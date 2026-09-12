@@ -1,0 +1,16 @@
+{
+  "name": "@turbopush/engine",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": "./src/service.ts",
+  "dependencies": {
+    "@turbopush/database": "workspace:*",
+    "@turbopush/shared": "workspace:*",
+    "marked": "^18.0.11",
+    "pino": "^9.0.0",
+    "playwright": "^1.55.0",
+    "sanitize-html": "^2.17.7",
+    "zod": "^4.0.0"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "turbopush-forked",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24.13.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @turbopush/desktop dev",
+    "desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/desktop.ps1",
+    "desktop:raw": "pnpm build:engine && pnpm --filter @turbopush/desktop tauri dev",
+    "build:engine": "esbuild packages/publisher-engine/src/stdio.ts --bundle --platform=node --format=esm --packages=external --outfile=packages/publisher-engine/dist/stdio.js",
+    "build": "pnpm typecheck && pnpm build:engine && pnpm --filter @turbopush/desktop build",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write apps/desktop/src apps/desktop/scripts packages scripts tests *.json *.yaml",
+    "test": "pnpm build:engine && tsx --test tests/*.test.ts",
+    "test:browser": "tsx scripts/browser-smoke.ts",
+    "test:ui": "tsx apps/desktop/scripts/ui-smoke.ts",
+    "test:native": "tsx apps/desktop/scripts/native-smoke.ts",
+    "browser:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/sanitize-html": "^2.16.1",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.55.0",
+    "prettier": "^3.6.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
