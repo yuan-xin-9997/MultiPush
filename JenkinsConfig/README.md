@@ -24,4 +24,4 @@ ssh -L 34080:127.0.0.1:34080 yuanxin@192.168.0.111
 
 Jenkins 任务已创建：<http://192.168.0.111:8080/job/MultiPush/>。Jenkinsfile 官方校验、SSH 凭据连接检查、Linux Bash 语法、systemd unit 和 sudoers 语法检查均通过；项目专用 Node 24.13.0 与 pnpm 11.19.0 已安装，系统 Node 未修改。
 
-当前任务临时停用，因为 GitHub main 尚无本地 Web 实现和 JenkinsConfig 文件。待确认提交范围并推送后，启用任务，运行首轮部署，再确认构建日志、服务健康和轮询基线。尚未执行真实流水线构建、启动应用或验证 Linux 浏览器依赖；不会把配置语法通过视为部署成功。`job-config.xml` 是源码准备好后使用的启用状态配置模板。
+任务已启用，当前代码及 JenkinsConfig 已推送到 GitHub main。首次部署及后续构建的实际结果以任务页面为准；流水线只有在构建和测试通过后才会停服更新。Linux 使用 Playwright 管理的 Chromium；Edge专项仅在 Windows 执行。`job-config.xml` 为启用状态配置模板。

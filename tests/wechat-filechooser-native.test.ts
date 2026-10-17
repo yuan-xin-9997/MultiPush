@@ -256,14 +256,17 @@ for (const browser of [
     name: "bundled Chromium",
     launch: () =>
       chromium.launch({
-        executablePath: `${process.env.LOCALAPPDATA}\\ms-playwright\\chromium-1234\\chrome-win64\\chrome.exe`,
         headless: true,
       }),
   },
-  {
-    name: "local Edge",
-    launch: () => chromium.launch({ channel: "msedge", headless: true }),
-  },
+  ...(process.platform === "win32"
+    ? [
+        {
+          name: "local Edge",
+          launch: () => chromium.launch({ channel: "msedge", headless: true }),
+        },
+      ]
+    : []),
 ]) {
   test(`真实${browser.name}：无需观察input click且两个常驻input只操作工具栏实际激活节点`, async () => {
     const instance = await browser.launch();
