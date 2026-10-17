@@ -1,3 +1,4 @@
+import { uploadImages } from "./api";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -32,6 +33,7 @@ const stateNames: Record<TaskStatus, string> = {
   failed: "失败",
   succeeded: "已完成",
   draft_saved: "草稿已保存",
+  publication_ready: "待发表核对",
 };
 const typeNames = { article: "长文章", gallery: "图文", video: "视频" };
 const progressStageNames: Record<DraftProgressStage, string> = {
@@ -273,7 +275,7 @@ function App() {
             <span className="version">阶段 0 / 基础链路</span>
           </div>
           <div className="banner">
-            技术验证版：公众号、知乎文章、小红书图文及抖音私密视频支持草稿保存和回读。创建任务不会公开发布，其他内容类型与平台仍待接入。
+            技术验证版：公众号、知乎文章和小红书图文已接入实验公开发布，需单独确认；平台安全验证可能需要人工处理。创建任务不会公开发布。
           </div>
           {error && (
             <div className="feedback error" role="alert">
@@ -293,9 +295,9 @@ function App() {
                   ["平台账号", data.accounts.length, "个独立的浏览器空间"],
                   ["发布任务", data.tasks.length, "个本地持久化任务"],
                   [
-                    "草稿链路验证",
-                    "4 / 8",
-                    "知乎、公众号文章、小红书图文及抖音私密视频已验证",
+                    "草稿链路状态",
+                    "3 自动 / 1 人工",
+                    "知乎、公众号文章和抖音私密视频已验证；小红书图文需人工核图",
                   ],
                 ].map(([name, number, desc]) => (
                   <section className="metric" key={name}>
@@ -521,27 +523,22 @@ function App() {
                           }}
                           onChange={(event) => {
                             const input = event.currentTarget;
-                            const paths = Array.from(input.files ?? [])
-                              .map(
-                                (file) =>
-                                  (file as File & { path?: string }).path ?? "",
-                              )
-                              .filter(Boolean);
+                            const files = Array.from(input.files ?? []);
                             input.value = "";
-                            if (!paths.length) {
-                              setError(
-                                "开发网页无法读取文件绝对路径，请手动填写；桌面应用可直接选择并托管。",
-                              );
-                              return;
-                            }
-                            void action(() =>
-                              importPickedImages(input.form!, "images", paths),
+                            const form = input.form!;
+                            if (!files.length) return;
+                            void action(async () =>
+                              importPickedImages(
+                                form,
+                                "images",
+                                await uploadImages(files),
+                              ),
                             );
                           }}
                         />
                       </label>
                       <small>
-                        桌面端选择后会复制到本地素材库；也可直接填写绝对路径。
+                        选择图片后会上传至服务端素材库；也可填写服务端绝对路径。
                       </small>
                     </div>
                   )}
@@ -581,19 +578,16 @@ function App() {
                           }}
                           onChange={(event) => {
                             const input = event.currentTarget;
-                            const path = (
-                              input.files?.[0] as
-                                (File & { path?: string }) | undefined
-                            )?.path;
+                            const files = Array.from(input.files ?? []);
                             input.value = "";
-                            if (!path) {
-                              setError(
-                                "开发网页无法读取文件绝对路径，请手动填写；桌面应用可直接选择并托管。",
-                              );
-                              return;
-                            }
-                            void action(() =>
-                              importPickedImages(input.form!, "cover", [path]),
+                            const form = input.form!;
+                            if (!files.length) return;
+                            void action(async () =>
+                              importPickedImages(
+                                form,
+                                "cover",
+                                await uploadImages(files),
+                              ),
                             );
                           }}
                         />
@@ -709,10 +703,8 @@ function App() {
                             [JSON.stringify(archive, null, 2)],
                             { type: "application/json" },
                           );
-                          if (blob.size > 700_000)
-                            throw new Error(
-                              "网页开发模式仅支持约700KB小包；请使用桌面应用导出大归档",
-                            );
+                          if (blob.size > 70 * 1024 * 1024)
+                            throw new Error("归档超过70MB限制");
                           const url = URL.createObjectURL(blob);
                           const link = document.createElement("a");
                           link.href = url;
@@ -753,10 +745,8 @@ function App() {
                           event.currentTarget.value = "";
                           if (!file) return;
                           void action(async () => {
-                            if (file.size > 700_000)
-                              throw new Error(
-                                "网页开发模式仅支持约700KB小包；请使用桌面应用导入大归档",
-                              );
+                            if (file.size > 70 * 1024 * 1024)
+                              throw new Error("归档超过70MB限制");
                             const archive = JSON.parse(await file.text()) as {
                               version?: unknown;
                             };
@@ -781,7 +771,7 @@ function App() {
                     </p>
                     {!isDesktopApp() && (
                       <p className="archive-warning">
-                        当前为网页开发模式：内联下载/导入仅用于约700KB以内的小包调试；大归档请在桌面应用中通过文件路径处理。
+                        Web端支持图片上传及最大70MB的便携归档导入和下载。
                       </p>
                     )}
                   </div>
@@ -1271,7 +1261,121 @@ function App() {
                             </button>
                           </>
                         )}
-                        {t.resultUrl && (
+                        {(t.status === "pending" ||
+                          (t.status === "intervention_required" &&
+                            t.message ===
+                              "待发表编辑器会话已中断；未自动发表，请人工核对")) &&
+                          t.platform === "xiaohongshu" &&
+                          t.content.type === "gallery" && (
+                            <button
+                              disabled={busy}
+                              onClick={() =>
+                                void action(async () => {
+                                  if (
+                                    !window.confirm(
+                                      `为小红书账号准备「${t.content.title}」的图文编辑器并上传图片？此步不会公开发布。`,
+                                    )
+                                  )
+                                    return;
+                                  await rpc("task.preparePublish", {
+                                    ...(t.status === "intervention_required"
+                                      ? { restore: true }
+                                      : {}),
+                                    id: t.id,
+                                    accountId: t.accountId,
+                                    title: t.content.title,
+                                    confirmed: true,
+                                  });
+                                  setNotice(
+                                    "小红书编辑器已准备，待逐图核对后确认公开发布",
+                                  );
+                                })
+                              }
+                            >
+                              准备小红书发布（实验）
+                            </button>
+                          )}
+                        {((t.status === "draft_saved" &&
+                          ["zhihu", "wechat-official"].includes(t.platform)) ||
+                          (t.status === "publication_ready" &&
+                            t.platform === "xiaohongshu")) && (
+                          <button
+                            disabled={busy}
+                            onClick={() => {
+                              const account = data.accounts.find(
+                                (account) => account.id === t.accountId,
+                              );
+                              const title = window.prompt(
+                                `实验功能：将向${platformName(t.platform)}账号「${account?.name ?? t.accountId}」公开发布内容「${t.content.title}」。请核对正文和图片，输入完整标题确认。真实账号发布验收尚未完成。`,
+                              );
+                              if (title !== t.content.title) return;
+                              void action(async () => {
+                                await rpc("task.publish", {
+                                  id: t.id,
+                                  accountId: t.accountId,
+                                  title,
+                                  confirmed: true,
+                                });
+                                setNotice("已公开发布并完成发布页刷新回读");
+                              });
+                            }}
+                          >
+                            公开发布（实验）
+                          </button>
+                        )}
+                        {t.status === "intervention_required" &&
+                          (t.message?.includes("已提交公开发布") ||
+                            t.message?.startsWith("公开结果链接待回读：")) && (
+                            <button
+                              disabled={busy}
+                              onClick={() =>
+                                void action(async () => {
+                                  await rpc("task.verifyPublication", {
+                                    id: t.id,
+                                    accountId: t.accountId,
+                                  });
+                                  setNotice("已只读核对公开页，未重复发表");
+                                })
+                              }
+                            >
+                              只读核对发布结果
+                            </button>
+                          )}
+                        {t.status === "intervention_required" &&
+                          t.message?.startsWith("公开结果链接待回读：") && (
+                            <button
+                              disabled={busy}
+                              onClick={() => {
+                                if (
+                                  !window.confirm(
+                                    `仅在你已打开平台公开页，并确认「${t.content.title}」的正文和全部图片内容、顺序正确后点击确定。此项记录人工核对结果，不代表自动回读通过。`,
+                                  )
+                                )
+                                  return;
+                                void action(async () => {
+                                  await rpc("task.confirmPublicationReview", {
+                                    id: t.id,
+                                    accountId: t.accountId,
+                                    title: t.content.title,
+                                    confirmed: true,
+                                  });
+                                  setNotice("已记录人工核对完成，未重复发表");
+                                });
+                              }}
+                            >
+                              记录人工核对完成
+                            </button>
+                          )}
+                        {t.status === "succeeded" && t.resultUrl && (
+                          <a
+                            href={t.resultUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            查看发布结果
+                          </a>
+                        )}
+                        {t.resultUrl && t.status !== "succeeded" && (
                           <button
                             disabled={busy}
                             onClick={() =>

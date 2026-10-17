@@ -8,11 +8,11 @@ import { imagePayload } from "../wechat/media.ts";
  * They are project safety limits, not claims about Xiaohongshu platform limits.
  */
 export const xiaohongshuGalleryPolicy = {
-  delivery: "draft_only",
+  delivery: "manual_publication_experimental",
   minImages: 2,
   maxImages: 18,
-  maxTitleCharacters: 50,
-  maxBodyCharacters: 3_000,
+  maxTitleCharacters: 20,
+  maxBodyCharacters: 1_000,
   maxTags: 10,
   maxTagCharacters: 20,
   maxImageBytes: 10 * 1024 * 1024,
@@ -28,14 +28,16 @@ export const xiaohongshuGalleryContent = z
       .trim()
       .min(1)
       .refine(
-        (value) => [...value].length <= xiaohongshuGalleryPolicy.maxTitleCharacters,
-        "标题超过本项目首版50字安全上限",
+        (value) =>
+          [...value].length <= xiaohongshuGalleryPolicy.maxTitleCharacters,
+        "标题超过本项目20字安全上限",
       ),
     body: z
       .string()
       .refine(
-        (value) => [...value].length <= xiaohongshuGalleryPolicy.maxBodyCharacters,
-        "正文超过本项目首版3000字安全上限",
+        (value) =>
+          [...value].length <= xiaohongshuGalleryPolicy.maxBodyCharacters,
+        "正文超过本项目1000字安全上限",
       ),
     bodyFormat: z.literal("plain").optional(),
     images: z
@@ -51,7 +53,8 @@ export const xiaohongshuGalleryContent = z
           .trim()
           .min(1)
           .refine(
-            (value) => [...value].length <= xiaohongshuGalleryPolicy.maxTagCharacters,
+            (value) =>
+              [...value].length <= xiaohongshuGalleryPolicy.maxTagCharacters,
             "单个标签超过本项目首版20字安全上限",
           ),
       )
@@ -61,7 +64,11 @@ export const xiaohongshuGalleryContent = z
   .superRefine((content, context) => {
     const normalized = content.tags.map((tag) => tag.toLocaleLowerCase());
     if (new Set(normalized).size !== normalized.length)
-      context.addIssue({ code: "custom", path: ["tags"], message: "标签不能重复" });
+      context.addIssue({
+        code: "custom",
+        path: ["tags"],
+        message: "标签不能重复",
+      });
   });
 
 /** Validate every local asset before a caller is allowed to open a browser. */
@@ -84,13 +91,14 @@ export async function validateXiaohongshuGallery(content: Content) {
     if (totalBytes > xiaohongshuGalleryPolicy.maxTotalImageBytes)
       throw new Error("图片总大小超过本项目首版50MB安全上限");
     const hash = createHash("sha256").update(payload.buffer).digest("hex");
-    if (hashes.has(hash)) throw new Error("图片内容不能重复，请保留每张唯一素材");
+    if (hashes.has(hash))
+      throw new Error("图片内容不能重复，请保留每张唯一素材");
     hashes.add(hash);
     images.push(payload);
   }
   return {
     content: parsed,
     images,
-    message: "小红书图文本地检查通过；首版仅允许保存草稿，不公开发布",
+    message: "小红书图文本地检查通过；公开发布需要单独确认，创建和预检不会发布",
   };
 }

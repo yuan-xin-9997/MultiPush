@@ -9,7 +9,7 @@ export function queueSummary(tasks: Task[]) {
       ["validating", "publishing"].includes(task.status),
     ).length,
     attention: tasks.filter((task) =>
-      ["intervention_required", "failed"].includes(task.status),
+      ["intervention_required", "failed", "publication_ready"].includes(task.status),
     ).length,
     completed: tasks.filter((task) =>
       ["draft_saved", "succeeded"].includes(task.status),

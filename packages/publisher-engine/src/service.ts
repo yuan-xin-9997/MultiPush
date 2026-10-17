@@ -1,3 +1,20 @@
+import {
+  publishXiaohongshuGallery,
+  findXiaohongshuPublication,
+  verifyXiaohongshuPublishedPage,
+  validateXiaohongshuPublishedUrl,
+} from "./platforms/xiaohongshu/publish.ts";
+import {
+  publishWechatArticle,
+  findPublishedArticle,
+  verifyWechatPublishedPage,
+  validateWechatPublishedUrl,
+} from "./platforms/wechat/publish.ts";
+import {
+  publishZhihuArticle,
+  verifyZhihuPublishedPage,
+  validateZhihuPublishedUrl,
+} from "./platforms/zhihu/publish.ts";
 import { z, ZodError } from "zod";
 import {
   exportPortableContents,
@@ -7,7 +24,7 @@ import {
 import { validateZhihuTopics } from "./platforms/zhihu/topics.ts";
 import { open, stat, writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { Store } from "@turbopush/database";
+import { Store, PUBLICATION_SUBMISSION_MESSAGE } from "@turbopush/database";
 import {
   rpcRequest,
   douyinVideoDraftVerified,
@@ -41,6 +58,7 @@ import {
 } from "./platforms/douyin/draft.ts";
 import {
   saveXiaohongshuDraft,
+  prepareXiaohongshuGalleryDraft,
   validateXiaohongshuPublishUrl,
 } from "./platforms/xiaohongshu/draft.ts";
 import { reportDraftProgress } from "./draft-progress.ts";
@@ -60,6 +78,10 @@ export interface ServiceOptions {
     context: DraftExecutionContext,
   ) => Promise<{ url: string }>;
   loginDetector?: (account: Account) => Promise<LoginCheckResult>;
+  publishExecutor?: (
+    task: Task,
+    markSubmitted: () => void,
+  ) => Promise<{ url: string }>;
 }
 
 const idParam = z.object({ id: z.uuid() }).strict();
@@ -74,6 +96,12 @@ export class Service {
   private readonly pollIntervalMs: number;
   private readonly draftExecutor: ServiceOptions["draftExecutor"];
   private readonly loginDetector: ServiceOptions["loginDetector"];
+  private readonly publishExecutor: ServiceOptions["publishExecutor"];
+  private readonly publicationCompletions = new Set<Promise<unknown>>();
+  private readonly preparedPublications = new Map<
+    string,
+    import("playwright").Page
+  >();
   private readonly externalWriting = new Set<string>();
   private readonly queuedTaskIds = new Set<string>();
   private readonly queueCompletions = new Set<Promise<void>>();
@@ -98,6 +126,7 @@ export class Service {
     this.pollIntervalMs = options.pollIntervalMs ?? 1_000;
     this.draftExecutor = options.draftExecutor;
     this.loginDetector = options.loginDetector;
+    this.publishExecutor = options.publishExecutor;
     // Retry timing is persisted by Store; each queue entry represents one attempt.
     this.queue = new TaskQueue({ clock: this.clock, maxRetries: 0 });
     this.queue.start();
@@ -281,12 +310,25 @@ export class Service {
           result = { message: "独立浏览器已打开；登录状态仍待适配器验证" };
           break;
         }
-        case "account.close":
-          await this.browsers.close(
-            this.store.account(idParam.parse(req.params).id).id,
-          );
+        case "account.close": {
+          const accountId = this.store.account(idParam.parse(req.params).id).id;
+          if (this.publishingAccounts.has(accountId))
+            throw new Error("账号仍在执行，请等待任务完成后关闭");
+          await this.browsers.close(accountId);
+          for (const [taskId] of this.preparedPublications) {
+            const task = this.store.task(taskId);
+            if (task.accountId !== accountId) continue;
+            this.preparedPublications.delete(taskId);
+            if (task.status === "publication_ready")
+              this.store.transition(
+                taskId,
+                "intervention_required",
+                "待发表编辑器会话已中断；未自动发表，请人工核对",
+              );
+          }
           result = { closed: true };
           break;
+        }
         case "account.checkLogin": {
           const account = this.store.account(idParam.parse(req.params).id);
           this.store.updateAccountLoginStatus(
@@ -314,6 +356,17 @@ export class Service {
             checked.status,
             checked.message,
             new Date(this.clock.now()),
+          );
+          break;
+        }
+        case "diagnostics.network": {
+          const account = this.store.account(idParam.parse(req.params).id);
+          result = this.browsers.network(account.id);
+          break;
+        }
+        case "diagnostics.inspect": {
+          result = await this.browsers.inspect(
+            this.store.account(idParam.parse(req.params).id),
           );
           break;
         }
@@ -374,8 +427,289 @@ export class Service {
           result = this.store.events(taskId);
           break;
         }
+        case "task.preparePublish": {
+          const params = z
+            .object({
+              id: z.uuid(),
+              accountId: z.uuid(),
+              title: z.string(),
+              confirmed: z.literal(true),
+              restore: z.literal(true).optional(),
+            })
+            .strict()
+            .parse(req.params);
+          const task = this.store.task(params.id);
+          const restoring =
+            params.restore === true &&
+            task.status === "intervention_required" &&
+            task.message === "待发表编辑器会话已中断；未自动发表，请人工核对";
+          this.assertNoPublicationAttempt(task);
+          if (
+            this.closed ||
+            task.platform !== "xiaohongshu" ||
+            task.content.type !== "gallery" ||
+            (!restoring &&
+              (task.status !== "pending" ||
+                this.store.hasDraftAttempt(task.id)))
+          )
+            throw new Error("仅允许为从未尝试的小红书图文任务准备编辑器");
+          if (
+            params.accountId !== task.accountId ||
+            params.title !== task.content.title
+          )
+            throw new Error("准备发布确认的账号或标题不一致");
+          if (process.env.TURBOPUSH_EXPERIMENTAL_PUBLISH !== "1")
+            throw new Error("实验发布开关未开启");
+          await validateXiaohongshuGallery(task.content);
+          if (task.content.tags.length)
+            throw new Error("小红书话题控件尚未验证");
+          if (
+            this.publishingAccounts.has(task.accountId) ||
+            (!restoring &&
+              (this.store.task(task.id).status !== "pending" ||
+                this.store.hasDraftAttempt(task.id)))
+          )
+            throw new Error("任务或账号状态已改变");
+          this.publishingAccounts.add(task.accountId);
+          const completion = this.preparePublication(task);
+          this.publicationCompletions.add(completion);
+          try {
+            result = await completion;
+          } finally {
+            this.publicationCompletions.delete(completion);
+          }
+          break;
+        }
+        case "task.confirmPublicationReview": {
+          const params = z
+            .object({
+              id: z.uuid(),
+              accountId: z.uuid(),
+              title: z.string(),
+              confirmed: z.literal(true),
+            })
+            .strict()
+            .parse(req.params);
+          const task = this.store.task(params.id);
+          if (
+            this.closed ||
+            task.status !== "intervention_required" ||
+            this.publishingAccounts.has(task.accountId) ||
+            !this.store.hasPublicationAttempt(task.id) ||
+            params.accountId !== task.accountId ||
+            params.title !== task.content.title
+          )
+            throw new Error("人工确认的任务、账号、标题或提交状态不匹配");
+          const candidate = this.store
+            .events(task.id)
+            .filter((event) => event.message.startsWith("公开结果链接待回读："))
+            .at(-1)
+            ?.message.slice("公开结果链接待回读：".length);
+          if (!candidate)
+            throw new Error("必须先只读取得平台公开链接，才能记录人工核对");
+          const url =
+            task.platform === "xiaohongshu"
+              ? validateXiaohongshuPublishedUrl(candidate)
+              : task.platform === "wechat-official"
+                ? validateWechatPublishedUrl(candidate)
+                : validateZhihuPublishedUrl(candidate, task.resultUrl!);
+          this.store.transaction(() => {
+            this.store.db
+              .prepare("UPDATE tasks SET result_url=? WHERE id=?")
+              .run(url, task.id);
+            this.store.transition(
+              task.id,
+              "succeeded",
+              "用户人工确认发布页正文与图片顺序正确；自动公开页回读受平台限制，未重复提交",
+            );
+          });
+          result = this.store.task(task.id);
+          break;
+        }
+        case "task.verifyPublication": {
+          const params = z
+            .object({
+              id: z.uuid(),
+              accountId: z.uuid(),
+              url: z.string().optional(),
+            })
+            .strict()
+            .parse(req.params);
+          const task = this.store.task(params.id);
+          if (
+            this.closed ||
+            params.accountId !== task.accountId ||
+            !this.store.hasPublicationAttempt(task.id) ||
+            this.publishingAccounts.has(task.accountId)
+          )
+            throw new Error("任务未提交、账号不一致或仍在执行");
+          this.publishingAccounts.add(task.accountId);
+          const completion = (async () => {
+            try {
+              const recorded = this.store
+                .events(task.id)
+                .filter((event) =>
+                  event.message.startsWith("公开结果链接待回读："),
+                )
+                .at(-1)
+                ?.message.slice("公开结果链接待回读：".length);
+              const candidate =
+                params.url ??
+                (task.platform === "xiaohongshu" ? undefined : recorded) ??
+                (task.platform === "xiaohongshu"
+                  ? await findXiaohongshuPublication(
+                      await this.browsers.open(
+                        this.store.account(task.accountId),
+                      ),
+                      task,
+                    )
+                  : task.platform === "wechat-official"
+                    ? await findPublishedArticle(
+                        await this.browsers.open(
+                          this.store.account(task.accountId),
+                        ),
+                        task,
+                      )
+                    : undefined) ??
+                (task.platform === "zhihu"
+                  ? task.resultUrl?.replace(/\/edit$/, "")
+                  : undefined);
+              if (!candidate)
+                throw new Error(
+                  "尚未取得公开链接，请从平台发表记录核对后提供链接",
+                );
+              const url =
+                task.platform === "xiaohongshu"
+                  ? validateXiaohongshuPublishedUrl(candidate)
+                  : task.platform === "wechat-official"
+                    ? validateWechatPublishedUrl(candidate)
+                    : validateZhihuPublishedUrl(candidate, task.resultUrl!);
+              const context = await this.browsers.open(
+                this.store.account(task.accountId),
+              );
+              this.store.transition(
+                task.id,
+                task.status,
+                "公开结果链接待回读：" + url,
+              );
+              const page = await context.newPage();
+              await page.goto(url, {
+                waitUntil: "domcontentloaded",
+                timeout: 30000,
+              });
+              await page.reload({
+                waitUntil: "domcontentloaded",
+                timeout: 30000,
+              });
+              await (
+                task.platform === "xiaohongshu"
+                  ? verifyXiaohongshuPublishedPage
+                  : task.platform === "wechat-official"
+                    ? verifyWechatPublishedPage
+                    : verifyZhihuPublishedPage
+              )(page, task);
+              this.store.transaction(() => {
+                this.store.db
+                  .prepare("UPDATE tasks SET result_url=? WHERE id=?")
+                  .run(url, task.id);
+                this.store.transition(
+                  task.id,
+                  "succeeded",
+                  "公开页只读回读通过，标题、正文和图片已核对",
+                );
+              });
+              return this.store.task(task.id);
+            } finally {
+              this.publishingAccounts.delete(task.accountId);
+            }
+          })();
+          this.publicationCompletions.add(completion);
+          try {
+            result = await completion;
+          } finally {
+            this.publicationCompletions.delete(completion);
+          }
+          break;
+        }
+        case "task.publish": {
+          const params = z
+            .object({
+              id: z.uuid(),
+              accountId: z.uuid(),
+              title: z.string(),
+              confirmed: z.literal(true),
+            })
+            .strict()
+            .parse(req.params);
+          const task = this.store.task(params.id);
+          if (this.closed) throw new Error("服务正在关闭");
+          if (!(
+            (["zhihu", "wechat-official"].includes(task.platform) &&
+              task.content.type === "article") ||
+            (task.platform === "xiaohongshu" && task.content.type === "gallery")
+          ))
+            throw new Error(
+              "当前实验公开发布仅接入知乎、公众号文章；其他平台尚未完成",
+            );
+          this.assertNoPublicationAttempt(task);
+          if (
+            task.platform === "xiaohongshu"
+              ? task.status !== "publication_ready" ||
+                !this.preparedPublications.has(task.id)
+              : task.status !== "draft_saved" || !task.resultUrl
+          )
+            throw new Error(
+              "仅允许发布已保存并回读通过的草稿；结果未知的任务禁止重试",
+            );
+          if (
+            params.accountId !== task.accountId ||
+            params.title !== task.content.title
+          )
+            throw new Error("确认的账号或标题与任务快照不一致");
+          if (
+            !this.publishExecutor &&
+            process.env.TURBOPUSH_EXPERIMENTAL_PUBLISH !== "1"
+          )
+            throw new Error("公开发布尚待真实账号验收；需显式开启实验发布开关");
+          if (this.publishingAccounts.has(task.accountId))
+            throw new Error("同账号已有任务执行中");
+          this.publishingAccounts.add(task.accountId);
+          const completion = this.publishTask(task);
+          this.publicationCompletions.add(completion);
+          try {
+            result = await completion;
+          } finally {
+            this.publicationCompletions.delete(completion);
+          }
+          break;
+        }
+        case "task.repairDraft":
         case "task.saveDraft": {
-          const task = this.store.task(idParam.parse(req.params).id);
+          const repair = req.method === "task.repairDraft";
+          const request = repair
+            ? z
+                .object({
+                  id: z.uuid(),
+                  accountId: z.uuid(),
+                  title: z.string(),
+                  confirmed: z.literal(true),
+                })
+                .strict()
+                .parse(req.params)
+            : idParam.parse(req.params);
+          const task = this.store.task(request.id);
+          if (repair) {
+            if (task.platform !== "zhihu" || !task.resultUrl)
+              throw new Error("仅允许修复具有明确草稿ID的知乎任务");
+            if (
+              !("accountId" in request) ||
+              !("title" in request) ||
+              request.accountId !== task.accountId ||
+              request.title !== task.content.title
+            )
+              throw new Error("修复确认账号或标题不一致");
+          }
+          this.assertNoPublicationAttempt(task);
           const xiaohongshu =
             task.platform === "xiaohongshu" && task.content.type === "gallery";
           const douyin =
@@ -404,9 +738,12 @@ export class Service {
                 ? "抖音"
                 : "知乎";
           if (
-            !["pending", "failed", "intervention_required"].includes(
-              task.status,
-            )
+            ![
+              "pending",
+              "failed",
+              "intervention_required",
+              ...(repair ? ["draft_saved"] : []),
+            ].includes(task.status)
           )
             throw new Error("当前任务不能保存草稿；已排期任务请另建即时任务");
           if (this.store.hasDraftAttempt(task.id) && !task.resultUrl)
@@ -430,9 +767,12 @@ export class Service {
             // Re-check after local asynchronous validation before entering the write phase.
             if (
               this.publishingAccounts.has(task.accountId) ||
-              !["pending", "failed", "intervention_required"].includes(
-                this.store.task(task.id).status,
-              )
+              ![
+                "pending",
+                "failed",
+                "intervention_required",
+                ...(repair ? ["draft_saved"] : []),
+              ].includes(this.store.task(task.id).status)
             )
               throw new Error("任务或账号状态已改变，请刷新");
           } else {
@@ -446,17 +786,23 @@ export class Service {
             );
             if (
               this.publishingAccounts.has(task.accountId) ||
-              !["pending", "failed", "intervention_required"].includes(
-                this.store.task(task.id).status,
-              )
+              ![
+                "pending",
+                "failed",
+                "intervention_required",
+                ...(repair ? ["draft_saved"] : []),
+              ].includes(this.store.task(task.id).status)
             )
               throw new Error("任务或账号状态已改变，请刷新");
           }
           if (
             this.publishingAccounts.has(task.accountId) ||
-            !["pending", "failed", "intervention_required"].includes(
-              this.store.task(task.id).status,
-            )
+            ![
+              "pending",
+              "failed",
+              "intervention_required",
+              ...(repair ? ["draft_saved"] : []),
+            ].includes(this.store.task(task.id).status)
           )
             throw new Error("任务或账号状态已改变，请刷新");
           if (
@@ -483,6 +829,7 @@ export class Service {
               this.store.account(task.accountId),
             );
             const options = {
+              ...(repair ? { repairMedia: true } : {}),
               draftUrl: task.resultUrl ?? undefined,
               checkpoint: (url: string) =>
                 this.store.checkpointDraft(task.id, url),
@@ -532,6 +879,7 @@ export class Service {
         }
         case "task.preflight": {
           const task = this.store.task(idParam.parse(req.params).id);
+          this.assertNoPublicationAttempt(task);
           if (
             ![
               "pending",
@@ -604,6 +952,119 @@ export class Service {
       };
     }
   }
+  private async preparePublication(task: Task) {
+    try {
+      this.store.transaction(() =>
+        this.store.transition(
+          task.id,
+          "publishing",
+          "正在准备小红书编辑器和媒体；不会公开发布",
+        ),
+      );
+      this.externalWriting.add(task.id);
+      const context = await this.browsers.open(
+        this.store.account(task.accountId),
+      );
+      const prepared = await prepareXiaohongshuGalleryDraft(
+        context,
+        task.content,
+      );
+      this.preparedPublications.set(task.id, prepared.page);
+      this.store.transition(
+        task.id,
+        "publication_ready",
+        "小红书图片上传和编辑器已准备，待逐图核对后确认发表；尚未公开发布",
+      );
+      return this.store.task(task.id);
+    } catch (error) {
+      this.store.transition(
+        task.id,
+        "intervention_required",
+        "小红书编辑器或上传证明未通过，未点击公开发布；请核对，禁止自动重试",
+      );
+      throw error;
+    } finally {
+      this.externalWriting.delete(task.id);
+      this.publishingAccounts.delete(task.accountId);
+    }
+  }
+  private async publishTask(task: Task) {
+    let submitted = false;
+    const markSubmitted = () => {
+      // Persist before the click: a process interruption can never authorize a repeat.
+      this.store.transaction(() =>
+        this.store.transition(
+          task.id,
+          "publishing",
+          PUBLICATION_SUBMISSION_MESSAGE,
+        ),
+      );
+      submitted = true;
+      this.externalWriting.add(task.id);
+    };
+    try {
+      const published = this.publishExecutor
+        ? await this.publishExecutor(task, markSubmitted)
+        : task.platform === "xiaohongshu"
+          ? await publishXiaohongshuGallery(
+              this.preparedPublications.get(task.id)!,
+              task,
+              markSubmitted,
+              (url) => {
+                if (!submitted) throw new Error("缺少提交检查点");
+                this.store.transition(
+                  task.id,
+                  "publishing",
+                  "公开结果链接待回读：" + validateXiaohongshuPublishedUrl(url),
+                );
+              },
+            )
+          : await (
+              task.platform === "wechat-official"
+                ? publishWechatArticle
+                : publishZhihuArticle
+            )(
+              await this.browsers.open(this.store.account(task.accountId)),
+              task,
+              markSubmitted,
+            );
+      if (!submitted) throw new Error("发布适配器没有记录提交检查点");
+      const url =
+        task.platform === "wechat-official"
+          ? validateWechatPublishedUrl(published.url)
+          : task.platform === "xiaohongshu"
+            ? validateXiaohongshuPublishedUrl(published.url)
+            : validateZhihuPublishedUrl(published.url, task.resultUrl!);
+      this.store.transaction(() => {
+        this.store.db
+          .prepare("UPDATE tasks SET result_url=? WHERE id=?")
+          .run(url, task.id);
+        this.store.transition(
+          task.id,
+          "succeeded",
+          "公开发布成功，发布页已刷新核对标题、正文与图片",
+        );
+      });
+      return this.store.task(task.id);
+    } catch (error) {
+      if (submitted) {
+        this.store.transition(
+          task.id,
+          "intervention_required",
+          "已提交公开发布，但未取得可靠发布结果；请核对平台，禁止重复提交",
+        );
+        throw new Error("公开发布结果未知，请人工核对，禁止自动重试", {
+          cause: error,
+        });
+      }
+      throw error;
+    } finally {
+      if (submitted) this.preparedPublications.delete(task.id);
+      this.externalWriting.delete(task.id);
+      this.publishingAccounts.delete(task.accountId);
+    }
+  }
+
   async close() {
     if (this.closed) return;
     this.closed = true;
@@ -615,7 +1076,10 @@ export class Service {
     // as a local cancellation.
     for (const id of this.queuedTaskIds)
       if (!this.externalWriting.has(id)) this.queue.cancel(id);
-    await Promise.allSettled([...this.queueCompletions]);
+    await Promise.allSettled([
+      ...this.queueCompletions,
+      ...this.publicationCompletions,
+    ]);
     try {
       await this.browsers.shutdown();
     } finally {
@@ -627,7 +1091,14 @@ export class Service {
     }
   }
 
+  private assertNoPublicationAttempt(task: Task) {
+    if (this.store.hasPublicationAttempt(task.id))
+      throw new Error(
+        "该任务已提交过公开发布；禁止重试或重新保存草稿，请人工核对平台",
+      );
+  }
   private assertDraftCapable(task: Task) {
+    this.assertNoPublicationAttempt(task);
     if (!this.isDraftCapable(task))
       throw new Error("该内容类型尚无已验证草稿适配器；绝不公开发布");
   }

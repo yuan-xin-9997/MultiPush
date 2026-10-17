@@ -74,3 +74,41 @@ test("小红书图文通过已验证能力门进入独立异步草稿执行路�
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("小红书暂存后逐图身份未知时异步任务不得标为 draft_saved", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "turbopush-xhs-unknown-"));
+  const first = join(dir, "first.png");
+  const second = join(dir, "second.png");
+  await writeFile(first, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]));
+  await writeFile(second, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]));
+  const service = new Service(dir, {
+    draftExecutor: async (_task, { markExternalWrite }) => {
+      markExternalWrite();
+      throw new Error("已执行暂存但无法核验远端逐图身份");
+    },
+  });
+  try {
+    const account = service.store.createAccount({
+      platform: "xiaohongshu", name: "结果未知契约",
+    });
+    const content = service.store.createContent({
+      type: "gallery", title: "身份未知", body: "正文", images: [first, second],
+    });
+    const task = service.store.createCampaign({
+      contentId: content.id, accountIds: [account.id],
+    })[0];
+    const response = await service.dispatch({
+      id: "enqueue-unknown", method: "task.enqueueDraft", params: { id: task.id },
+    });
+    assert.equal(response.error, undefined);
+    for (let index = 0; index < 100; index += 1) {
+      if (service.store.task(task.id).status === "intervention_required") break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(service.store.task(task.id).status, "intervention_required");
+    assert.notEqual(service.store.task(task.id).status, "draft_saved");
+  } finally {
+    await service.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

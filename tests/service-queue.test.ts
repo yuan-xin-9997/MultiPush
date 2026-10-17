@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Service } from "../packages/publisher-engine/src/service.ts";
 import type { QueueClock } from "../packages/publisher-engine/src/task-queue.ts";
 import { QueueFailure } from "../packages/publisher-engine/src/task-queue.ts";
+import { uploadImagesSequentially } from "../packages/publisher-engine/src/platforms/upload-sequence.ts";
 
 class VirtualClock implements QueueClock {
   constructor(public time = Date.now()) {}
@@ -38,7 +39,20 @@ const flush = async () => {
   for (let i = 0; i < 12; i += 1) await Promise.resolve();
 };
 
-function addTask(service: Service, accountId?: string, scheduledAt?: string) {
+async function waitFor(predicate: () => boolean, message: string) {
+  for (let i = 0; i < 200; i += 1) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.fail(message);
+}
+
+function addTask(
+  service: Service,
+  accountId?: string,
+  scheduledAt?: string,
+  images: string[] = [],
+) {
   const account = accountId
     ? service.store.account(accountId)
     : service.store.createAccount({ platform: "zhihu", name: "队列测试" });
@@ -46,12 +60,19 @@ function addTask(service: Service, accountId?: string, scheduledAt?: string) {
     type: "article",
     title: "异步草稿",
     body: "正文",
+    images,
   });
   return service.store.createCampaign({
     contentId: content.id,
     accountIds: [account.id],
     ...(scheduledAt ? { scheduledAt } : {}),
   })[0];
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => (resolve = done));
+  return { promise, resolve };
 }
 
 test("task.enqueueDraft立即返回，后台完成且重复请求不重复领取", async () => {
@@ -87,6 +108,161 @@ test("task.enqueueDraft立即返回，后台完成且重复请求不重复领取
     release();
     await flush();
     assert.equal(service.store.task(task.id).status, "draft_saved");
+  } finally {
+    await service.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("20张慢上传通过异步队列立即受理并逐张上报到成功终态", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "turbopush-service-20-images-"));
+  const image = join(dir, "image.png");
+  await writeFile(image, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const uploadGates = Array.from({ length: 20 }, deferred);
+  const started: string[] = [];
+  let modeledElapsedMs = 0;
+  let firstTaskId = "";
+  const service = new Service(dir, {
+    draftExecutor: async (task, { markExternalWrite, progress }) => {
+      started.push(task.id);
+      markExternalWrite();
+      assert.equal(task.id, firstTaskId);
+      await uploadImagesSequentially(
+        task.content.images,
+        async (_path, index) => {
+          // Each gate represents one platform upload consuming its full 45-second
+          // allowance. The test remains instant while modelling a 900-second run.
+          await uploadGates[index]!.promise;
+          modeledElapsedMs += 45_000;
+          progress({
+            stage: "upload",
+            message: `测试素材已上传 ${index + 1}/20`,
+            current: index + 1,
+            total: 20,
+          });
+        },
+      );
+      progress({ stage: "verify", message: "测试草稿已回读" });
+      return { url: "https://zhuanlan.zhihu.com/p/slow-20/edit" };
+    },
+  });
+  try {
+    const first = addTask(service, undefined, undefined, Array(20).fill(image));
+    firstTaskId = first.id;
+
+    const accepted = await service.dispatch({
+      id: 1,
+      method: "task.enqueueDraft",
+      params: { id: first.id },
+    });
+    assert.equal(accepted.error, undefined);
+    assert.equal((accepted.result as { queued: boolean }).queued, true);
+    // The RPC has returned although none of the modelled 900 seconds of upload
+    // work has been released yet.
+    assert.notEqual(service.store.task(first.id).status, "draft_saved");
+    assert.equal(
+      service.store
+        .events(first.id)
+        .some((event) => event.progressStage === "upload"),
+      false,
+    );
+
+    await waitFor(
+      () => started.length === 1,
+      "首个任务应在本地素材预检后开始执行",
+    );
+    assert.deepEqual(started, [first.id]);
+
+    for (const [index, gate] of uploadGates.entries()) {
+      gate.resolve();
+      await waitFor(
+        () =>
+          service.store
+            .events(first.id)
+            .filter((event) => event.progressStage === "upload").length ===
+          index + 1,
+        `应持久化第 ${index + 1}/20 张上传进度`,
+      );
+    }
+    await waitFor(
+      () => service.store.task(first.id).status === "draft_saved",
+      "20张上传及回读后应进入草稿已保存终态",
+    );
+    assert.equal(service.store.task(first.id).status, "draft_saved");
+    assert.deepEqual(started, [first.id]);
+    assert.equal(modeledElapsedMs, 900_000);
+
+    const uploadEvents = service.store
+      .events(first.id)
+      .filter((event) => event.progressStage === "upload");
+    assert.deepEqual(
+      uploadEvents.map((event) => [event.progressCurrent, event.progressTotal]),
+      Array.from({ length: 20 }, (_, index) => [index + 1, 20]),
+    );
+    assert.equal(
+      service.store.events(first.id).at(-1)?.message,
+      "异步草稿已保存并回读一致；未公开发布",
+    );
+  } finally {
+    for (const gate of uploadGates) gate.resolve();
+    await service.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("20张慢上传完成后结果未知进入人工介入且永不自动重试", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "turbopush-service-20-unknown-"));
+  const image = join(dir, "image.png");
+  await writeFile(image, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const clock = new VirtualClock();
+  let calls = 0;
+  const service = new Service(dir, {
+    clock,
+    pollIntervalMs: 100,
+    draftExecutor: async (task, { markExternalWrite, progress }) => {
+      calls += 1;
+      markExternalWrite();
+      await uploadImagesSequentially(
+        task.content.images,
+        async (_path, index) => {
+          progress({
+            stage: "upload",
+            message: `测试素材已上传 ${index + 1}/20`,
+            current: index + 1,
+            total: 20,
+          });
+        },
+      );
+      throw new Error("第20张后连接中断，远端结果不可确认");
+    },
+  });
+  try {
+    const task = addTask(service, undefined, undefined, Array(20).fill(image));
+    await service.dispatch({
+      id: 1,
+      method: "task.enqueueDraft",
+      params: { id: task.id },
+    });
+    await waitFor(
+      () => service.store.task(task.id).status === "intervention_required",
+      "外部写入结果未知应进入人工介入终态",
+    );
+    const failed = service.store.task(task.id);
+    assert.equal(failed.status, "intervention_required");
+    assert.equal(failed.lastErrorKind, "unknown");
+    assert.equal(failed.nextRunAt, null);
+    assert.match(failed.message, /禁止自动重试/);
+    assert.equal(
+      service.store
+        .events(task.id)
+        .filter((event) => event.progressStage === "upload").length,
+      20,
+    );
+
+    clock.advance(10_000);
+    await flush();
+    assert.equal(calls, 1);
+    assert.equal(service.store.task(task.id).status, "intervention_required");
   } finally {
     await service.close();
     await rm(dir, { recursive: true, force: true });

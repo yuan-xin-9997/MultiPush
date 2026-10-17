@@ -2,9 +2,12 @@ import type { BrowserContext, Page } from "playwright";
 import type { Content } from "@turbopush/shared";
 import {
   imagePayload,
+  fingerprintImageBuffer,
+  type ImageFingerprint,
   uploadBodyImage,
   uploadCover,
   verifyWechatMedia,
+  WechatImageIdentityError,
 } from "./media.ts";
 import { renderMarkdown } from "../../markdown.ts";
 import { uploadImagesSequentially } from "../upload-sequence.ts";
@@ -27,6 +30,58 @@ type Article = Pick<
   | "author"
   | "summary"
 >;
+type WechatImagePayload = Awaited<ReturnType<typeof imagePayload>>;
+
+export async function uploadWechatDraftMedia(
+  page: Page,
+  images: readonly WechatImagePayload[],
+  cover: WechatImagePayload | undefined,
+  onProgress?: DraftProgressReporter,
+  operations: {
+    uploadBodyImage: typeof uploadBodyImage;
+    uploadCover: typeof uploadCover;
+    verifyMedia: typeof verifyWechatMedia;
+  } = { uploadBodyImage, uploadCover, verifyMedia: verifyWechatMedia },
+) {
+  const fingerprints: ImageFingerprint[] = [];
+  await uploadImagesSequentially(images, async (image, index) => {
+    try {
+      fingerprints.push(
+        await operations.uploadBodyImage(page, image, fingerprints),
+      );
+    } catch (error) {
+      if (error instanceof WechatImageIdentityError)
+        reportDraftProgress(onProgress, {
+          stage: "upload",
+          message: error.message,
+          current: index,
+          total: images.length,
+        });
+      throw error;
+    }
+    reportDraftProgress(onProgress, {
+      stage: "upload",
+      message: `公众号正文图片已上传 ${index + 1}/${images.length}`,
+      current: index + 1,
+      total: images.length,
+    });
+  });
+  // A per-image success is not enough: a delayed upload from a previous round
+  // can still rewrite the DOM afterwards. Require the whole ordered group to
+  // remain content-stable before touching the cover or save controls.
+  await operations.verifyMedia(page, fingerprints, false);
+  if (cover) {
+    await operations.uploadCover(page, cover);
+    reportDraftProgress(onProgress, {
+      stage: "upload",
+      message: "公众号封面已上传",
+      current: 1,
+      total: 1,
+    });
+    await operations.verifyMedia(page, fingerprints, true);
+  }
+  return fingerprints;
+}
 
 export function validateWechatContent(content: Article) {
   if (
@@ -214,7 +269,12 @@ export async function saveWechatDraft(
     if (options.draftUrl) {
       // Retry only verifies the checkpointed draft; never overwrite a later manual edit.
       await verifyWechatDraft(page, content);
-      await verifyWechatMedia(page, images.length, !!cover);
+      const expected = await Promise.all(
+        images.map((image) =>
+          fingerprintImageBuffer(page, image.buffer, image.mimeType),
+        ),
+      );
+      await verifyWechatMedia(page, expected, !!cover);
       await verifyWechatDraftList(context, options.draftUrl, content.title);
       reportDraftProgress(options.onProgress, {
         stage: "verify",
@@ -245,24 +305,18 @@ export async function saveWechatDraft(
       stage: "fields",
       message: "公众号标题、作者、摘要和正文已填写",
     });
-    await uploadImagesSequentially(images, async (image, index) => {
-      await uploadBodyImage(page, image);
-      reportDraftProgress(options.onProgress, {
-        stage: "upload",
-        message: `公众号正文图片已上传 ${index + 1}/${images.length}`,
-        current: index + 1,
-        total: images.length,
-      });
+    reportDraftProgress(options.onProgress, {
+      stage: "upload",
+      message: "正在逐张上传并核对公众号图片",
+      current: 0,
+      total: images.length,
     });
-    if (cover) {
-      await uploadCover(page, cover);
-      reportDraftProgress(options.onProgress, {
-        stage: "upload",
-        message: "公众号封面已上传",
-        current: 1,
-        total: 1,
-      });
-    }
+    const uploadedImageFingerprints = await uploadWechatDraftMedia(
+      page,
+      images,
+      cover,
+      options.onProgress,
+    );
     const responsePromise = page.waitForResponse(
       async (response) => {
         const u = new URL(response.url());
@@ -299,7 +353,7 @@ export async function saveWechatDraft(
     options.checkpoint(url);
     const reopened = await openWechatDraft(context, url);
     await verifyWechatDraft(reopened, content);
-    await verifyWechatMedia(reopened, images.length, !!cover);
+    await verifyWechatMedia(reopened, uploadedImageFingerprints, !!cover);
     await verifyWechatDraftList(context, url, content.title);
     reportDraftProgress(options.onProgress, {
       stage: "verify",

@@ -13,7 +13,7 @@ export const platformId = z.enum([
 export type PlatformId = z.infer<typeof platformId>;
 export const contentType = z.enum(["article", "gallery", "video"]);
 export type ContentType = z.infer<typeof contentType>;
-// Enable only after the packaged adapter passes real draft save and read-back.
+// Allows a draft-only attempt; Xiaohongshu image identity still needs manual review.
 export const xiaohongshuGalleryDraftVerified = true;
 // Enable only after a packaged Douyin adapter passes real draft save/read-back.
 export const douyinVideoDraftVerified = true;
@@ -176,7 +176,8 @@ export type TaskStatus =
   | "cancelled"
   | "failed"
   | "succeeded"
-  | "draft_saved";
+  | "draft_saved"
+  | "publication_ready";
 export interface Task {
   id: string;
   campaignId: string;
@@ -236,10 +237,17 @@ export const rpcRequest = z
       "task.cancel",
       "task.preflight",
       "task.saveDraft",
+      "task.repairDraft",
+      "task.publish",
+      "task.preparePublish",
+      "task.verifyPublication",
+      "task.confirmPublicationReview",
       "task.enqueueDraft",
       "task.openDraft",
       "task.events",
       "diagnostics.capture",
+      "diagnostics.inspect",
+      "diagnostics.network",
     ]),
     params: z.unknown().optional(),
   })

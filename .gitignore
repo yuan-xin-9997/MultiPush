@@ -1,0 +1,16 @@
+node_modules/
+dist/
+target/
+.data/
+.test-data/
+.pnpm-store/
+.toolchains/
+test-results/
+playwright-report/
+*.log
+.env
+.env.*
+!.env.example
+
+# Local deployment prompt contains server credentials.
+生成Jenkinsfile的提示词.md

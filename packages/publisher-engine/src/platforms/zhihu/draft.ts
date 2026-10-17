@@ -10,6 +10,7 @@ import { renderMarkdown } from "../../markdown.ts";
 import { imagePayload } from "../wechat/media.ts";
 import {
   uploadZhihuImage,
+  verifyZhihuImageOrder,
   uploadZhihuCover,
   verifyZhihuMedia,
 } from "./media.ts";
@@ -173,6 +174,7 @@ export async function saveZhihuDraft(
   > & { tags?: string[] },
   options: {
     draftUrl?: string;
+    repairMedia?: boolean;
     checkpoint?: (url: string) => void;
     onProgress?: DraftProgressReporter;
   } = {},
@@ -217,9 +219,13 @@ export async function saveZhihuDraft(
       titleSelector,
       { timeout: 30_000 },
     );
-    if (html || images.length || cover || topics.length) {
+    if (
+      !options.repairMedia &&
+      (html || images.length || cover || topics.length)
+    ) {
       await verifyDraft(page, content);
       await verifyZhihuMedia(page, images.length, !!cover);
+      await verifyZhihuImageOrder(page, images);
       await verifyZhihuTopics(page, topics);
       await verifyZhihuDraftList(context, options.draftUrl, content.title);
       reportDraftProgress(options.onProgress, {
@@ -233,6 +239,7 @@ export async function saveZhihuDraft(
       };
     }
     if (
+      !options.repairMedia &&
       (await page.locator(titleSelector).inputValue()) === content.title &&
       normalize(await page.locator(bodySelector).innerText()) ===
         normalize(content.body)
@@ -248,6 +255,18 @@ export async function saveZhihuDraft(
         verified: true as const,
       };
     }
+  }
+  let preservedImages = 0;
+  if (options.repairMedia) {
+    if (!options.draftUrl)
+      throw new Error("修复图片必须指定已有草稿，禁止创建新文章");
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+    await verifyDraft(page, content);
+    preservedImages = await page.locator(`${bodySelector} img`).count();
+    if (preservedImages > images.length)
+      throw new Error("已有草稿包含额外图片，停止修复");
+    if (preservedImages)
+      await verifyZhihuImageOrder(page, images.slice(0, preservedImages));
   }
   async function saveField(
     field: "title" | "content",
@@ -318,7 +337,7 @@ export async function saveZhihuDraft(
   });
   const url = validateDraftUrl(page.url());
   options.checkpoint?.(url);
-  if (html) {
+  if (html && !options.repairMedia) {
     const expected = await page.evaluate((html) => {
       const doc = new DOMParser().parseFromString(html, "text/html");
       doc.querySelectorAll("*").forEach((el) => {
@@ -329,8 +348,9 @@ export async function saveZhihuDraft(
     }, html);
     await saveField("content", expected, bodySelector);
   } else if (
+    !options.repairMedia &&
     normalize(await page.locator(bodySelector).innerText()) !==
-    normalize(content.body)
+      normalize(content.body)
   )
     await saveField("content", content.body, bodySelector);
   reportDraftProgress(options.onProgress, {
@@ -338,15 +358,20 @@ export async function saveZhihuDraft(
     message: "知乎正文已填写并确认保存",
   });
   // A successful save response alone is insufficient: reload the remote draft and compare both fields.
-  await uploadImagesSequentially(images, async (image, index) => {
-    await uploadZhihuImage(page, image);
-    reportDraftProgress(options.onProgress, {
-      stage: "upload",
-      message: `知乎正文图片已上传 ${index + 1}/${images.length}`,
-      current: index + 1,
-      total: images.length,
-    });
-  });
+  await uploadImagesSequentially(
+    images.slice(preservedImages),
+    async (image, offset) => {
+      const index = offset + preservedImages;
+      await uploadZhihuImage(page, image);
+      await verifyZhihuImageOrder(page, images.slice(0, index + 1));
+      reportDraftProgress(options.onProgress, {
+        stage: "upload",
+        message: `知乎正文图片已上传 ${index + 1}/${images.length}`,
+        current: index + 1,
+        total: images.length,
+      });
+    },
+  );
   if (cover) {
     await uploadZhihuCover(page, cover);
     reportDraftProgress(options.onProgress, {
@@ -371,6 +396,7 @@ export async function saveZhihuDraft(
   await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
   await verifyDraft(page, content);
   await verifyZhihuMedia(page, images.length, !!cover);
+  await verifyZhihuImageOrder(page, images);
   await verifyZhihuTopics(page, topics);
   await verifyZhihuDraftList(context, url, content.title);
   reportDraftProgress(options.onProgress, {

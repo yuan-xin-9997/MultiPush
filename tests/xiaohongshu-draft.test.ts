@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   clickVerifiedXiaohongshuDraftPoint,
+  findMatchingXiaohongshuDraft,
   validateXiaohongshuDraftLayout,
   xiaohongshuDraftLayoutVersion,
   validateXiaohongshuPublishUrl,
@@ -47,11 +48,11 @@ async function draftFixture() {
   } as const;
 }
 
-test("正式适配器全字段匹配时复用且不上传或暂存", async () => {
+test("同标题字段和图片数量匹配但无逐图证明时不复用也不新建", async () => {
   const fixture = await draftFixture();
   const events: string[] = [];
   try {
-    const result = await saveXiaohongshuDraft(
+    await assert.rejects(saveXiaohongshuDraft(
       { newPage: async () => ({}) } as any,
       fixture.content as any,
       {
@@ -69,21 +70,55 @@ test("正式适配器全字段匹配时复用且不上传或暂存", async () =>
           events.push("settle");
         },
       },
-    );
-    assert.equal(result.reused, true);
+    ), /无法核验逐图身份/);
     assert.deepEqual(events, ["find"]);
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
 });
 
-test("小红书适配器统一上报会话、上传、字段、暂存和回读进度", async () => {
+test("真实草稿箱查找不能把相同数量的不同图片认作同一草稿", async () => {
   const fixture = await draftFixture();
-  const progress: Array<{ stage: string; current?: number; total?: number }> =
+  const clicks: string[] = [];
+  const chain = (label: string): any => ({
+    filter: () => chain(label),
+    first: () => chain(label),
+    nth: () => chain(label),
+    locator: () => chain("edit"),
+    waitFor: async () => undefined,
+    click: async () => { clicks.push(label); },
+    count: async () => label === "title-candidate" || label === "image-count" ? 1 : 0,
+    inputValue: async () => fixture.content.title,
+    innerText: async () => fixture.content.body,
+  });
+  const page = {
+    goto: async () => undefined,
+    getByText: (value: string | RegExp, options?: { exact?: boolean }) =>
+      typeof value === "string" && options?.exact
+        ? chain("title-candidate")
+        : value instanceof RegExp && String(value).includes("18")
+          ? chain("image-count")
+          : chain("navigation"),
+    locator: () => chain("editor"),
+  } as any;
+  try {
+    await assert.rejects(
+      findMatchingXiaohongshuDraft(page, fixture.content as any),
+      /无法核验逐图身份.*禁止自动复用或新建/,
+    );
+    assert.deepEqual(clicks, ["navigation", "navigation", "edit"]);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("暂存后只有字段和图片数量时结果未知，且不报告上传或回读成功", async () => {
+  const fixture = await draftFixture();
+  const progress: Array<{ stage: string; message: string; current?: number; total?: number }> =
     [];
   let finds = 0;
   try {
-    await saveXiaohongshuDraft(
+    await assert.rejects(saveXiaohongshuDraft(
       { newPage: async () => ({}) } as any,
       fixture.content as any,
       {
@@ -95,17 +130,18 @@ test("小红书适配器统一上报会话、上传、字段、暂存和回读�
       (event) =>
         progress.push({
           stage: event.stage,
+          message: event.message,
           ...(event.current === undefined ? {} : { current: event.current }),
           ...(event.total === undefined ? {} : { total: event.total }),
         }),
-    );
-    assert.deepEqual(progress, [
-      { stage: "session" },
-      { stage: "upload", current: 2, total: 2 },
-      { stage: "fields" },
-      { stage: "save" },
-      { stage: "verify" },
+    ), /结果未知，请人工介入，禁止自动重试/);
+    assert.deepEqual(progress.map(({ stage }) => stage), [
+      "session", "upload", "fields", "save",
     ]);
+    assert.equal(progress[1].current, 0);
+    assert.equal(progress[1].total, 2);
+    assert.match(progress[1].message, /未验证/);
+    assert.equal(finds, 2);
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
@@ -137,7 +173,7 @@ test("正式适配器暂存后回读失败报告结果未知且不自行重试",
           },
         },
       ),
-      /结果未知；禁止自动重试/,
+      /结果未知，请人工介入，禁止自动重试/,
     );
     assert.equal(finds, 2);
     assert.deepEqual(events, ["find", "populate", "save", "settle", "find"]);

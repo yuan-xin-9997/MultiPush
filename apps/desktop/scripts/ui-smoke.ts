@@ -40,7 +40,7 @@ try {
     )
       snapshotRequests += 1;
   });
-  await page.goto("http://127.0.0.1:1420");
+  await page.goto(`http://127.0.0.1:${process.env.TURBOPUSH_PORT ?? 34080}`);
   await page.getByText("本地引擎已连接").waitFor();
   await page.waitForTimeout(2200);
   assert.ok(snapshotRequests >= 2, "snapshot should refresh periodically");
@@ -152,13 +152,7 @@ try {
   const imagePicker = page.getByLabel("选择并托管正文图片", {
     exact: true,
   });
-  await imagePicker.evaluate((input, path) => {
-    Object.defineProperty(input, "files", {
-      configurable: true,
-      value: [{ path }],
-    });
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }, sourceImage);
+  await imagePicker.setInputFiles(sourceImage);
   await page.getByText("已选择并托管1张图片", { exact: false }).waitFor();
   const hostedImage = await page
     .getByLabel("正文图片（每行一张）")
@@ -226,7 +220,7 @@ try {
   await page.getByRole("button", { name: "批量任务", exact: false }).click();
   await page.getByText("我的第一篇测试文章", { exact: true }).waitFor();
   await page.getByRole("button", { name: "内容中心", exact: false }).click();
-  await page.getByText("当前为网页开发模式", { exact: false }).waitFor();
+  await page.getByText("Web端支持图片上传", { exact: false }).waitFor();
   const portableDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "下载便携归档", exact: true }).click();
   const portableStream = await (await portableDownload).createReadStream();
@@ -317,7 +311,7 @@ try {
     .click();
   await page.getByText("待人工验证", { exact: true }).first().waitFor();
   // Reject cross-origin requests to the development bridge.
-  const forbidden = await fetch("http://127.0.0.1:1420/__rpc", {
+  const forbidden = await fetch(`http://127.0.0.1:${process.env.TURBOPUSH_PORT ?? 34080}/__rpc`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

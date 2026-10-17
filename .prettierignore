@@ -1,0 +1,8 @@
+**/dist/**
+**/target/**
+**/gen/**
+node_modules
+.toolchains
+.pnpm-store
+.data
+pnpm-lock.yaml

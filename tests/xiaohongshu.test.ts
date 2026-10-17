@@ -29,7 +29,7 @@ function content(images: string[], overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-test("首版小红书图文接受2到18张本地PNG/JPEG且明确仅保存草稿", async () => {
+test("小红书图文接受2到18张本地PNG/JPEG，公开发布必须单独确认", async () => {
   const directory = await mkdtemp(join(tmpdir(), "turbopush-xhs-"));
   try {
     const pngPath = join(directory, "one.png");
@@ -38,8 +38,8 @@ test("首版小红书图文接受2到18张本地PNG/JPEG且明确仅保存草稿
     await writeFile(jpgPath, jpeg);
     const minimum = await validateXiaohongshuGallery(content([pngPath, jpgPath]));
     assert.equal(minimum.images.length, 2);
-    assert.match(minimum.message, /仅允许保存草稿，不公开发布/);
-    assert.equal(xiaohongshuGalleryPolicy.delivery, "draft_only");
+    assert.match(minimum.message, /公开发布需要单独确认/);
+    assert.equal(xiaohongshuGalleryPolicy.delivery, "manual_publication_experimental");
 
     const maximumPaths = [];
     for (let index = 0; index < 18; index += 1) {
@@ -130,11 +130,11 @@ test("首版项目安全上限拒绝图片数量、文本、标签和混入视�
   );
   assert.throws(
     () => xiaohongshuGalleryContent.parse(content(["a", "b"], { title: "题".repeat(51) })),
-    /50字安全上限/,
+    /20字安全上限/,
   );
   assert.throws(
     () => xiaohongshuGalleryContent.parse(content(["a", "b"], { body: "文".repeat(3001) })),
-    /3000字安全上限/,
+    /1000字安全上限/,
   );
   assert.throws(
     () => xiaohongshuGalleryContent.parse(content(["a", "b"], { tags: ["旅行", "旅行"] })),

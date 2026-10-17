@@ -1,3 +1,5 @@
+import { armFormDataUploadProof } from "../form-data-upload-proof.ts";
+import { imagePayload } from "../wechat/media.ts";
 import type { BrowserContext, Page } from "playwright";
 import type { Content } from "@turbopush/shared";
 import { validateXiaohongshuGallery } from "./schema.ts";
@@ -56,7 +58,7 @@ export function validateXiaohongshuPublishUrl(value: string) {
     url.pathname !== "/publish/publish" ||
     url.username ||
     url.password ||
-    url.search ||
+    [...url.searchParams].some(([key, value]) => !(key === "from" && /^[a-zA-Z0-9_-]{1,40}$/.test(value))) ||
     url.hash
   )
     throw new Error("无效的小红书创作入口");
@@ -105,7 +107,7 @@ async function editorMatches(page: Page, content: GalleryDraft) {
   }
 }
 
-/** Exact title locates candidates; each candidate is opened and fully read back. */
+/** A matching title/body/count is only a candidate, never proof of image identity. */
 export async function findMatchingXiaohongshuDraft(
   page: Page,
   content: GalleryDraft,
@@ -134,11 +136,14 @@ export async function findMatchingXiaohongshuDraft(
         { cause: error },
       );
     }
-    if (await editorMatches(page, content)) return true;
+    if (await editorMatches(page, content))
+      throw new Error(
+        "已存在同标题小红书草稿，标题、正文和图片数量一致但无法核验逐图身份；禁止自动复用或新建，请人工核对",
+      );
   }
   if (initialCandidates > 0)
     throw new Error(
-      "已存在同标题小红书草稿但内容或图片数不一致，请人工核对；禁止自动新建",
+      "已存在同标题小红书草稿但字段或图片数量不一致，请人工核对；禁止自动新建",
     );
   return false;
 }
@@ -152,7 +157,25 @@ async function populateGalleryEditor(page: Page, content: GalleryDraft) {
   await gallery.evaluate((element) => (element as HTMLElement).click());
   const input = page.locator(xiaohongshuGallerySelectors.images).first();
   await input.waitFor({ state: "attached", timeout: 30_000 });
-  await input.setInputFiles(content.images);
+  for (const path of content.images) {
+    const image = await imagePayload(path);
+    const current = page.locator(xiaohongshuGallerySelectors.images);
+    if ((await current.count()) !== 1)
+      throw new Error("小红书图片选择控件不唯一，停止上传");
+    const proof = await armFormDataUploadProof(
+      page,
+      image,
+      "https://creator.xiaohongshu.com",
+      "xiaohongshu",
+    );
+    if (!proof) throw new Error("小红书上传文件证明无法启动");
+    try {
+      await current.setInputFiles(image);
+      await proof.promise;
+    } finally {
+      await proof.cancel();
+    }
+  }
   const title = page.locator(xiaohongshuGallerySelectors.title).first();
   const body = page.locator(xiaohongshuGallerySelectors.body).first();
   await title.waitFor({ state: "visible", timeout: 30_000 });
@@ -288,7 +311,7 @@ export async function saveXiaohongshuDraft(
   content: GalleryDraft,
   runtime: XiaohongshuDraftRuntime = browserDraftRuntime,
   onProgress?: DraftProgressReporter,
-) {
+): Promise<never> {
   const validated = await validateXiaohongshuGallery(content as Content);
   if (validated.content.tags.length)
     throw new Error("小红书话题控件尚未验证，首版草稿暂不接受标签");
@@ -297,23 +320,16 @@ export async function saveXiaohongshuDraft(
     stage: "session",
     message: "正在检查小红书草稿箱中的同内容草稿",
   });
-  // No stable ID exists: title is only a lookup key; all fields and N/18 must match.
-  if (await runtime.find(page, validated.content)) {
-    reportDraftProgress(onProgress, {
-      stage: "verify",
-      message: "小红书已有草稿已完成标题、正文和图片数量回读",
-    });
-    return {
-      url: xiaohongshuPublishUrl,
-      verified: true as const,
-      reused: true as const,
-    };
-  }
+  // No stable image identity exists. Even a matching title/body/N/18 cannot be reused.
+  if (await runtime.find(page, validated.content))
+    throw new Error(
+      "小红书草稿仅匹配标题、正文和图片数量，无法核验逐图身份；禁止自动复用或新建",
+    );
   await runtime.populate(page, validated.content);
   reportDraftProgress(onProgress, {
     stage: "upload",
-    message: `小红书图片已上传 ${validated.content.images.length}/${validated.content.images.length}`,
-    current: validated.content.images.length,
+    message: `已向小红书页面选择 ${validated.content.images.length} 张图片；远端上传及逐图身份未验证`,
+    current: 0,
     total: validated.content.images.length,
   });
   reportDraftProgress(onProgress, {
@@ -326,17 +342,17 @@ export async function saveXiaohongshuDraft(
   });
   await runtime.save(page);
   await runtime.settle(page);
-  if (!(await runtime.find(page, validated.content)))
+  // A save click has happened. Read back for diagnostics, but do not mark the
+  // task successful: N/18 cannot distinguish different images or upload races.
+  try {
+    await runtime.find(page, validated.content);
+  } catch (error) {
     throw new Error(
-      "小红书草稿暂存后未能从草稿箱逐字段回读，结果未知；禁止自动重试",
+      "小红书已执行暂存，草稿箱回读不能核验逐图身份；结果未知，请人工介入，禁止自动重试",
+      { cause: error },
     );
-  reportDraftProgress(onProgress, {
-    stage: "verify",
-    message: "小红书草稿已完成标题、正文和图片数量回读",
-  });
-  return {
-    url: xiaohongshuPublishUrl,
-    verified: true as const,
-    reused: false as const,
-  };
+  }
+  throw new Error(
+    "小红书已执行暂存，但无法核验远端逐图身份；结果未知，请人工介入，禁止自动重试",
+  );
 }

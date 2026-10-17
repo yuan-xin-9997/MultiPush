@@ -1,0 +1,33 @@
+pipeline {
+    agent { label 'built-in' }
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timestamps()
+        timeout(time: 45, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+    triggers { pollSCM('H/30 * * * *') }
+    stages {
+        stage('Checkout GitHub') {
+            steps { checkout scm }
+        }
+        stage('Build and test') {
+            steps { sh 'bash JenkinsConfig/deploy.sh prepare' }
+        }
+        stage('Stop service') {
+            steps { sh 'bash JenkinsConfig/deploy.sh stop' }
+        }
+        stage('Update /opt/MultiPush') {
+            steps { sh 'bash JenkinsConfig/deploy.sh update' }
+        }
+        stage('Start and verify') {
+            steps { sh 'bash JenkinsConfig/deploy.sh start' }
+        }
+    }
+    post {
+        failure {
+            echo 'Deployment failed. Check the failing stage and journalctl -u multipush.service; no automatic publication is performed.'
+        }
+    }
+}

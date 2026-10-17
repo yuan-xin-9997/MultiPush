@@ -63,7 +63,7 @@ export function classifyLoginPage(
         ? parsed.hostname === "creator.xiaohongshu.com"
         : platform === "douyin"
           ? parsed.hostname === "creator.douyin.com"
-        : ["www.zhihu.com", "zhuanlan.zhihu.com"].includes(parsed.hostname));
+          : ["www.zhihu.com", "zhuanlan.zhihu.com"].includes(parsed.hostname));
   if (platform === "douyin") {
     try {
       validateDouyinCreatorUrl(url);
@@ -119,11 +119,10 @@ export async function detectPlatformLogin(
           ? "https://creator.xiaohongshu.com/"
           : platform === "douyin"
             ? douyinCreatorHomeUrl
-          : "https://www.zhihu.com/",
+            : "https://www.zhihu.com/",
       { waitUntil: "domcontentloaded", timeout: 30_000 },
     );
-    if (platform === "douyin")
-      await waitForDouyinStablePage(page);
+    if (platform === "douyin") await waitForDouyinStablePage(page);
     if (platform === "xiaohongshu")
       await page
         .waitForFunction(
@@ -149,7 +148,7 @@ export async function detectPlatformLogin(
     // authenticated page signal.
     const securityChallenge = await hasVisibleText(
       page,
-      /验证码|安全验证|环境异常|异常流量/,
+      /安全验证|环境异常|异常流量|拖动滑块|滑块验证|完成验证/,
     );
     const signals: LoginPageSignals =
       platform === "wechat-official"
@@ -164,7 +163,7 @@ export async function detectPlatformLogin(
               0,
             securityChallenge,
           }
-          : platform === "xiaohongshu"
+        : platform === "xiaohongshu"
           ? {
               authenticated: isXiaohongshuAuthenticatedPage(
                 page.url(),
@@ -172,7 +171,8 @@ export async function detectPlatformLogin(
               ),
               loginPrompt:
                 /^\/login\/?$/.test(new URL(page.url()).pathname) ||
-                (await page.getByText(/扫码登录|手机号登录/).count()) > 0,
+                (await page.getByText(/扫码登录|手机号登录/).filter({ visible: true }).count()) > 0 ||
+                (await page.locator('input[placeholder="手机号"]:visible').count()) > 0,
               securityChallenge,
             }
           : platform === "douyin"
@@ -186,17 +186,20 @@ export async function detectPlatformLogin(
                   (await page.getByText(/扫码登录|手机号登录/).count()) > 0,
                 securityChallenge,
               }
-          : {
-              authenticated:
-                (await page
-                  .locator(
-                    ".AppHeader-profile, [data-za-detail-view-element_name='头像']",
-                  )
-                  .count()) > 0,
-              loginPrompt:
-                (await page.getByRole("button", { name: /登录/ }).count()) > 0,
-              securityChallenge,
-            };
+            : {
+                authenticated:
+                  (await page
+                    .locator(
+                      ".AppHeader-profile:visible, .AppHeader-profileEntry:visible .AppHeader-profileAvatar:visible, [data-za-detail-view-element_name='头像']:visible",
+                    )
+                    .count()) > 0,
+                loginPrompt:
+                  (await page
+                    .getByRole("button", { name: /登录/ })
+                    .filter({ visible: true })
+                    .count()) > 0,
+                securityChallenge,
+              };
     return classifyLoginPage(platform, page.url(), signals);
   } catch {
     return {

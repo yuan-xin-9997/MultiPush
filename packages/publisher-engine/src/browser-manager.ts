@@ -4,10 +4,59 @@ import { mkdir } from "node:fs/promises";
 import { z } from "zod";
 import { platforms, type Account } from "@turbopush/shared";
 
+export interface BrowserNetworkDiagnostic {
+  host: string;
+  method: string;
+  pathShape: string;
+  contentType: string;
+  bodyBytes: number | null;
+  status: number | null;
+  error?: string;
+}
+export function networkDiagnostic(
+  method: string,
+  value: string,
+  contentType: string,
+  bodyBytes: number | null,
+): BrowserNetworkDiagnostic {
+  const url = new URL(value);
+  const known = new Set([
+    "api",
+    "articles",
+    "draft",
+    "images",
+    "image",
+    "upload",
+    "cgi-bin",
+    "filetransfer",
+    "appmsgpublish",
+    "notes",
+    "sns",
+    "web",
+    "v1",
+    "v2",
+  ]);
+  return {
+    host: url.hostname,
+    method,
+    pathShape: url.pathname
+      .split("/")
+      .map((part) => (!part || known.has(part) ? part : "_"))
+      .join("/"),
+    contentType: contentType.split(";")[0],
+    bodyBytes,
+    status: null,
+  };
+}
+
 export class BrowserManager {
   private contexts = new Map<string, BrowserContext>();
   private opening = new Map<string, Promise<BrowserContext>>();
   private directory: string;
+  private networkEvidence = new Map<string, BrowserNetworkDiagnostic[]>();
+  network(accountId: string) {
+    return this.networkEvidence.get(accountId) ?? [];
+  }
   constructor(directory: string) {
     this.directory = directory;
   }
@@ -17,7 +66,7 @@ export class BrowserManager {
   async open(account: Account): Promise<BrowserContext> {
     const current = this.contexts.get(account.id);
     if (current) {
-      await current.pages()[0]?.bringToFront();
+      await current.pages().at(-1)?.bringToFront();
       return current;
     }
     const pending = this.opening.get(account.id);
@@ -47,6 +96,39 @@ export class BrowserManager {
         "无法启动浏览器。请执行 pnpm browser:install，或设置 TURBOPUSH_BROWSER_CHANNEL=msedge 使用本机 Edge。",
       );
     }
+    const network: BrowserNetworkDiagnostic[] = [];
+    const requests = new WeakMap<
+      import("playwright").Request,
+      BrowserNetworkDiagnostic
+    >();
+    this.networkEvidence.set(account.id, network);
+    context.on("request", (request) => {
+      if (!["POST", "PUT", "PATCH"].includes(request.method())) return;
+      try {
+        const row = networkDiagnostic(
+          request.method(),
+          request.url(),
+          request.headers()["content-type"] ?? "",
+          request.postDataBuffer()?.length ?? null,
+        );
+        requests.set(request, row);
+        network.push(row);
+        if (network.length > 40) network.shift();
+      } catch {
+        /* Network diagnostics must never interfere with a platform request. */
+      }
+    });
+    context.on("response", (response) => {
+      const row = requests.get(response.request());
+      if (row) row.status = response.status();
+    });
+    context.on("requestfailed", (request) => {
+      const row = requests.get(request);
+      if (row) {
+        const error = request.failure()?.errorText ?? "";
+        row.error = /^net::ERR_[A-Z_]+$/.test(error) ? error : "REQUEST_FAILED";
+      }
+    });
     this.contexts.set(account.id, context);
     context.on("close", () => this.contexts.delete(account.id));
     try {
@@ -63,8 +145,96 @@ export class BrowserManager {
     }
     return context;
   }
+  async inspect(account: Account) {
+    const context = this.contexts.get(account.id);
+    if (!context) throw new Error("请先打开账号浏览器");
+    const expectedHost = new URL(
+      platforms.find((platform) => platform.id === account.platform)!.loginUrl,
+    ).hostname;
+    const result = [];
+    for (const [index, page] of context.pages().entries()) {
+      const url = new URL(page.url());
+      if (
+        url.hostname !== expectedHost &&
+        !(
+          account.platform === "zhihu" && url.hostname === "zhuanlan.zhihu.com"
+        ) &&
+        !(
+          account.platform === "xiaohongshu" &&
+          url.hostname === "www.xiaohongshu.com"
+        )
+      )
+        continue;
+      const controls = await page.locator("body").evaluate((body) =>
+        [
+          ...body.querySelectorAll(
+            'button,input,textarea,[contenteditable=true],[role=button],header img,[class*=Header] img,[class*=Nav] img,.AppHeader-profileAvatar,a[href*="/creator"]',
+          ),
+        ]
+          .filter(
+            (element) =>
+              element.getClientRects().length &&
+              getComputedStyle(element).visibility !== "hidden",
+          )
+          .slice(0, 100)
+          .map((element) => ({
+            tag: element.tagName.toLowerCase(),
+            classes: element.className,
+            role: element.getAttribute("role"),
+            text:
+              element instanceof HTMLInputElement ||
+              element instanceof HTMLTextAreaElement
+                ? ""
+                : (element.textContent ?? "").trim().slice(0, 100),
+            placeholder: element.getAttribute("placeholder"),
+            label: element.getAttribute("aria-label"),
+            alt: element.getAttribute("alt"),
+          })),
+      );
+      result.push({
+        index,
+        origin: url.origin,
+        path: url.pathname,
+        queryKeys: [...url.searchParams.keys()],
+        title: await page.title(),
+        controls,
+        images: await page.locator("img").evaluateAll((images) =>
+          images.map((element, index) => {
+            const image = element as HTMLImageElement;
+            const box = image.getBoundingClientRect();
+            const src = image.currentSrc || image.src;
+            return {
+              index,
+              classes: image.className,
+              naturalWidth: image.naturalWidth,
+              naturalHeight: image.naturalHeight,
+              width: box.width,
+              height: box.height,
+              source: src.startsWith("blob:")
+                ? "blob"
+                : src.startsWith("data:")
+                  ? "data"
+                  : src.startsWith("https:")
+                    ? new URL(src).hostname
+                    : "other",
+            };
+          }),
+        ),
+      });
+    }
+    return result;
+  }
   async capture(accountId: string) {
-    const page = this.contexts.get(accountId)?.pages().at(-1);
+    const pages = this.contexts.get(accountId)?.pages() ?? [];
+    let page = pages.at(-1);
+    for (const candidate of pages) {
+      if (
+        await candidate
+          .evaluate(() => document.visibilityState === "visible")
+          .catch(() => false)
+      )
+        page = candidate;
+    }
     if (!page) throw new Error("请先打开账号浏览器");
     const directory = join(this.directory, "screenshots");
     await mkdir(directory, { recursive: true });

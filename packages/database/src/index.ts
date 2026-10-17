@@ -17,6 +17,9 @@ import {
   type DraftProgress,
 } from "@turbopush/shared";
 
+export const PUBLICATION_SUBMISSION_MESSAGE =
+  "已确认公开发布，正在提交；结果未知时禁止自动重试";
+
 export class Store {
   readonly db: DatabaseSync;
   readonly directory: string;
@@ -62,16 +65,18 @@ export class Store {
     this.transaction(() => {
       const rows = this.db
         .prepare(
-          "SELECT id, status FROM tasks WHERE status IN ('validating','publishing')",
+          "SELECT id, status FROM tasks WHERE status IN ('validating','publishing','publication_ready')",
         )
         .all();
       for (const row of rows)
         this.transition(
           row.id as string,
-          row.status === "publishing" ? "intervention_required" : "pending",
-          row.status === "publishing"
-            ? "应用中断，发布结果未知，请人工核对后处理"
-            : "已恢复中断的本地预检任务",
+          row.status === "validating" ? "pending" : "intervention_required",
+          row.status === "publication_ready"
+            ? "待发表编辑器会话已中断；未自动发表，请人工核对"
+            : row.status === "publishing"
+              ? "应用中断，发布结果未知，请人工核对后处理"
+              : "已恢复中断的本地预检任务",
         );
     });
   }
@@ -219,7 +224,7 @@ export class Store {
          AND NOT EXISTS (
            SELECT 1 FROM tasks AS active
            WHERE active.account_id=candidate.account_id
-             AND active.status IN ('validating','publishing')
+             AND active.status IN ('validating','publishing','publication_ready')
          )
          ORDER BY COALESCE(candidate.scheduled_at,candidate.created_at), candidate.rowid
          LIMIT ?`,
@@ -246,7 +251,7 @@ export class Store {
                SELECT 1 FROM tasks AS active
                WHERE active.account_id=candidate.account_id
                  AND active.id<>candidate.id
-                 AND active.status IN ('validating','publishing')
+                 AND active.status IN ('validating','publishing','publication_ready')
              )`,
         )
         .run(message, id, timestamp, timestamp);
@@ -404,6 +409,11 @@ export class Store {
   }
   checkpointDraft(id: string, url: string) {
     this.db.prepare("UPDATE tasks SET result_url=? WHERE id=?").run(url, id);
+  }
+  hasPublicationAttempt(id: string) {
+    return !!this.db
+      .prepare("SELECT 1 FROM events WHERE task_id=? AND message=? LIMIT 1")
+      .get(id, PUBLICATION_SUBMISSION_MESSAGE);
   }
   hasDraftAttempt(id: string) {
     return !!this.db

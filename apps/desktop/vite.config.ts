@@ -1,45 +1,68 @@
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Plugin, type ViteDevServer, type PreviewServer } from 'vite';
 import react from '@vitejs/plugin-react';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { Service } from '@turbopush/engine';
+import { importImages } from '../../packages/publisher-engine/src/assets.ts';
 
-// Development-only bridge. Production uses Rust -> stdin/stdout, with no listening port.
+export function webPort(value = process.env.TURBOPUSH_PORT): number {
+  const port = value === undefined ? 34080 : Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('TURBOPUSH_PORT 必须为1至65535的整数');
+  return port;
+}
+
 function localRpc(): Plugin {
-  return {
-    name: 'local-engine-rpc',
-    configureServer(server) {
-      const directory = resolve(process.env.TURBOPUSH_DATA_DIR ?? fileURLToPath(new URL('../../.data', import.meta.url)));
-      // Native development owns its own sidecar/database; do not open a second Store.
-      const service = process.env.TAURI_ENV_PLATFORM ? undefined : new Service(directory);
-      server.httpServer?.once('close', () => { void service?.close(); });
-      server.middlewares.use('/__rpc', async (req, res) => {
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Cache-Control', 'no-store');
-        const hosts = ['127.0.0.1:1420', 'localhost:1420'];
-        if (!hosts.includes(req.headers.host ?? '') || req.headers.origin !== `http://${req.headers.host}` || req.method !== 'POST'
-          || req.headers['content-type'] !== 'application/json') {
-          res.statusCode = 403; res.end(JSON.stringify({ error: { message: '仅接受本机开发界面的同源JSON请求' } })); return;
+  const install = (server: ViteDevServer | PreviewServer) => {
+    const directory = resolve(process.env.TURBOPUSH_DATA_DIR ?? fileURLToPath(new URL('../../.data', import.meta.url)));
+    const service = process.env.TAURI_ENV_PLATFORM ? undefined : new Service(directory);
+    server.httpServer?.once('close', () => { void service?.close(); });
+    server.middlewares.use(async (req, res, next) => {
+      if (req.url !== '/__rpc' && req.url !== '/__upload') return next();
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      const port = server.httpServer?.address();
+      const actualPort = port && typeof port === 'object' ? port.port : webPort();
+      const hosts = [`127.0.0.1:${actualPort}`, `localhost:${actualPort}`];
+      const upload = req.url === '/__upload';
+      if (!hosts.includes(req.headers.host ?? '') || req.headers.origin !== `http://${req.headers.host}` || req.method !== 'POST'
+        || req.headers['content-type'] !== (upload ? 'application/octet-stream' : 'application/json')) {
+        res.statusCode = 403; res.end(JSON.stringify({ error: { message: '仅接受本机Web界面的同源请求' } })); return;
+      }
+      if (!service) { res.statusCode = 503; res.end(JSON.stringify({ error: { message: '请在桌面客户端中使用此功能' } })); return; }
+      let temporary: string | undefined;
+      try {
+        const chunks: Buffer[] = []; let size = 0;
+        const limit = upload ? 10 * 1024 * 1024 : 72 * 1024 * 1024;
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > limit) throw new Error('请求超过大小限制');
+          chunks.push(Buffer.from(chunk));
         }
-        if (!service) { res.statusCode = 503; res.end(JSON.stringify({ error: { message: '请在桌面客户端中使用此功能' } })); return; }
-        try {
-          const chunks: Buffer[] = []; let size = 0;
-          for await (const chunk of req) {
-            size += chunk.length;
-            if (size > 1_000_000) throw new Error('请求超过1MB限制');
-            chunks.push(Buffer.from(chunk));
-          }
-          res.end(JSON.stringify(await service.dispatch(JSON.parse(Buffer.concat(chunks).toString('utf8')))));
-        } catch {
-          res.statusCode = 400;
-          res.end(JSON.stringify({ error: { message: '无效请求或请求超过1MB限制' } }));
+        const body = Buffer.concat(chunks);
+        if (upload) {
+          temporary = await mkdtemp(join(tmpdir(), 'turbopush-upload-'));
+          const png = body.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+          const path = join(temporary, png ? 'image.png' : 'image.jpg');
+          await writeFile(path, body);
+          res.end(JSON.stringify({ result: (await importImages(directory, [path]))[0] }));
+        } else {
+          res.end(JSON.stringify(await service.dispatch(JSON.parse(body.toString('utf8')))));
         }
-      });
-    },
+      } catch {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: { message: '无效请求、图片格式错误或超过大小限制' } }));
+      } finally {
+        if (temporary) await rm(temporary, { recursive: true, force: true });
+      }
+    });
   };
+  return { name: 'local-engine-rpc', configureServer: install, configurePreviewServer: install };
 }
 export default defineConfig({
   plugins: [react(), localRpc()],
-  server: { port: 1420, strictPort: true, host: '127.0.0.1' },
+  server: { port: process.env.TAURI_ENV_PLATFORM ? 1420 : webPort(), strictPort: true, host: '127.0.0.1' },
+  preview: { port: webPort(), strictPort: true, host: '127.0.0.1' },
   clearScreen: false,
 });

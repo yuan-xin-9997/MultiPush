@@ -15,8 +15,8 @@ export interface PlatformTaskCapability {
 const unverifiedDraft = "草稿保存待真实创作页面验证，当前不可用";
 
 /**
- * UI-facing capability gate. Platform adapters can promote a capability here
- * only after their remote write and read-back checks have been verified.
+ * UI-facing capability gate. Xiaohongshu gallery is an explicit manual-review
+ * draft attempt; other enabled adapters require remote write/read-back checks.
  */
 export function taskCapability(
   platform: PlatformId,

@@ -19,7 +19,9 @@
     "test:browser": "tsx scripts/browser-smoke.ts",
     "test:ui": "tsx apps/desktop/scripts/ui-smoke.ts",
     "test:native": "tsx apps/desktop/scripts/native-smoke.ts",
-    "browser:install": "playwright install chromium"
+    "browser:install": "playwright install chromium",
+    "start": "pnpm --filter @turbopush/desktop start",
+    "test:web": "tsx apps/desktop/scripts/web-smoke.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
