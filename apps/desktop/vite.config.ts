@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, networkInterfaces } from 'node:os';
 import { Service } from '@turbopush/engine';
 import { importImages } from '../../packages/publisher-engine/src/assets.ts';
 
@@ -24,11 +24,11 @@ function localRpc(): Plugin {
       res.setHeader('Cache-Control', 'no-store');
       const port = server.httpServer?.address();
       const actualPort = port && typeof port === 'object' ? port.port : webPort();
-      const hosts = [`127.0.0.1:${actualPort}`, `localhost:${actualPort}`];
+      const hosts = ["localhost", ...Object.values(networkInterfaces()).flatMap(interfaces => (interfaces ?? []).filter(address => address.family === "IPv4").map(address => address.address))].map(host => `${host}:${actualPort}`);
       const upload = req.url === '/__upload';
       if (!hosts.includes(req.headers.host ?? '') || req.headers.origin !== `http://${req.headers.host}` || req.method !== 'POST'
         || req.headers['content-type'] !== (upload ? 'application/octet-stream' : 'application/json')) {
-        res.statusCode = 403; res.end(JSON.stringify({ error: { message: '仅接受本机Web界面的同源请求' } })); return;
+        res.statusCode = 403; res.end(JSON.stringify({ error: { message: '仅接受本服务Web界面的同源请求' } })); return;
       }
       if (!service) { res.statusCode = 503; res.end(JSON.stringify({ error: { message: '请在桌面客户端中使用此功能' } })); return; }
       let temporary: string | undefined;
@@ -62,7 +62,7 @@ function localRpc(): Plugin {
 }
 export default defineConfig({
   plugins: [react(), localRpc()],
-  server: { port: process.env.TAURI_ENV_PLATFORM ? 1420 : webPort(), strictPort: true, host: '127.0.0.1' },
-  preview: { port: webPort(), strictPort: true, host: '127.0.0.1' },
+  server: { port: process.env.TAURI_ENV_PLATFORM ? 1420 : webPort(), strictPort: true, host: process.env.TAURI_ENV_PLATFORM ? '127.0.0.1' : '0.0.0.0' },
+  preview: { port: webPort(), strictPort: true, host: '0.0.0.0' },
   clearScreen: false,
 });

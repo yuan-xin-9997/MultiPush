@@ -29,6 +29,7 @@ case "${1:-}" in
     pnpm install --frozen-lockfile
     pnpm exec playwright install chromium
     pnpm build
+    pnpm test:web
     pnpm test
     ;;
   stop)
