@@ -1,7 +1,0 @@
-packages:
-  - apps/*
-  - packages/*
-allowBuilds:
-  esbuild: true
-storeDir: .pnpm-store
-registry: https://registry.npmjs.org
