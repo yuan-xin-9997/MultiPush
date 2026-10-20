@@ -488,7 +488,7 @@ export default function EditorPage() {
   }
 
   const slashItems: SlashMenuItem[] = editor
-    ? [
+    ? ([
         {
           id: 'paragraph',
           label: '正文',
@@ -505,7 +505,7 @@ export default function EditorPage() {
           group: '基础',
           keywords: ['h1', 'heading', 'title', '标题', '一级'],
           icon: <Heading1 size={17} />,
-          action: withEditor((target) => target.chain().focus().toggleHeading({ level: 1 }).run()),
+          action: withEditor((target) => target.chain().focus().setHeading({ level: 1 }).run()),
         },
         {
           id: 'heading-2',
@@ -514,7 +514,7 @@ export default function EditorPage() {
           group: '基础',
           keywords: ['h2', 'heading', 'title', '标题', '二级'],
           icon: <Heading2 size={17} />,
-          action: withEditor((target) => target.chain().focus().toggleHeading({ level: 2 }).run()),
+          action: withEditor((target) => target.chain().focus().setHeading({ level: 2 }).run()),
         },
         {
           id: 'heading-3',
@@ -523,7 +523,7 @@ export default function EditorPage() {
           group: '基础',
           keywords: ['h3', 'heading', 'title', '标题', '三级'],
           icon: <Heading3 size={17} />,
-          action: withEditor((target) => target.chain().focus().toggleHeading({ level: 3 }).run()),
+          action: withEditor((target) => target.chain().focus().setHeading({ level: 3 }).run()),
         },
         {
           id: 'bullet-list',
@@ -532,7 +532,9 @@ export default function EditorPage() {
           group: '列表',
           keywords: ['ul', 'bullet', 'list', '无序', '项目符号'],
           icon: <List size={17} />,
-          action: withEditor((target) => target.chain().focus().toggleBulletList().run()),
+          action: withEditor((target) => {
+            if (!target.isActive('bulletList')) target.chain().focus().toggleBulletList().run()
+          }),
         },
         {
           id: 'ordered-list',
@@ -541,7 +543,9 @@ export default function EditorPage() {
           group: '列表',
           keywords: ['ol', 'ordered', 'number', '有序', '编号'],
           icon: <ListOrdered size={17} />,
-          action: withEditor((target) => target.chain().focus().toggleOrderedList().run()),
+          action: withEditor((target) => {
+            if (!target.isActive('orderedList')) target.chain().focus().toggleOrderedList().run()
+          }),
         },
         {
           id: 'task-list',
@@ -550,7 +554,9 @@ export default function EditorPage() {
           group: '列表',
           keywords: ['todo', 'task', 'check', '待办', '任务', '清单'],
           icon: <ListChecks size={17} />,
-          action: withEditor((target) => target.chain().focus().toggleTaskList().run()),
+          action: withEditor((target) => {
+            if (!target.isActive('taskList')) target.chain().focus().toggleTaskList().run()
+          }),
         },
         {
           id: 'quote',
@@ -559,7 +565,7 @@ export default function EditorPage() {
           group: '插入',
           keywords: ['quote', 'blockquote', '引用', '引述'],
           icon: <Quote size={17} />,
-          action: withEditor((target) => target.chain().focus().toggleBlockquote().run()),
+          action: withEditor((target) => target.chain().focus().setBlockquote().run()),
         },
         {
           id: 'code-block',
@@ -568,7 +574,7 @@ export default function EditorPage() {
           group: '插入',
           keywords: ['code', 'pre', '代码', '代码块'],
           icon: <Code2 size={17} />,
-          action: withEditor((target) => target.chain().focus().toggleCodeBlock().run()),
+          action: withEditor((target) => target.chain().focus().setCodeBlock().run()),
         },
         {
           id: 'divider',
@@ -615,7 +621,7 @@ export default function EditorPage() {
           icon: <Link2 size={17} />,
           action: openLinkDialog,
         },
-      ]
+      ] satisfies SlashMenuItem[]).filter((item) => item.id !== 'table' || !editor.isActive('table'))
     : []
 
   const normalizedSlashQuery = slashMenu?.query.trim().toLowerCase() ?? ''
