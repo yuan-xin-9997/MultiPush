@@ -887,6 +887,220 @@
   flex: 1;
 }
 
+/* ---------- Slash command menu ---------- */
+.editor-slash-menu {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  width: min(318px, calc(100vw - 24px));
+  max-height: min(430px, calc(100vh - 24px));
+  flex-direction: column;
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(31, 35, 41, 0.09);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow:
+    0 24px 64px rgba(24, 31, 38, 0.16),
+    0 3px 10px rgba(24, 31, 38, 0.07);
+  backdrop-filter: blur(16px);
+  animation: editor-slash-pop 0.13s ease-out;
+}
+
+.editor-slash-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid #f1f3f4;
+}
+
+.editor-slash-title {
+  color: var(--ink-2);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.editor-slash-query {
+  max-width: 168px;
+  overflow: hidden;
+  color: #b0b6bd;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-slash-query.has-query {
+  color: var(--brand);
+  font-family: var(--font-mono);
+}
+
+.editor-slash-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0 2px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.editor-slash-group {
+  padding: 8px 10px 4px;
+  color: #a0a7af;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.editor-slash-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.1s ease,
+    color 0.1s ease;
+}
+
+.editor-slash-item:hover,
+.editor-slash-item.is-active {
+  background: #eef8f2;
+}
+
+.editor-slash-item:focus-visible {
+  outline: 2px solid rgba(0, 185, 107, 0.45);
+  outline-offset: -2px;
+}
+
+.editor-slash-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #edf0f1;
+  border-radius: 9px;
+  background: #f7f9f8;
+  color: #59636c;
+  transition:
+    border-color 0.1s ease,
+    background-color 0.1s ease,
+    color 0.1s ease;
+}
+
+.editor-slash-item.is-active .editor-slash-icon {
+  border-color: #c8eedb;
+  background: #ddf4e8;
+  color: var(--brand);
+}
+
+.editor-slash-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.editor-slash-copy strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-slash-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-slash-enter {
+  flex: 0 0 auto;
+  color: var(--brand);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.editor-slash-item.is-active .editor-slash-enter {
+  opacity: 0.7;
+}
+
+.editor-slash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 28px 18px 30px;
+  text-align: center;
+}
+
+.editor-slash-empty > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 3px;
+  place-items: center;
+  border-radius: 10px;
+  background: #f4f6f6;
+  color: #9aa2aa;
+  font-family: var(--font-mono);
+  font-size: 18px;
+}
+
+.editor-slash-empty p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.editor-slash-empty small {
+  color: #b3b9c1;
+  font-size: 10px;
+}
+
+.editor-slash-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px 5px;
+  border-top: 1px solid #f1f3f4;
+  color: #a5abb2;
+  font-size: 9.5px;
+}
+
+@keyframes editor-slash-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-slash-menu {
+    animation: none;
+  }
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1240px) {
   .editor-body {

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
-import { EditorContent, Node, mergeAttributes, useEditor, type Editor } from '@tiptap/react'
+import { EditorContent, Node as TiptapNode, mergeAttributes, useEditor, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
@@ -39,6 +40,9 @@ import {
   ImagePlus,
   Italic,
   Link2,
+  List,
+  ListChecks,
+  ListOrdered,
   LoaderCircle,
   Minus,
   MoreHorizontal,
@@ -91,7 +95,7 @@ const HIGHLIGHT_COLORS = [
   { label: '浅橙', value: '#ffe8cc' },
 ]
 
-const VideoNode = Node.create({
+const VideoNode = TiptapNode.create({
   name: 'video',
   group: 'block',
   atom: true,
@@ -125,6 +129,30 @@ interface OutlineItem {
   pos: number
 }
 
+type SlashGroup = '基础' | '列表' | '插入'
+
+interface SlashMenuItem {
+  id: string
+  label: string
+  description: string
+  group: SlashGroup
+  keywords: string[]
+  icon: ReactNode
+  action: () => void
+}
+
+interface SlashMenuState {
+  from: number
+  to: number
+  parentStart: number
+  query: string
+  selected: number
+  left: number
+  top?: number
+  bottom?: number
+  maxHeight: number
+}
+
 function jsonHasContent(value: RichTextJson | null | undefined): boolean {
   if (!value || typeof value !== 'object') return false
   const content = (value as { content?: unknown }).content
@@ -148,6 +176,36 @@ function buildOutline(editor: Editor): OutlineItem[] {
     }
   })
   return items
+}
+
+function getSlashMenuPosition(editor: Editor) {
+  const selection = window.getSelection()
+  let rect: DOMRect | null = null
+  if (selection?.rangeCount && selection.isCollapsed) {
+    const range = selection.getRangeAt(0)
+    const rects = range.getClientRects()
+    rect = rects.length > 0 ? rects[rects.length - 1] : range.getBoundingClientRect()
+  }
+  if (!rect || (rect.width === 0 && rect.height === 0)) {
+    const anchor = selection?.anchorNode
+    const element = anchor instanceof Element ? anchor : anchor?.parentElement
+    rect = element?.getBoundingClientRect() ?? editor.view.dom.getBoundingClientRect()
+  }
+  const gap = 8
+  const padding = 12
+  const desiredHeight = 430
+  const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - gap - padding)
+  const spaceAbove = Math.max(0, rect.top - gap - padding)
+  const placeBelow = spaceBelow >= Math.min(desiredHeight, 220) || spaceBelow >= spaceAbove
+  const maxHeight = Math.max(120, Math.min(desiredHeight, placeBelow ? spaceBelow : spaceAbove))
+  const width = Math.min(318, window.innerWidth - 24)
+  const left = Math.max(padding, Math.min(rect.left, window.innerWidth - width - padding))
+  if (placeBelow) {
+    const top = Math.max(padding, Math.min(rect.bottom + gap, window.innerHeight - maxHeight - padding))
+    return { left, top, maxHeight }
+  }
+  const bottom = Math.max(padding, window.innerHeight - rect.top + gap)
+  return { left, bottom, maxHeight }
 }
 
 interface ToolbarButtonProps {
@@ -205,6 +263,7 @@ export default function EditorPage() {
   const [deleting, setDeleting] = useState(false)
   const [uploading, setUploading] = useState<{ label: string; percent: number } | null>(null)
   const [coverUploading, setCoverUploading] = useState(false)
+  const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null)
 
   const initializedIdRef = useRef<string | null>(null)
   const initializedContentRef = useRef(false)
@@ -223,6 +282,9 @@ export default function EditorPage() {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
+  const slashMenuRef = useRef<SlashMenuState | null>(null)
+  const slashMenuElementRef = useRef<HTMLDivElement | null>(null)
+  const slashKeyDownRef = useRef<((event: KeyboardEvent, view: Editor['view']) => boolean) | null>(null)
 
   titleRef.current = title
   bookIdRef.current = bookId
@@ -245,6 +307,67 @@ export default function EditorPage() {
   const syncOutline = useCallback((target: Editor) => {
     setOutline(buildOutline(target))
   }, [])
+
+  const updateSlashMenu = useCallback((next: SlashMenuState | null) => {
+    slashMenuRef.current = next
+    setSlashMenu(next)
+  }, [])
+
+  const openSlashMenu = useCallback(
+    (target: Editor, from: number) => {
+      const { selection } = target.state
+      const position = getSlashMenuPosition(target)
+      updateSlashMenu({
+        from,
+        to: selection.from,
+        parentStart: selection.$from.start(),
+        query: '',
+        selected: 0,
+        ...position,
+      })
+    },
+    [updateSlashMenu],
+  )
+
+  const syncSlashQuery = useCallback(
+    (target: Editor) => {
+      const current = slashMenuRef.current
+      if (!current) return
+      const { selection } = target.state
+      if (!selection.empty) {
+        updateSlashMenu(null)
+        return
+      }
+      const $from = selection.$from
+      if ($from.start() !== current.parentStart || selection.from <= current.from) {
+        updateSlashMenu(null)
+        return
+      }
+      const offset = current.from - current.parentStart
+      const parentOffset = $from.parentOffset
+      if (offset < 0 || parentOffset < offset + 1) {
+        updateSlashMenu(null)
+        return
+      }
+      const content = $from.parent.textBetween(offset, parentOffset, undefined, '\ufffc')
+      if (!content.startsWith('/')) {
+        updateSlashMenu(null)
+        return
+      }
+      const query = content.slice(1)
+      if (query.length > 24 || /[\n\r]/.test(query)) {
+        updateSlashMenu(null)
+        return
+      }
+      updateSlashMenu({
+        ...current,
+        query,
+        to: selection.from,
+        selected: query === current.query ? current.selected : 0,
+      })
+    },
+    [updateSlashMenu],
+  )
 
   const uploadFiles = useCallback(
     async (files: File[], kind: 'image' | 'video', position?: number) => {
@@ -306,7 +429,7 @@ export default function EditorPage() {
       TaskList,
       TaskItem.configure({ nested: true }),
       Placeholder.configure({
-        placeholder: '开始书写，或粘贴 Markdown / 图片…',
+        placeholder: '输入 / 唤起快捷指令，或粘贴 Markdown / 图片…',
         emptyEditorClass: 'is-editor-empty',
       }),
       Highlight.configure({ multicolor: true }),
@@ -320,6 +443,9 @@ export default function EditorPage() {
       attributes: {
         class: 'tiptap editor-prose',
         spellcheck: 'false',
+      },
+      handleKeyDown(view, event) {
+        return slashKeyDownRef.current?.(event, view) ?? false
       },
       handlePaste(_view, event) {
         const files = Array.from(event.clipboardData?.files ?? []).filter(
@@ -348,12 +474,260 @@ export default function EditorPage() {
     onUpdate({ editor: instance }) {
       editorRef.current = instance
       syncOutline(instance)
+      syncSlashQuery(instance)
       markDirty()
     },
     onSelectionUpdate({ editor: instance }) {
       editorRef.current = instance
     },
   })
+
+  const withEditor = (action: (target: Editor) => void) => () => {
+    const target = editorRef.current
+    if (target) action(target)
+  }
+
+  const slashItems: SlashMenuItem[] = editor
+    ? [
+        {
+          id: 'paragraph',
+          label: '正文',
+          description: '普通段落文本',
+          group: '基础',
+          keywords: ['text', 'paragraph', 'p', '正文', '段落'],
+          icon: <Pilcrow size={17} />,
+          action: withEditor((target) => target.chain().focus().setParagraph().run()),
+        },
+        {
+          id: 'heading-1',
+          label: '一级标题',
+          description: '用于文章主章节',
+          group: '基础',
+          keywords: ['h1', 'heading', 'title', '标题', '一级'],
+          icon: <Heading1 size={17} />,
+          action: withEditor((target) => target.chain().focus().toggleHeading({ level: 1 }).run()),
+        },
+        {
+          id: 'heading-2',
+          label: '二级标题',
+          description: '用于小节标题',
+          group: '基础',
+          keywords: ['h2', 'heading', 'title', '标题', '二级'],
+          icon: <Heading2 size={17} />,
+          action: withEditor((target) => target.chain().focus().toggleHeading({ level: 2 }).run()),
+        },
+        {
+          id: 'heading-3',
+          label: '三级标题',
+          description: '用于更细的层级',
+          group: '基础',
+          keywords: ['h3', 'heading', 'title', '标题', '三级'],
+          icon: <Heading3 size={17} />,
+          action: withEditor((target) => target.chain().focus().toggleHeading({ level: 3 }).run()),
+        },
+        {
+          id: 'bullet-list',
+          label: '无序列表',
+          description: '创建项目符号列表',
+          group: '列表',
+          keywords: ['ul', 'bullet', 'list', '无序', '项目符号'],
+          icon: <List size={17} />,
+          action: withEditor((target) => target.chain().focus().toggleBulletList().run()),
+        },
+        {
+          id: 'ordered-list',
+          label: '有序列表',
+          description: '创建带编号的列表',
+          group: '列表',
+          keywords: ['ol', 'ordered', 'number', '有序', '编号'],
+          icon: <ListOrdered size={17} />,
+          action: withEditor((target) => target.chain().focus().toggleOrderedList().run()),
+        },
+        {
+          id: 'task-list',
+          label: '待办列表',
+          description: '创建可勾选的任务清单',
+          group: '列表',
+          keywords: ['todo', 'task', 'check', '待办', '任务', '清单'],
+          icon: <ListChecks size={17} />,
+          action: withEditor((target) => target.chain().focus().toggleTaskList().run()),
+        },
+        {
+          id: 'quote',
+          label: '引用',
+          description: '突出引用或摘录内容',
+          group: '插入',
+          keywords: ['quote', 'blockquote', '引用', '引述'],
+          icon: <Quote size={17} />,
+          action: withEditor((target) => target.chain().focus().toggleBlockquote().run()),
+        },
+        {
+          id: 'code-block',
+          label: '代码块',
+          description: '插入等宽代码片段',
+          group: '插入',
+          keywords: ['code', 'pre', '代码', '代码块'],
+          icon: <Code2 size={17} />,
+          action: withEditor((target) => target.chain().focus().toggleCodeBlock().run()),
+        },
+        {
+          id: 'divider',
+          label: '分割线',
+          description: '在内容之间添加横线',
+          group: '插入',
+          keywords: ['hr', 'line', 'divider', '分割线', '横线'],
+          icon: <Minus size={17} />,
+          action: withEditor((target) => target.chain().focus().setHorizontalRule().run()),
+        },
+        {
+          id: 'table',
+          label: '表格',
+          description: '插入 3×3 表格',
+          group: '插入',
+          keywords: ['table', 'grid', '表格', '行列'],
+          icon: <Table2 size={17} />,
+          action: withEditor((target) => target.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()),
+        },
+        {
+          id: 'image',
+          label: '图片',
+          description: '上传并插入图片',
+          group: '插入',
+          keywords: ['image', 'img', 'photo', '图片', '照片', '插图'],
+          icon: <ImagePlus size={17} />,
+          action: () => imageInputRef.current?.click(),
+        },
+        {
+          id: 'video',
+          label: '视频',
+          description: '上传并插入视频',
+          group: '插入',
+          keywords: ['video', 'movie', '视频', '短片'],
+          icon: <Video size={17} />,
+          action: () => videoInputRef.current?.click(),
+        },
+        {
+          id: 'link',
+          label: '链接',
+          description: '插入网址或为选中文字添加链接',
+          group: '插入',
+          keywords: ['link', 'url', 'href', '链接', '网址'],
+          icon: <Link2 size={17} />,
+          action: openLinkDialog,
+        },
+      ]
+    : []
+
+  const normalizedSlashQuery = slashMenu?.query.trim().toLowerCase() ?? ''
+  const slashResults = normalizedSlashQuery
+    ? slashItems.filter((item) =>
+        `${item.label} ${item.description} ${item.keywords.join(' ')}`.toLowerCase().includes(normalizedSlashQuery),
+      )
+    : slashItems
+  const slashSelected = slashMenu ? Math.min(slashMenu.selected, Math.max(0, slashResults.length - 1)) : 0
+  const slashOpen = slashMenu !== null
+
+  function runSlashItem(item: SlashMenuItem) {
+    const activeEditor = editorRef.current
+    const current = slashMenuRef.current
+    if (!activeEditor || !current) return
+    const to = Math.max(current.from + 1, activeEditor.state.selection.from)
+    updateSlashMenu(null)
+    activeEditor.chain().focus().deleteRange({ from: current.from, to }).run()
+    item.action()
+  }
+
+  slashKeyDownRef.current = (event, view) => {
+    if (event.isComposing || event.keyCode === 229) return false
+    const viewEditor = (view.dom as HTMLElement & { editor?: Editor }).editor
+    if (viewEditor) editorRef.current = viewEditor
+    const activeEditor = viewEditor ?? editorRef.current
+    if (!activeEditor || !activeEditor.isEditable || content?.deletedAt) return false
+
+    const current = slashMenuRef.current
+    if (current) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        updateSlashMenu(null)
+        return true
+      }
+      const selected = Math.min(current.selected, Math.max(0, slashResults.length - 1))
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (slashResults.length === 0) {
+          updateSlashMenu(null)
+          return false
+        }
+        event.preventDefault()
+        const delta = event.key === 'ArrowDown' ? 1 : -1
+        updateSlashMenu({
+          ...current,
+          selected: (selected + delta + slashResults.length) % slashResults.length,
+        })
+        return true
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        if (event.key === 'Enter' && event.shiftKey) {
+          updateSlashMenu(null)
+          return false
+        }
+        if (slashResults.length === 0) {
+          updateSlashMenu(null)
+          return false
+        }
+        event.preventDefault()
+        runSlashItem(slashResults[selected])
+        return true
+      }
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End') {
+        updateSlashMenu(null)
+        return false
+      }
+      if ((event.key === ' ' || event.key === 'Backspace') && !current.query) {
+        updateSlashMenu(null)
+        return false
+      }
+      if (event.key === '/') {
+        updateSlashMenu(null)
+        return false
+      }
+      return false
+    }
+
+    if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return false
+    const { selection } = activeEditor.state
+    if (!selection.empty) return false
+    const { $from } = selection
+    if (activeEditor.isActive('codeBlock') || activeEditor.isActive('code')) return false
+    const before = $from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')
+    if (before && !/\s$/.test(before)) return false
+
+    event.preventDefault()
+    const from = $from.pos
+    const inserted = activeEditor.chain().focus().insertContent('/').run()
+    if (inserted) openSlashMenu(activeEditor, from)
+    return true
+  }
+
+  useEffect(() => {
+    if (!slashOpen) return
+    const close = () => updateSlashMenu(null)
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && slashMenuElementRef.current?.contains(event.target)) return
+      close()
+    }
+    const handleScroll = (event: Event) => {
+      if (event.target instanceof Node && slashMenuElementRef.current?.contains(event.target)) return
+      close()
+    }
+    window.addEventListener('scroll', handleScroll, true)
+    window.addEventListener('resize', close)
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true)
+      window.removeEventListener('resize', close)
+      document.removeEventListener('pointerdown', handlePointerDown, true)
+    }
+  }, [slashOpen, updateSlashMenu])
 
   const saveNow = useCallback(async (force = false): Promise<boolean> => {
     const activeEditor = editorRef.current
@@ -411,6 +785,7 @@ export default function EditorPage() {
   // Load document.
   useEffect(() => {
     let cancelled = false
+    updateSlashMenu(null)
     initializedIdRef.current = null
     initializedContentRef.current = false
     setReady(false)
@@ -672,27 +1047,28 @@ export default function EditorPage() {
   }
 
   function openLinkDialog() {
-    const href = editor?.getAttributes('link').href
+    const href = editorRef.current?.getAttributes('link').href
     setLinkUrl(typeof href === 'string' ? href : '')
     setLinkOpen(true)
   }
 
   function applyLink() {
-    if (!editor) return
+    const target = editorRef.current
+    if (!target) return
     const normalized = normalizeUrl(linkUrl)
     if (!normalized) {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run()
+      target.chain().focus().extendMarkRange('link').unsetLink().run()
       setLinkOpen(false)
       return
     }
-    if (editor.state.selection.empty) {
-      editor
+    if (target.state.selection.empty) {
+      target
         .chain()
         .focus()
         .insertContent({ type: 'text', text: normalized, marks: [{ type: 'link', attrs: { href: normalized } }] })
         .run()
     } else {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: normalized }).run()
+      target.chain().focus().extendMarkRange('link').setLink({ href: normalized }).run()
     }
     setLinkOpen(false)
   }
@@ -1229,6 +1605,72 @@ export default function EditorPage() {
           </aside>
         ) : null}
       </div>
+
+      {slashMenu && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={slashMenuElementRef}
+              className="editor-slash-menu"
+              style={{
+                left: slashMenu.left,
+                top: slashMenu.top,
+                bottom: slashMenu.bottom,
+                maxHeight: slashMenu.maxHeight,
+              }}
+              role="listbox"
+              aria-label="快捷插入"
+            >
+              <div className="editor-slash-head">
+                <span className="editor-slash-title">快捷插入</span>
+                <span className={cn('editor-slash-query', slashMenu.query && 'has-query')}>
+                  {slashMenu.query ? `/${slashMenu.query}` : '输入以筛选'}
+                </span>
+              </div>
+              <div className="editor-slash-list">
+                {slashResults.length === 0 ? (
+                  <div className="editor-slash-empty">
+                    <span>/</span>
+                    <p>没有匹配的指令</p>
+                    <small>试试「标题」「列表」「表格」</small>
+                  </div>
+                ) : (
+                  slashResults.map((item, index) => {
+                    const showGroup = index === 0 || slashResults[index - 1].group !== item.group
+                    return (
+                      <Fragment key={item.id}>
+                        {showGroup ? <div className="editor-slash-group">{item.group}</div> : null}
+                        <button
+                          type="button"
+                          className={cn('editor-slash-item', index === slashSelected && 'is-active')}
+                          role="option"
+                          aria-selected={index === slashSelected}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onMouseEnter={() => {
+                            if (slashMenu.selected !== index) updateSlashMenu({ ...slashMenu, selected: index })
+                          }}
+                          onClick={() => runSlashItem(item)}
+                        >
+                          <span className="editor-slash-icon">{item.icon}</span>
+                          <span className="editor-slash-copy">
+                            <strong>{item.label}</strong>
+                            <small>{item.description}</small>
+                          </span>
+                          <span className="editor-slash-enter">↵</span>
+                        </button>
+                      </Fragment>
+                    )
+                  })
+                )}
+              </div>
+              <div className="editor-slash-foot">
+                <span>↑↓ 选择</span>
+                <span>↵ 插入</span>
+                <span>Esc 关闭</span>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       <Modal
         open={linkOpen}
