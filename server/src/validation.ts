@@ -100,7 +100,7 @@ export const favoriteBodySchema = z.object({
   favorite: z.boolean(),
 })
 
-const platformSchema = z.enum(['wechat', 'xiaohongshu', 'zhihu'])
+const platformSchema = z.enum(['wechat', 'xiaohongshu', 'zhihu', 'douyin'])
 
 export const renderOptionsSchema = z.object({
   cardStyle: z.enum(['clean', 'warm', 'bold']).optional(),
@@ -120,7 +120,7 @@ export const renderRequestSchema = z.object({
   platforms: z
     .array(platformSchema)
     .min(1, '请至少选择一个平台')
-    .max(3, '最多选择三个平台')
+    .max(4, '最多选择四个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
 })

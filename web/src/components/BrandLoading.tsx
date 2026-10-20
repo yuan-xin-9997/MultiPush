@@ -15,7 +15,7 @@ export default function BrandLoading({ label = '正在进入 MultiPush…' }: Br
           <span>{label}</span>
         </div>
       </div>
-      <p className="brand-loading-note">一次创作 · 三平台适配</p>
+      <p className="brand-loading-note">一次创作 · 四平台适配</p>
     </div>
   )
 }

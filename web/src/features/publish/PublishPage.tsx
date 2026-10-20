@@ -6,6 +6,7 @@ import {
   Clock3,
   FileText,
   LockKeyhole,
+  Music2,
   Rocket,
   Send,
   ShieldCheck,
@@ -22,12 +23,14 @@ const PLATFORM_ICONS = {
   wechat: FileText,
   xiaohongshu: Sparkles,
   zhihu: Send,
+  douyin: Music2,
 } as const
 
 const PLATFORM_CAPABILITIES: Record<string, string[]> = {
   wechat: ['图文消息', '富文本复制', '视频嵌入'],
   xiaohongshu: ['图文卡片', '视频笔记', '话题文案'],
   zhihu: ['专栏文章', 'Markdown', '视频内容'],
+  douyin: ['竖屏图文', '视频笔记', '话题文案'],
 }
 
 export default function PublishPage() {
@@ -64,7 +67,7 @@ export default function PublishPage() {
           </span>
           <h1>让好内容，抵达每一个平台</h1>
           <p>
-            第一版聚焦「智能渲染 + 预览 + 下载」。你可以在渲染工作台把内容适配成公众号、小红书和知乎格式，
+            第一版聚焦「智能渲染 + 预览 + 下载」。你可以在渲染工作台把内容适配成公众号、小红书、知乎与抖音格式，
             下载后手动发布。平台账号连接与一键发布将在下一阶段开放。
           </p>
           <div className="publish-hero-actions">
@@ -96,6 +99,10 @@ export default function PublishPage() {
           <div className="publish-chip publish-chip-three">
             <CheckCircle2 size={15} />
             知乎 Markdown
+          </div>
+          <div className="publish-chip publish-chip-four">
+            <Music2 size={15} />
+            抖音竖屏文案
           </div>
         </div>
       </header>
@@ -166,7 +173,7 @@ export default function PublishPage() {
             <span className="publish-step-num">02</span>
             <div>
               <h3>智能渲染</h3>
-              <p>选择平台，一键生成公众号内联排版、小红书 3:4 卡片与知乎 Markdown。</p>
+              <p>选择平台，一键生成公众号内联排版、小红书 3:4 卡片、知乎 Markdown 与抖音竖屏文案。</p>
             </div>
           </div>
           <span className="publish-step-line" aria-hidden="true" />

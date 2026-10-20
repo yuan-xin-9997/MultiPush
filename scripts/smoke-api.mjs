@@ -120,23 +120,26 @@ async function main() {
     token: userA.token,
     body: {
       contentId,
-      platforms: ['wechat', 'xiaohongshu', 'zhihu'],
+      platforms: ['wechat', 'xiaohongshu', 'zhihu', 'douyin'],
       options: { cardStyle: 'clean', includeTags: true },
     },
   })
   check(rendered.status === 201 || rendered.status === 200, 'render all platforms')
   const results = rendered.data?.render?.results || []
-  check(results.length === 3, 'three platform results returned')
+  check(results.length === 4, 'four platform results returned')
 
   const wechat = results.find((item) => item.platform === 'wechat')
   const xhs = results.find((item) => item.platform === 'xiaohongshu')
   const zhihu = results.find((item) => item.platform === 'zhihu')
+  const douyin = results.find((item) => item.platform === 'douyin')
 
   check(Boolean(wechat?.html?.includes('一次创作')), 'wechat HTML rendered')
   check(Boolean(wechat?.downloads?.length), 'wechat download payload present')
   check(Array.isArray(xhs?.cards) && xhs.cards.length >= 2, 'xiaohongshu cards rendered')
   check(Boolean(xhs?.text), 'xiaohongshu caption rendered')
   check(Boolean(zhihu?.markdown?.includes('#')), 'zhihu markdown rendered')
+  check(Boolean(douyin?.text?.includes('#')), 'douyin caption rendered')
+  check(douyin?.previewMode === 'vertical', 'douyin vertical preview mode')
   check(results.every((item) => item.generatedAt), 'render timestamps present')
   check(results.every((item) => !/<script/i.test(item.html)), 'rendered HTML contains no script tags')
 

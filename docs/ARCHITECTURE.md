@@ -35,7 +35,7 @@ Express (single Node process, 0.0.0.0:34080)
 1. `POST /api/renders` 校验平台列表和内容归属。
 2. 读取 `ContentDetail`（Tiptap JSON + HTML）与用户显示名。
 3. 构造 `RenderInput`：`content`、`platforms`、`options`、`authorName`、`baseUrl`。
-4. `renderPlatforms()` 分派到 `wechat.ts` / `xiaohongshu.ts` / `zhihu.ts`：
+4. `renderPlatforms()` 分派到 `wechat.ts` / `xiaohongshu.ts` / `zhihu.ts` / `douyin.ts`：
    - HTML 清洗（sanitize-html），相对媒体 URL 转绝对；
    - 提取图片/视频、纯文本、字数、标签；
    - 按平台规则排版，生成 `PlatformRender`（HTML、Markdown、文案、卡片数据、下载内容、警告）。

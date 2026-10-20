@@ -163,6 +163,15 @@
   left: 36px;
 }
 
+.publish-chip-four {
+  top: 92px;
+  right: 26px;
+}
+
+.publish-chip-four svg {
+  color: var(--douyin);
+}
+
 /* ---------- Section shared ---------- */
 .publish-section-head {
   display: flex;

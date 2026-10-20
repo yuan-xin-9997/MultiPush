@@ -205,7 +205,7 @@ export const api = {
 }
 
 export function isPlatformId(value: string): value is PlatformId {
-  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu'
+  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'douyin'
 }
 
 /** Make an uploaded relative URL absolute for previews / rendering. */

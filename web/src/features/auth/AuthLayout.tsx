@@ -13,7 +13,7 @@ const FLOW_STEPS = [
   {
     icon: WandSparkles,
     title: '智能渲染',
-    description: '按公众号、小红书、知乎的规则重新排版。',
+    description: '按公众号、小红书、知乎与抖音的规则重新排版。',
   },
   {
     icon: Download,

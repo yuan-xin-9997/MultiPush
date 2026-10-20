@@ -155,7 +155,7 @@ export default function LoginPage() {
         还没有账号？<Link to={registerHref}>立即注册</Link>
       </p>
 
-      <p className="auth-form-footnote">一次创作，渲染适配微信公众号、小红书与知乎。</p>
+      <p className="auth-form-footnote">一次创作，渲染适配微信公众号、小红书、知乎与抖音。</p>
     </AuthLayout>
   )
 }

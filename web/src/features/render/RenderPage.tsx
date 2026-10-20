@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  Bookmark,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -17,16 +18,20 @@ import {
   FileCode2,
   FileJson,
   FileText,
+  Heart,
   History,
   Image as ImageIcon,
   Layers,
   LoaderCircle,
+  MessageCircle,
+  Music2,
   Package,
   Palette,
   Play,
   RefreshCw,
   Search,
   Settings2,
+  Share2,
   Sparkles,
   Trash2,
   TriangleAlert,
@@ -76,7 +81,7 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
 
-const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu']
+const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'douyin']
 
 const DOWNLOAD_LABELS = {
   html: 'HTML 页面',
@@ -141,6 +146,124 @@ function ScaledCard({ card, style, tags }: ScaledCardProps) {
         style={{ transform: `scale(${scale})`, visibility: scale > 0 ? 'visible' : 'hidden' }}
       >
         <XhsCardView card={card} style={style} tags={tags} />
+      </div>
+    </div>
+  )
+}
+
+interface DouyinSceneProps {
+  render: PlatformRender
+  author: string
+  exporting: boolean
+  onCopy: () => void
+}
+
+function hasOnlyTags(line: string): boolean {
+  return /^#\S+(?:\s+#\S+)*$/.test(line)
+}
+
+/** 9:16 vertical feed mockup for Douyin captions and media. */
+function DouyinScene({ render, author, exporting, onCopy }: DouyinSceneProps) {
+  const video = render.videos[0]
+  const cover = render.assets.find((asset) => asset.kind === 'image')?.url
+  const tags = render.meta.tags.slice(0, 5)
+  const body = (render.text ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && line !== render.title.trim() && !hasOnlyTags(line))
+    .join('\n')
+
+  return (
+    <div className="douyin-scene">
+      <div className="douyin-phone-shell">
+        <div className="douyin-media">
+          {video ? (
+            <video
+              className="douyin-media-video"
+              controls
+              playsInline
+              poster={cover ? absoluteUrl(cover) : undefined}
+              src={absoluteUrl(video)}
+            />
+          ) : cover ? (
+            <img className="douyin-media-image" src={absoluteUrl(cover)} alt="" />
+          ) : (
+            <div className="douyin-media-placeholder">
+              <Music2 size={34} />
+              <span>竖屏封面预览</span>
+              <small>补充图片或视频素材后可获得更好的封面效果</small>
+            </div>
+          )}
+
+          <div className="douyin-topbar">
+            <span className="douyin-topbar-back">‹</span>
+            <span className="douyin-topbar-tabs">
+              <em>关注</em>
+              <strong>推荐</strong>
+            </span>
+            <span className="douyin-topbar-search">⌕</span>
+          </div>
+
+          <div className="douyin-rail">
+            <span className="douyin-rail-avatar">{author.slice(0, 1)}</span>
+            <span>
+              <Heart size={18} />
+              <small>2.8w</small>
+            </span>
+            <span>
+              <MessageCircle size={18} />
+              <small>3286</small>
+            </span>
+            <span>
+              <Bookmark size={18} />
+              <small>1.2w</small>
+            </span>
+            <span>
+              <Share2 size={18} />
+              <small>分享</small>
+            </span>
+            <span className="douyin-rail-disc">
+              <Music2 size={15} />
+            </span>
+          </div>
+
+          <div className="douyin-caption">
+            <span className="douyin-author">@{author}</span>
+            <h3>{render.title}</h3>
+            <p>{body || '正文内容会整理为作品文案显示在这里。'}</p>
+            {tags.length > 0 ? (
+              <div className="douyin-tags">
+                {tags.map((tag) => (
+                  <span key={tag}>#{tag}</span>
+                ))}
+              </div>
+            ) : null}
+            <span className="douyin-music">
+              <Music2 size={11} />
+              原声 · {author}
+            </span>
+          </div>
+        </div>
+
+        <div className="douyin-bottom-nav">
+          <span>首页</span>
+          <span>朋友</span>
+          <span className="douyin-publish">+</span>
+          <span>消息</span>
+          <span>我</span>
+        </div>
+      </div>
+
+      <div className="douyin-side-note">
+        <span className="douyin-side-icon">
+          <PlatformGlyph platform="douyin" size={18} />
+        </span>
+        <h3>竖屏文案与素材</h3>
+        <p>抖音以 9:16 竖屏呈现，标题、正文与话题会自动整理为可直接粘贴的作品文案。</p>
+        <button type="button" className="btn btn-sm btn-primary" onClick={onCopy} disabled={exporting}>
+          <Copy size={14} />
+          复制抖音文案
+        </button>
       </div>
     </div>
   )
@@ -556,6 +679,11 @@ export default function RenderPage() {
         toast.success('知乎 Markdown 已复制')
         return
       }
+      if (activeRender.platform === 'douyin') {
+        await copyText(activeRender.text || activeRender.html)
+        toast.success('抖音文案已复制')
+        return
+      }
       const note = activeRender.text || activeRender.cards.flatMap((card) => card.body).join('\n')
       await copyText(note)
       toast.success('小红书文案已复制')
@@ -592,7 +720,7 @@ export default function RenderPage() {
             Render Studio
           </span>
           <h1>智能渲染</h1>
-          <p>一次创作，生成公众号排版、小红书卡片与知乎长文，预览确认后下载发布。</p>
+          <p>一次创作，生成公众号排版、小红书卡片、知乎长文与抖音竖屏文案，预览确认后下载发布。</p>
         </div>
         <div className="render-head-actions">
           <button type="button" className="btn" onClick={() => setHistoryOpen(true)}>
@@ -794,8 +922,8 @@ export default function RenderPage() {
                 <span className="render-empty-spark render-empty-spark-one">✦</span>
                 <span className="render-empty-spark render-empty-spark-two">✦</span>
               </div>
-              <span className="render-empty-eyebrow">ONE SOURCE · THREE FORMATS</span>
-              <h2>把一篇内容，变成三种发布形态</h2>
+              <span className="render-empty-eyebrow">ONE SOURCE · FOUR FORMATS</span>
+              <h2>把一篇内容，变成四种发布形态</h2>
               <p>选择内容与平台，MultiPush 会按照每个平台的阅读习惯重新排版，生成可直接交付的素材。</p>
               <div className="render-empty-actions">
                 {selectedContent ? (
@@ -826,6 +954,10 @@ export default function RenderPage() {
                 <span>
                   <PlatformGlyph platform="zhihu" size={14} />
                   知乎 Markdown 长文
+                </span>
+                <span>
+                  <PlatformGlyph platform="douyin" size={14} />
+                  抖音竖屏文案
                 </span>
               </div>
             </div>
@@ -892,7 +1024,13 @@ export default function RenderPage() {
                   ) : (
                     <span className="render-preview-mode">
                       {activeRender.previewMode === 'article' ? <FileText size={13} /> : <Video size={13} />}
-                      {activeRender.platform === 'wechat' ? '公众号图文' : '知乎专栏文章'}
+                      {activeRender.platform === 'wechat'
+                        ? '公众号图文'
+                        : activeRender.platform === 'douyin'
+                          ? activeRender.videos.length > 0
+                            ? '抖音视频'
+                            : '抖音图文'
+                          : '知乎专栏文章'}
                     </span>
                   )}
                   <span className="render-preview-date">
@@ -911,7 +1049,14 @@ export default function RenderPage() {
                   </div>
                 ) : null}
 
-                {activeRender.platform === 'wechat' ? (
+                {activeRender.platform === 'douyin' ? (
+                  <DouyinScene
+                    render={activeRender}
+                    author={authorLabel}
+                    exporting={Boolean(exporting)}
+                    onCopy={() => void copyCurrent()}
+                  />
+                ) : activeRender.platform === 'wechat' ? (
                   <div className="wechat-scene">
                     <div className="phone-shell">
                       <div className="phone-statusbar">
@@ -1297,7 +1442,9 @@ export default function RenderPage() {
                       ? '复制富文本'
                       : activeRender.platform === 'zhihu'
                         ? '复制 Markdown'
-                        : '复制文案'}
+                        : activeRender.platform === 'douyin'
+                          ? '复制抖音文案'
+                          : '复制文案'}
                   </button>
                   {activeRender.platform === 'xiaohongshu' ? (
                     <>
@@ -1423,7 +1570,7 @@ export default function RenderPage() {
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         title="选择内容"
-        subtitle="从内容库中选择一篇文档，渲染为三个平台的发布格式"
+        subtitle="从内容库中选择一篇文档，渲染为四个平台的发布格式"
         size="wide"
       >
         <div className="render-picker-search">

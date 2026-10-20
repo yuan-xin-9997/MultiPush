@@ -1,4 +1,4 @@
-import { BookOpen, Heart, MessageCircle } from 'lucide-react'
+import { BookOpen, Heart, MessageCircle, Music2 } from 'lucide-react'
 import type { PlatformId } from '@shared/types'
 
 interface PlatformGlyphProps {
@@ -20,6 +20,9 @@ export default function PlatformGlyph({
   }
   if (platform === 'xiaohongshu') {
     return <Heart size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
+  }
+  if (platform === 'douyin') {
+    return <Music2 size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
   }
   return <BookOpen size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
 }

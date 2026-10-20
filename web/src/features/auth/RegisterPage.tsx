@@ -116,7 +116,7 @@ export default function RegisterPage() {
       <div className="auth-form-head">
         <span className="auth-form-eyebrow">开始创作</span>
         <h1>创建你的账号</h1>
-        <p>注册后即可建立知识库、导入旧稿，并尝试三平台渲染。</p>
+        <p>注册后即可建立知识库、导入旧稿，并尝试四平台渲染。</p>
       </div>
 
       {serverError ? (

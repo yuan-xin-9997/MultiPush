@@ -838,7 +838,8 @@
 /* ---------- Phone frames ---------- */
 .wechat-scene,
 .zhihu-scene,
-.xhs-scene {
+.xhs-scene,
+.douyin-scene {
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -1598,6 +1599,304 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+/* ---------- Douyin ---------- */
+.douyin-phone-shell {
+  position: relative;
+  display: flex;
+  width: 352px;
+  height: min(694px, calc(100vh - 265px));
+  min-height: 540px;
+  flex: 0 0 auto;
+  flex-direction: column;
+  overflow: hidden;
+  border: 8px solid #0d0e12;
+  border-radius: 39px;
+  background: #0b0c0f;
+  box-shadow:
+    0 26px 60px rgba(15, 17, 21, 0.28),
+    0 2px 0 rgba(255, 255, 255, 0.08) inset;
+}
+
+.douyin-phone-shell::before {
+  content: '';
+  position: absolute;
+  z-index: 9;
+  top: 6px;
+  left: 50%;
+  width: 96px;
+  height: 4px;
+  border-radius: 999px;
+  background: #3a3d45;
+  transform: translateX(-50%);
+}
+
+.douyin-media {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: #14151a;
+}
+
+.douyin-media-video,
+.douyin-media-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.douyin-media-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 30px;
+  background:
+    radial-gradient(circle at 30% 22%, rgba(254, 44, 85, 0.35), transparent 52%),
+    radial-gradient(circle at 72% 78%, rgba(37, 244, 238, 0.28), transparent 50%),
+    #14151a;
+  color: rgba(255, 255, 255, 0.78);
+  text-align: center;
+}
+
+.douyin-media-placeholder span {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.douyin-media-placeholder small {
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.douyin-topbar {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.douyin-topbar-back {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.douyin-topbar-tabs {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  gap: 16px;
+  font-size: 12px;
+}
+
+.douyin-topbar-tabs em {
+  color: rgba(255, 255, 255, 0.62);
+  font-style: normal;
+}
+
+.douyin-topbar-tabs strong {
+  position: relative;
+  font-weight: 650;
+}
+
+.douyin-topbar-tabs strong::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: -7px;
+  left: 4px;
+  height: 2px;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.douyin-topbar-search {
+  font-size: 17px;
+}
+
+.douyin-rail {
+  position: absolute;
+  z-index: 4;
+  right: 10px;
+  bottom: 148px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+  color: #fff;
+}
+
+.douyin-rail > span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.douyin-rail small {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 7.5px;
+  font-weight: 600;
+}
+
+.douyin-rail-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 2px;
+  place-items: center;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  background: #fe2c55;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.douyin-rail-disc {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(20, 21, 26, 0.72);
+  animation: douyin-disc-spin 6s linear infinite;
+}
+
+@keyframes douyin-disc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.douyin-caption {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 52px 62px 16px 14px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.36) 62%, transparent);
+  color: #fff;
+}
+
+.douyin-author {
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.douyin-caption h3 {
+  margin-top: 6px;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.douyin-caption p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 5px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 9.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.douyin-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.douyin-tags span {
+  color: #8ce9ef;
+  font-size: 9px;
+}
+
+.douyin-music {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 8.5px;
+}
+
+.douyin-bottom-nav {
+  display: flex;
+  height: 48px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-around;
+  background: #0b0c0f;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 8.5px;
+}
+
+.douyin-publish {
+  display: grid;
+  width: 40px;
+  height: 26px;
+  place-items: center;
+  border-radius: 7px;
+  background: linear-gradient(90deg, #25f4ee 0%, #fff 50%, #fe2c55 100%);
+  color: #0b0c0f;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.douyin-side-note {
+  width: 228px;
+  flex: 0 0 auto;
+  padding-top: 22px;
+}
+
+.douyin-side-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  background: #fff0f3;
+  color: #e11d3f;
+}
+
+.douyin-side-note h3 {
+  margin-top: 12px;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.douyin-side-note p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.7;
+}
+
+.douyin-side-note .btn {
+  margin-top: 13px;
 }
 
 /* ---------- Delivery side panel ---------- */
@@ -2745,12 +3044,14 @@
 
   .wechat-side-note,
   .zhihu-side-note,
-  .xhs-side-stack {
+  .xhs-side-stack,
+  .douyin-side-note {
     display: none;
   }
 
   .phone-shell,
-  .xhs-phone-shell {
+  .xhs-phone-shell,
+  .douyin-phone-shell {
     width: 366px;
   }
 
@@ -2961,7 +3262,8 @@
   }
 
   .phone-shell,
-  .xhs-phone-shell {
+  .xhs-phone-shell,
+  .douyin-phone-shell {
     width: min(362px, calc(100vw - 34px));
     height: 640px;
     min-height: 0;

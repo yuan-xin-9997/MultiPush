@@ -37,7 +37,7 @@ function content(overrides: Partial<ContentDetail> = {}): ContentDetail {
 
 const options: RenderOptions = { cardStyle: 'clean', includeTags: true }
 
-function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu')[], overrides: Partial<ContentDetail> = {}) {
+function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'douyin')[], overrides: Partial<ContentDetail> = {}) {
   return {
     content: content(overrides),
     platforms,
@@ -48,9 +48,9 @@ function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu')[], overrides: Par
 }
 
 describe('renderPlatforms', () => {
-  it('renders all three platforms in request order', async () => {
-    const results = await renderPlatforms(input(['zhihu', 'wechat', 'xiaohongshu']))
-    expect(results.map((result) => result.platform)).toEqual(['zhihu', 'wechat', 'xiaohongshu'])
+  it('renders all four platforms in request order', async () => {
+    const results = await renderPlatforms(input(['douyin', 'zhihu', 'wechat', 'xiaohongshu']))
+    expect(results.map((result) => result.platform)).toEqual(['douyin', 'zhihu', 'wechat', 'xiaohongshu'])
     expect(results.every((result) => result.generatedAt)).toBe(true)
     expect(results.every((result) => result.meta.wordCount > 0)).toBe(true)
   })
@@ -109,6 +109,28 @@ describe('renderPlatforms', () => {
     expect(result.downloads[1].content).toContain('核心流程')
   })
 
+  it('renders Douyin caption, hashtags and vertical preview', async () => {
+    const [result] = await renderPlatforms(input(['douyin']))
+    expect(result.platform).toBe('douyin')
+    expect(result.previewMode).toBe('vertical')
+    expect(result.title.length).toBeLessThanOrEqual(55)
+    expect(result.text).toContain('#内容创作')
+    expect(result.text).toContain('一次创作，多平台发布')
+    expect(result.downloads.map((download) => download.kind)).toEqual(['text', 'html', 'json'])
+    expect(result.downloads[1].content).toContain('<!DOCTYPE html>')
+    expect(result.warnings.some((warning) => warning.includes('视频'))).toBe(true)
+  })
+
+  it('switches Douyin warnings to the video recommendation when a video exists', async () => {
+    const [result] = await renderPlatforms(
+      input(['douyin'], {
+        contentHtml: '<p>视频教程</p><video src="/uploads/demo.mp4" poster="/uploads/cover.png"></video>',
+      }),
+    )
+    expect(result.videos[0]).toBe('http://192.168.0.111:34080/uploads/demo.mp4')
+    expect(result.warnings.some((warning) => warning.includes('视频版本'))).toBe(true)
+  })
+
   it('sanitizes scripts and javascript URLs', async () => {
     const [result] = await renderPlatforms(
       input(['wechat'], {
@@ -122,17 +144,18 @@ describe('renderPlatforms', () => {
 
   it('handles empty content without throwing', async () => {
     const results = await renderPlatforms(
-      input(['wechat', 'xiaohongshu', 'zhihu'], {
+      input(['wechat', 'xiaohongshu', 'zhihu', 'douyin'], {
         title: '空文档',
         contentHtml: '',
         contentJson: {},
         tags: [],
       }),
     )
-    expect(results).toHaveLength(3)
+    expect(results).toHaveLength(4)
     expect(results[0].html).toContain('暂无正文')
     expect(results[1].cards.length).toBeGreaterThanOrEqual(2)
     expect(results[2].markdown).toContain('# 空文档')
+    expect(results[3].text).toContain('空文档')
   })
 })
 

@@ -6,13 +6,13 @@
  * dependencies so it can be used in either environment.
  */
 
-export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu'
+export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'douyin'
 
 export type ContentStatus = 'draft' | 'ready'
 
 export type MediaKind = 'image' | 'video'
 
-export type RenderPreviewMode = 'article' | 'cards' | 'video'
+export type RenderPreviewMode = 'article' | 'cards' | 'video' | 'vertical'
 
 export interface PlatformInfo {
   id: PlatformId
@@ -63,6 +63,17 @@ export const PLATFORMS: PlatformInfo[] = [
     contentTypes: ['image-text', 'video'],
     highlight: '专栏长文 · Markdown · 引用与代码块',
     limits: { titleMax: 100, bodyMax: 50000, imageMax: 200 },
+  },
+  {
+    id: 'douyin',
+    name: '抖音',
+    shortName: '抖音',
+    description: '生成抖音竖屏图文 / 视频笔记文案，适配标题、正文与话题标签，配套 HTML 与 JSON。',
+    color: '#fe2c55',
+    softColor: '#fff0f3',
+    contentTypes: ['image-text', 'video'],
+    highlight: '竖屏封面 · 话题文案 · 视频笔记',
+    limits: { titleMax: 55, bodyMax: 1000, imageMax: 35 },
   },
 ]
 
@@ -279,4 +290,4 @@ export interface ApiErrorBody {
   issues?: Array<{ path: string; message: string }>
 }
 
-export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu']
+export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'douyin']
