@@ -1,0 +1,26 @@
+{
+  "name": "multipush",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MultiPush - 多平台智能发布系统",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c green,cyan \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web && npm run build -w server",
+    "build:web": "npm run build -w web",
+    "build:server": "npm run build -w server",
+    "start": "npm run start -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "test": "npm run test -w server",
+    "smoke": "node scripts/smoke-api.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

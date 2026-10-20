@@ -1,0 +1,14 @@
+{
+  "name": "MultiPush 多平台智能发布系统",
+  "short_name": "MultiPush",
+  "description": "一次创作，智能渲染适配微信公众平台、小红书、知乎。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#00b96b",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/favicon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/favicon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

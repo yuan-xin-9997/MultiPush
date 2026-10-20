@@ -1,0 +1,44 @@
+[Unit]
+Description=MultiPush multi-platform publishing service
+Documentation=https://github.com/yuan-xin-9997/MultiPush/blob/main/docs/DEPLOYMENT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jenkins
+Group=jenkins
+WorkingDirectory=/opt/MultiPush
+
+Environment=HOST=0.0.0.0
+Environment=PORT=34080
+Environment=NODE_ENV=production
+Environment=DATA_DIR=/opt/MultiPush/.data
+Environment=WEB_DIST=/opt/MultiPush/web/dist
+EnvironmentFile=-/opt/MultiPush/.env
+
+ExecStart=/usr/bin/node /opt/MultiPush/server/dist/index.js
+
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGTERM
+SyslogIdentifier=multipush
+
+# The service only needs to write DATA_DIR (SQLite, uploads, JWT secret).
+# Application and web assets stay read-only at runtime.
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/opt/MultiPush/.data
+
+[Install]
+WantedBy=multi-user.target

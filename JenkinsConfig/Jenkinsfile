@@ -1,0 +1,117 @@
+pipeline {
+    agent { label 'built-in' }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+        disableConcurrentBuilds()
+        timestamps()
+        timeout(time: 45, unit: 'MINUTES')
+        skipDefaultCheckout()
+    }
+
+    triggers {
+        pollSCM('H/30 * * * *')
+    }
+
+    environment {
+        DEPLOY_ROOT  = '/opt/MultiPush'
+        SERVICE_NAME = 'multipush.service'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh 'git rev-parse --short HEAD'
+            }
+        }
+
+        stage('Install') {
+            steps {
+                sh '''
+                    set -euo pipefail
+                    test -f package-lock.json || {
+                        echo 'ERROR: package-lock.json 缺失，npm ci 需要已提交的 lockfile' >&2
+                        exit 1
+                    }
+                    node --version
+                    npm --version
+                    npm ci
+                '''
+            }
+        }
+
+        stage('Verify') {
+            steps {
+                sh 'npm run typecheck'
+                sh 'npm test'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'npm run build'
+                sh 'bash JenkinsConfig/deploy.sh prepare'
+            }
+        }
+
+        stage('Stop service') {
+            steps {
+                sh '''
+                    set -euo pipefail
+                    sudo -n systemctl stop multipush.service || true
+                    if systemctl is-active --quiet multipush.service; then
+                        echo 'ERROR: multipush.service 停止失败，仍处于运行状态' >&2
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh 'bash JenkinsConfig/deploy.sh deploy'
+            }
+        }
+
+        stage('Start & Health') {
+            steps {
+                sh '''
+                    set -euo pipefail
+                    sudo -n systemctl start multipush.service
+                    node JenkinsConfig/health.mjs
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "MultiPush ${env.BUILD_NUMBER} 部署成功：${env.DEPLOY_ROOT}"
+            sh '''
+                set +e
+                echo '--- 已部署提交 ---'
+                cat /opt/MultiPush/DEPLOYED_COMMIT
+                echo '--- 服务状态 ---'
+                systemctl is-active multipush.service
+            '''
+        }
+        failure {
+            sh '''
+                set +e
+                echo '============================================================'
+                echo '构建或部署失败。排查命令：'
+                echo '  sudo journalctl -u multipush.service -n 100 --no-pager'
+                echo '  sudo systemctl status multipush.service --no-pager -l'
+                echo '  curl -v http://127.0.0.1:34080/api/health'
+                echo '============================================================'
+                echo '--- systemctl status ---'
+                sudo -n systemctl status multipush.service --no-pager -l
+                echo '--- journalctl (last 100 lines) ---'
+                sudo -n journalctl -u multipush.service -n 100 --no-pager
+                echo '--- deployed commit ---'
+                cat /opt/MultiPush/DEPLOYED_COMMIT
+            '''
+        }
+    }
+}
