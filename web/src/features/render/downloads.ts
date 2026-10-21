@@ -239,29 +239,65 @@ function assetFilename(asset: AssetRef, index: number, blob: Blob, url: string):
   return `${number}-${base}.${assetExtension(blob, url, asset.kind)}`
 }
 
+const ASSET_FETCH_TIMEOUT_MS = 20_000
+const ASSET_FETCH_CONCURRENCY = 3
+
+async function fetchAssetBlob(url: string): Promise<Blob> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ASSET_FETCH_TIMEOUT_MS)
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok) throw new Error(`素材请求失败：${response.status}`)
+    return await response.blob()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function addAssetsToZip(
   zip: JSZip,
   assets: AssetRef[],
   folder: string,
   onProgress?: ProgressReporter,
 ): Promise<number> {
+  const total = assets.length
+  if (total === 0) return 0
+
   let skipped = 0
-  for (let index = 0; index < assets.length; index += 1) {
-    const asset = assets[index]
-    if (!asset) continue
-    onProgress?.(`正在获取素材 ${index + 1}/${assets.length}…`)
-    try {
-      const url = absoluteUrl(asset.url)
-      const response = await fetch(url)
-      if (!response.ok) throw new Error(`素材请求失败：${response.status}`)
-      const blob = await response.blob()
-      const typeFolder = asset.kind === 'video' ? '视频' : '图片'
-      zip.file(`${folder}/${typeFolder}/${assetFilename(asset, index, blob, url)}`, blob)
-    } catch {
-      // Assets are best-effort: the archive must still be downloadable.
-      skipped += 1
+  let completed = 0
+  let cursor = 0
+  onProgress?.(`正在获取素材 0/${total}…`)
+
+  // Fetch a few assets at a time and always settle: a stalled remote file must
+  // never leave the ZIP download hanging forever.
+  const worker = async (): Promise<void> => {
+    while (cursor < total) {
+      const index = cursor
+      cursor += 1
+      const asset = assets[index]
+      if (!asset) continue
+      try {
+        const url = absoluteUrl(asset.url)
+        const blob = await fetchAssetBlob(url)
+        const typeFolder = asset.kind === 'video' ? '视频' : '图片'
+        // Images and videos are already compressed; storing them avoids a
+        // slow, pointless DEFLATE pass over tens of megabytes.
+        zip.file(`${folder}/${typeFolder}/${assetFilename(asset, index, blob, url)}`, blob, {
+          compression: 'STORE',
+        })
+      } catch {
+        // Assets are best-effort: the archive must still be downloadable.
+        skipped += 1
+      } finally {
+        completed += 1
+        onProgress?.(`正在获取素材 ${completed}/${total}…`)
+      }
     }
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(ASSET_FETCH_CONCURRENCY, total) }, () => worker()),
+  )
   return skipped
 }
 
@@ -307,7 +343,7 @@ export async function buildXhsZip(
   const folder = '小红书'
 
   for (const image of cards) {
-    zip.file(`${folder}/卡片/${image.filename}`, image.blob)
+    zip.file(`${folder}/卡片/${image.filename}`, image.blob, { compression: 'STORE' })
   }
   zip.file(`${folder}/文案.txt`, xhsNoteText(render))
   zip.file(`${folder}/笔记.json`, xhsNoteJson(render))
@@ -352,7 +388,7 @@ export async function buildAllZip(
 
     if (render.platform === 'xiaohongshu' && xhsCards.length > 0) {
       for (const image of xhsCards) {
-        zip.file(`${folder}/卡片/${image.filename}`, image.blob)
+        zip.file(`${folder}/卡片/${image.filename}`, image.blob, { compression: 'STORE' })
       }
     }
 

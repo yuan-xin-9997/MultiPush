@@ -71,7 +71,9 @@ export function downloadBlob(filename: string, blob: Blob): void {
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 2000)
+  // Large archives can take a while to be picked up by the browser's download
+  // manager. Revoking too early can leave the download stuck with no progress.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 export function downloadText(filename: string, content: string, mimeType = 'text/plain;charset=utf-8'): void {

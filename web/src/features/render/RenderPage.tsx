@@ -108,6 +108,26 @@ function renderSignature(contentId: string | null | undefined, platforms: Platfo
   })
 }
 
+const IMAGE_WAIT_TIMEOUT_MS = 15_000
+const FONT_WAIT_TIMEOUT_MS = 4_000
+const CARD_CAPTURE_TIMEOUT_MS = 30_000
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs)
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        window.clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
 function waitForImages(node: HTMLElement): Promise<void> {
   const images = Array.from(node.querySelectorAll('img'))
   return Promise.all(
@@ -118,11 +138,22 @@ function waitForImages(node: HTMLElement): Promise<void> {
             resolve()
             return
           }
-          image.addEventListener('load', () => resolve(), { once: true })
-          image.addEventListener('error', () => resolve(), { once: true })
+          let settled = false
+          const finish = () => {
+            if (settled) return
+            settled = true
+            window.clearTimeout(timer)
+            image.removeEventListener('load', finish)
+            image.removeEventListener('error', finish)
+            resolve()
+          }
+          // A broken or stalled image must not block the whole export.
+          const timer = window.setTimeout(finish, IMAGE_WAIT_TIMEOUT_MS)
+          image.addEventListener('load', finish, { once: true })
+          image.addEventListener('error', finish, { once: true })
         }),
     ),
-  ).then(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+  ).then(() => new Promise<void>((resolve) => window.setTimeout(resolve, 0)))
 }
 
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
@@ -566,15 +597,20 @@ export default function RenderPage() {
       const node = cardNodeRefs.current.get(card.id)
       if (!node) return null
       try {
-        await document.fonts.ready
+        await withTimeout(document.fonts.ready.then(() => undefined), FONT_WAIT_TIMEOUT_MS, '字体加载超时')
         await waitForImages(node)
-        const dataUrl = await toPng(node, {
-          width: 540,
-          height: 720,
-          pixelRatio: 2,
-          cacheBust: true,
-          backgroundColor: cardStyle === 'bold' ? '#17191f' : cardStyle === 'warm' ? '#fff7ec' : '#f4faf6',
-        })
+        const dataUrl = await withTimeout(
+          toPng(node, {
+            width: 540,
+            height: 720,
+            pixelRatio: 2,
+            // Uploads are immutable and served with a one-year cache. Busting
+            // the cache here re-downloaded every photo once per card.
+            backgroundColor: cardStyle === 'bold' ? '#17191f' : cardStyle === 'warm' ? '#fff7ec' : '#f4faf6',
+          }),
+          CARD_CAPTURE_TIMEOUT_MS,
+          '卡片渲染超时',
+        )
         const blob = await dataUrlToBlob(dataUrl)
         return { card, filename: cardImageFilename(card, index), blob }
       } catch (error) {
@@ -611,6 +647,7 @@ export default function RenderPage() {
       const { blob, skippedAssets } = await buildXhsZip(xhsRender, exported, (label, percent) =>
         setExporting({ label, percent: Math.max(60, Math.round(percent ?? 0)) }),
       )
+      setExporting({ label: '正在保存 ZIP…', percent: 99 })
       downloadBlob(`${safeFilename(xhsRender.title, 'multipush')}-小红书素材-${dateStamp()}.zip`, blob)
       toast.success(
         skippedAssets > 0
@@ -632,6 +669,7 @@ export default function RenderPage() {
       const { blob, skippedAssets } = await buildAllZip(results, exported, (label, percent) =>
         setExporting({ label, percent: Math.max(58, Math.round(percent ?? 0)) }),
       )
+      setExporting({ label: '正在保存 ZIP…', percent: 99 })
       downloadBlob(`MultiPush-全部平台-${dateStamp()}.zip`, blob)
       toast.success(
         skippedAssets > 0

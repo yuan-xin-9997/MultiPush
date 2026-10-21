@@ -45,6 +45,11 @@ export function createUploadsRouter(uploadsDir: string): Router {
         headers: {
           'Cache-Control': CACHE_HEADER,
           'X-Content-Type-Options': 'nosniff',
+          // Uploaded files are unauthenticated capability URLs. Allow the
+          // export flow to fetch them when the app is opened through another
+          // hostname (LAN IP, Tailscale, reverse proxy) than the render was
+          // originally generated with.
+          'Access-Control-Allow-Origin': '*',
         },
       },
       (error) => {
