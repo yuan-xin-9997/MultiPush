@@ -218,7 +218,7 @@ export default function RegisterPage() {
             </p>
           ) : (
             <p className="hint" id="register-password-hint">
-              建议使用字母、数字和符号的组合
+                至少 8 个字符，最多 72 字节；建议使用字母、数字和符号的组合
             </p>
           )}
         </div>

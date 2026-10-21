@@ -774,7 +774,7 @@ export default function EditorPage() {
         setSaveState('unsaved')
       }
       setContent((current) => (current ? { ...current, ...updated, contentJson: current.contentJson, contentHtml: current.contentHtml } : current))
-      return true
+      return !stillDirty
     } catch (error) {
       setSaveState('error')
       toast.error(getErrorMessage(error, '保存失败，请重试'))
@@ -947,7 +947,8 @@ export default function EditorPage() {
             : '已保存'
 
   async function goBack() {
-    if (dirtyRef.current) await saveNow(false)
+    if (dirtyRef.current && !(await saveNow(false))) return
+    if (dirtyRef.current) return
     navigate('/library')
   }
 
@@ -1124,7 +1125,7 @@ export default function EditorPage() {
           </button>
           <Logo size={28} subtitle={false} />
           <span className="editor-topbar-divider" />
-          <button type="button" className="editor-crumb" onClick={() => navigate('/library')}>
+          <button type="button" className="editor-crumb" onClick={() => void goBack()}>
             <BookOpen size={14} />
             {content.bookName || '未分组'}
           </button>

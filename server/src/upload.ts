@@ -19,7 +19,6 @@ const MEDIA_TYPES: Record<string, MediaDescriptor> = {
   png: { ext: 'png', kind: 'image', mimeType: 'image/png' },
   webp: { ext: 'webp', kind: 'image', mimeType: 'image/webp' },
   gif: { ext: 'gif', kind: 'image', mimeType: 'image/gif' },
-  svg: { ext: 'svg', kind: 'image', mimeType: 'image/svg+xml' },
   mp4: { ext: 'mp4', kind: 'video', mimeType: 'video/mp4' },
   webm: { ext: 'webm', kind: 'video', mimeType: 'video/webm' },
   mov: { ext: 'mov', kind: 'video', mimeType: 'video/quicktime' },
@@ -84,7 +83,7 @@ export function createUploader(uploadsDir: string) {
       const descriptor = getMediaDescriptor(file.originalname)
       if (!descriptor) {
         callback(
-          new ApiError(400, 'unsupported_media_type', '仅支持 JPG、PNG、WebP、GIF、SVG、MP4、WebM、MOV 文件'),
+          new ApiError(400, 'unsupported_media_type', '仅支持 JPG、PNG、WebP、GIF、MP4、WebM、MOV 文件'),
         )
         return
       }

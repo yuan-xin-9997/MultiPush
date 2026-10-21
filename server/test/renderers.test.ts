@@ -160,9 +160,26 @@ describe('renderPlatforms', () => {
 })
 
 describe('paginateForCards', () => {
+  it('preserves all text beyond eight cards and splits oversized sentences', () => {
+    const blocks = Array.from({ length: 12 }, () => '文'.repeat(168) + '。短句。')
+    const pages = paginateForCards(blocks, [])
+    expect(pages.length).toBeGreaterThan(8)
+    expect(pages.flatMap((page) => page.body).join('')).toBe(blocks.join(''))
+    expect(pages.every((page) => Array.from(page.body.join('')).length <= 170)).toBe(true)
+  })
+
+  it('gives every image a visible page even when images outnumber text pages', () => {
+    const images = Array.from({ length: 12 }, (_, i) => `${i}.png`)
+    for (const blocks of [[], ['short text']]) {
+      const pages = paginateForCards(blocks, images)
+      expect(pages.flatMap((page) => page.images)).toEqual(images)
+      expect(pages.every((page) => page.images.length <= 1)).toBe(true)
+    }
+  })
+
   it('paginates long paragraphs and assigns images', () => {
     const blocks = Array.from({ length: 6 }, (_, index) => `第${index + 1}段：` + '内容'.repeat(60))
-    const pages = paginateForCards(blocks, ['a.png', 'b.png'], 150, 8)
+    const pages = paginateForCards(blocks, ['a.png', 'b.png'], 150)
     expect(pages.length).toBeGreaterThan(1)
     expect(pages.some((page) => page.images.length > 0)).toBe(true)
     expect(pages.every((page) => page.body.join('').length <= 170)).toBe(true)

@@ -17,6 +17,7 @@ const emailSchema = z
   .transform((value) => value.toLowerCase())
 
 const passwordSchema = z.string().min(8, '密码至少 8 个字符').max(128, '密码最多 128 个字符')
+  .refine((value) => Buffer.byteLength(value, 'utf8') <= 72, '密码最多 72 字节（汉字通常占 3 字节）')
 
 const displayNameSchema = z.string().trim().max(50, '昵称最多 50 个字符')
 

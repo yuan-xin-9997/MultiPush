@@ -65,6 +65,12 @@ function splitLongText(value: string, budget: number): string[] {
   const chunks: string[] = []
   let current = ''
   for (const part of parts) {
+    if (charLength(part) > budget) {
+      if (current) chunks.push(current)
+      current = ''
+      chunks.push(...splitLongText(part, budget))
+      continue
+    }
     if (current && charLength(current) + charLength(part) > budget) {
       chunks.push(current)
       current = part
@@ -86,7 +92,6 @@ export function paginateForCards(
   blocks: string[],
   images: string[],
   budget = CARD_TEXT_BUDGET,
-  maxCards = MAX_CONTENT_CARDS,
 ): CardPage[] {
   const pieces: string[] = []
   for (const block of blocks) {
@@ -108,7 +113,6 @@ export function paginateForCards(
   for (const piece of pieces) {
     const length = charLength(piece)
     if (current.length > 0 && currentLength + length > budget) flush()
-    if (pages.length >= maxCards) break
     current.push(piece)
     currentLength += length
   }
@@ -117,16 +121,15 @@ export function paginateForCards(
   // Attach images after pagination so a card with no text can still exist for
   // image-heavy notes. One image per card keeps the 3:4 composition clean.
   for (let index = 0; index < images.length; index += 1) {
-    const pageIndex = Math.min(index, Math.max(pages.length - 1, 0))
-    if (pages.length === 0) pages.push({ body: [], images: [] })
-    pages[pageIndex].images.push(images[index])
+    if (index >= pages.length) pages.push({ body: [], images: [] })
+    pages[index].images.push(images[index])
   }
 
   if (pages.length === 0 && images.length === 0) {
     pages.push({ body: ['这篇内容暂时没有正文，欢迎直接查看原文。'], images: [] })
   }
 
-  return pages.slice(0, maxCards)
+  return pages
 }
 
 /**
@@ -151,6 +154,9 @@ export async function renderXiaohongshu(
   const includeTags = prepared.options.includeTags !== false
   const hashtags = includeTags ? buildHashtags(prepared.tags) : []
   const pages = paginateForCards(prepared.textBlocks, inlineImages)
+  if (pages.length > MAX_CONTENT_CARDS) {
+    warnings.push('内容较长，已生成额外卡片以保留全文和图片；发布时请按平台上限分批使用。')
+  }
   const coverExtension = coverImage.match(/\.[a-z0-9]+$/i)?.[0] ?? '.png'
   const assets =
     coverImage && !prepared.media.assets.some((asset) => asset.url === coverImage)
