@@ -289,6 +289,42 @@ export interface RenderListItem {
   createdAt: string
 }
 
+export interface WechatAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface WechatLogin {
+  id: string
+  status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'
+  qrCode: string | null
+  message: string
+  expiresAt: string
+}
+
+export interface WechatPublishInput {
+  renderId: string
+  mode: 'draft' | 'publish'
+  coverMediaId: string
+  author?: string
+  digest?: string
+}
+
+export interface WechatPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'awaiting_confirmation' | 'published' | 'failed' | 'uncertain'
+  message: string
+  qrCode: string | null
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ApiHealth {
   status: 'ok'
   service: string

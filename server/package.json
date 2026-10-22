@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/index.js --log-level=info",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --external:playwright-core --outfile=dist/index.js --log-level=info",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -18,6 +18,7 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.2",
+    "playwright-core": "1.64.1",
     "sanitize-html": "^2.17.0",
     "turndown": "^7.2.0",
     "turndown-plugin-gfm": "^1.0.2",

@@ -6,8 +6,7 @@
 #   bash JenkinsConfig/deploy.sh prepare
 #   bash JenkinsConfig/deploy.sh deploy
 #
-# This script only publishes build artifacts. It never copies node_modules to
-# the production host and never deletes /opt/MultiPush/.data or
+# This script publishes build artifacts and the Playwright runtime. It never deletes /opt/MultiPush/.data or
 # /opt/MultiPush/.env. Run it from a checkout after a successful
 # `npm run build`, preferably as the same user that owns /opt/MultiPush
 # (normally the `jenkins` user).
@@ -72,6 +71,7 @@ esac
 for required in \
   "$SOURCE_ROOT/package.json" \
   "$SOURCE_ROOT/server/dist/index.js" \
+  "$SOURCE_ROOT/node_modules/playwright-core/package.json" \
   "$SOURCE_ROOT/web/dist/index.html" \
   "$SOURCE_ROOT/JenkinsConfig/health.mjs"; do
   [ -f "$required" ] || die "缺少构建产物或必要文件: $required（请先执行 npm run build）"
@@ -152,7 +152,12 @@ else
 fi
 
 install -d -m 755 -- "$DEPLOY_REAL/server" "$DEPLOY_REAL/server/dist" \
-  "$DEPLOY_REAL/web" "$DEPLOY_REAL/web/dist" "$DEPLOY_REAL/JenkinsConfig"
+  "$DEPLOY_REAL/web" "$DEPLOY_REAL/web/dist" "$DEPLOY_REAL/JenkinsConfig" \
+  "$DEPLOY_REAL/node_modules/playwright-core"
+
+log "同步公众号浏览器运行库..."
+rsync -a --delete --chmod=D755,F644 -- \
+  "$SOURCE_ROOT/node_modules/playwright-core/" "$DEPLOY_REAL/node_modules/playwright-core/"
 
 log "同步后端构建产物..."
 rsync -a --delete --chmod=D755,F644 --itemize-changes -- \

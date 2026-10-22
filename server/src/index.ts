@@ -34,8 +34,10 @@ function shutdown(signal: string): void {
   }, 10_000)
   forceTimer.unref()
 
-  server.close((error) => {
+  server.close(async (error) => {
     if (error) console.error('[multipush] server close error:', error)
+    try { await app.locals.wechat.close() }
+    catch { console.error('[multipush] failed to close the WeChat browser') }
     try {
       database.close()
     } catch (dbError) {

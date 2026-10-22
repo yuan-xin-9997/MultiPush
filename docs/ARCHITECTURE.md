@@ -79,6 +79,6 @@ export interface ContentEnhancer {
 
 ## 部署
 
-- `npm run build`：Vite → `web/dist`；esbuild → `server/dist/index.js`（单文件）。
+- `npm run build`：Vite → `web/dist`；esbuild → `server/dist/index.js`，`playwright-core` 保留为外置运行库并随部署同步。公众号会话与发布 API 见 [接入说明](WECHAT_PUBLISHING.md)。
 - Jenkinsfile：安装 → 类型检查/测试 → 构建 → 停服 → `deploy.sh`（仅同步构建产物，保留 `.data`/`.env`）→ 启动 → 健康检查。
 - systemd：`multipush.service`，`0.0.0.0:34080`，`DATA_DIR=/opt/MultiPush/.data`，`WEB_DIST=/opt/MultiPush/web/dist`。

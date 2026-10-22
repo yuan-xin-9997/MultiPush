@@ -13,10 +13,11 @@ Jenkins built-in 节点（192.168.0.111，与生产服务同机）
    │  stop multipush.service
    │  bash JenkinsConfig/deploy.sh deploy
    │  start + health.mjs
-   │  rsync（只传构建产物）
+   │  rsync（构建产物与 Playwright 运行库）
    ▼
 /opt/MultiPush
-   ├── server/dist/index.js      # esbuild 单文件后端，无需 node_modules
+   ├── server/dist/index.js      # esbuild 后端，外置 Playwright 运行库
+   ├── node_modules/playwright-core/ # 公众号浏览器自动化运行库
    ├── web/dist/                 # Vite 前端静态文件
    ├── JenkinsConfig/health.mjs  # 服务器本地健康检查
    ├── package.json              # 版本/元数据，不用于生产安装
@@ -45,14 +46,15 @@ systemd multipush.service（User=jenkins）→ 0.0.0.0:34080
 | --- | --- | --- |
 | `/opt/MultiPush/server/dist/index.js` | 后端单文件构建产物 | `rsync --delete` 替换 |
 | `/opt/MultiPush/web/dist/` | 前端静态文件 | `rsync --delete` 替换 |
+| `/opt/MultiPush/node_modules/playwright-core/` | 公众号浏览器运行库 | `rsync --delete` 替换 |
 | `/opt/MultiPush/JenkinsConfig/health.mjs` | 服务器端健康检查脚本 | `install` 覆盖 |
 | `/opt/MultiPush/package.json` | 应用元数据 | `install` 覆盖 |
 | `/opt/MultiPush/DEPLOYED_COMMIT` | 最近部署的 commit | 原子写入 |
-| `/opt/MultiPush/.data/` | `multipush.sqlite`（含 WAL/SHM）、`uploads/`、`.jwt-secret` | **绝不删除、不改权限** |
+| `/opt/MultiPush/.data/` | SQLite（含 WAL/SHM）、`uploads/`、`.jwt-secret`、`.wechat-session-key` | **绝不删除、不改权限** |
 | `/opt/MultiPush/.env` | 可选环境变量 | **绝不删除、不改权限** |
 | `/opt/MultiPush/apps/` | 旧版本遗留目录（如有） | 不自动删除 |
 
-`rsync --delete` 只作用于 `server/dist/` 和 `web/dist/` 两个子目录，不会影响部署根目录下的 `.data`、`.env` 或遗留目录。
+`rsync --delete` 只作用于 `server/dist/`、`web/dist/`、`node_modules/playwright-core/`，不会影响 `.data`、`.env` 或遗留目录。
 
 ## 3. 服务器首次准备
 
@@ -90,7 +92,7 @@ sudo -u jenkins test -w /opt/MultiPush/.data && echo "data dir writable"
 
 注意：
 
-- 不要在 `/opt/MultiPush` 下执行 `npm install`，生产不需要 `node_modules`。
+- 不要在 `/opt/MultiPush` 下执行 `npm install`，部署脚本会复制唯一外置依赖 `playwright-core`。启用公众号发布前，按 [公众号接入说明](WECHAT_PUBLISHING.md) 安装服务器浏览器并配置 `WECHAT_BROWSER_PATH`。
 - 不要对 `.data` 执行 `chmod -R 755` 或 `chown -R` 作为日常部署步骤；数据目录只允许服务用户访问。
 - 如果 `/opt/MultiPush` 已存在且属主不对，先确认没有其他应用在使用，再修正属主：
 
@@ -307,11 +309,11 @@ curl -fsS http://127.0.0.1:34080/api/health
 
 必须备份：
 
-- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`。
+- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`、`.wechat-session-key`。
 - `/opt/MultiPush/.env`（如存在）。
 - 可选的 systemd unit 与当前 `DEPLOYED_COMMIT`，便于恢复环境。
 
-不要只备份 `multipush.sqlite` 而忽略 `uploads/` 和 `.jwt-secret`；否则图片/视频丢失，已有登录 token 也会失效。
+不要只备份 SQLite 而忽略上传目录和两个密钥文件；否则素材丢失、系统登录或公众号会话无法恢复。
 
 ### 6.2 冷备份（推荐）
 
@@ -506,12 +508,12 @@ node /opt/MultiPush/JenkinsConfig/health.mjs
 
 ## 9. 设计说明与约束
 
-### 9.1 为什么不部署 node_modules
+### 9.1 构建与浏览器运行库
 
 后端构建使用 esbuild：
 
 ```text
-esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs \
+esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --external:playwright-core \
   --outfile=dist/index.js
 ```
 
@@ -520,9 +522,10 @@ esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs \
 - Node.js 22.12+；
 - `server/dist/index.js`；
 - `web/dist/`；
+- `node_modules/playwright-core/` 及服务器 Chrome / Chromium（公众号发布）；
 - 可写的 `.data/`。
 
-生产不需要 `npm install`、`node_modules` 或 TypeScript/构建工具。`package.json` 被复制到 `/opt/MultiPush` 仅用于版本/元数据。如果未来引入原生扩展（native addon）或依赖运行时按路径查找的文件，单文件 bundle 假设需要重新评估。
+生产不需要执行 `npm install` 或安装构建工具。Playwright 依赖运行时资源文件，因此单独同步，其他依赖继续打包。`package.json` 用于版本/元数据。
 
 前端是 Vite 构建的静态文件，由同一个 Node 服务按 `WEB_DIST` 托管；API、上传文件和前端同源，不需要额外 Web 服务器。
 
@@ -532,11 +535,12 @@ esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs \
 
 - `server/dist/` → `/opt/MultiPush/server/dist/`
 - `web/dist/` → `/opt/MultiPush/web/dist/`
+- `node_modules/playwright-core/` → `/opt/MultiPush/node_modules/playwright-core/`
 - `JenkinsConfig/health.mjs`
 - `package.json`
 - `DEPLOYED_COMMIT`
 
-不会同步源码、测试、`node_modules`、`.env`、`.data`、`.git` 或旧的 `apps/`。`rsync --delete` 被限制在两个 dist 目录内，避免误删持久化数据。
+不会同步源码、测试、其他 `node_modules`、`.env`、`.data`、`.git` 或旧的 `apps/`。`rsync --delete` 只作用于上述三个产物子目录，保留持久化数据。
 
 ### 9.3 服务安全设置
 
@@ -556,7 +560,7 @@ esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs \
 ### 9.4 Jenkins 流水线约束
 
 - 只在 Jenkins 上执行 `npm ci`，使用 lockfile 保证可重复构建。
-- 不执行 Docker、Playwright、浏览器安装或端到端测试，避免生产主机依赖膨胀。
+- CI 不自动安装浏览器或运行真实公众号端到端发布。浏览器由管理员安装；单元测试使用模拟驱动。
 - typecheck/test 在停服之前执行；构建失败不会影响线上服务。
 - 部署阶段不停服，停服由独立阶段完成，便于日志定位。
 - 健康检查最多 30 次、每次间隔 1 秒，避免启动瞬间误判。

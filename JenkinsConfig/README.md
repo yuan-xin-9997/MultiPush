@@ -35,7 +35,7 @@ MultiPush 的 Jenkins 流水线与生产部署配置。这里只存放运维文�
 6. **Deploy**：`bash JenkinsConfig/deploy.sh deploy`，只 rsync 构建产物，保留 `.data` 与 `.env`。
 7. **Start & Health**：启动服务，`node JenkinsConfig/health.mjs` 最多等待约 30 秒。
 
-约束：不执行 Docker、Playwright、浏览器安装；不向生产同步 `node_modules`。整体超时 45 分钟，保留最近 20 次构建，禁止并发。
+约束：CI 不自动安装系统浏览器或执行真实公众号发布。部署仅同步外置运行库 `node_modules/playwright-core`，其他依赖打包。公众号发布需管理员先按 [接入说明](../docs/WECHAT_PUBLISHING.md) 准备 Chrome / Chromium。整体超时 45 分钟，保留最近 20 次构建，禁止并发。
 
 ## Jenkins 任务配置（现有任务核对项）
 

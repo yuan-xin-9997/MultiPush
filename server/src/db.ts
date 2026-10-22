@@ -16,6 +16,7 @@ import type {
   RenderRecord,
   RichTextJson,
   User,
+  WechatPublication,
 } from '../../shared/types'
 import { PLATFORM_ORDER } from '../../shared/types'
 import { DEFAULT_BOOK_COLOR } from './config'
@@ -162,6 +163,22 @@ export interface CreateRenderValues {
   results: RenderRecord['results']
 }
 
+export interface WechatAccountSession {
+  encryptedSession: string
+  name: string | null
+  status: 'connected' | 'expired'
+  checkedAt: string
+}
+
+export interface CreateWechatPublicationValues {
+  renderId: string
+  title: string
+  mode: WechatPublication['mode']
+  idempotencyKey: string
+}
+
+export type UpdateWechatPublicationValues = Partial<Pick<WechatPublication, 'status' | 'message' | 'url' | 'remoteId'>>
+
 /**
  * SQLite persistence. Every read/write on user-owned resources takes a userId
  * so cross-tenant access can only ever return null/0 (mapped to HTTP 404).
@@ -262,8 +279,36 @@ export class Database {
         result_json TEXT NOT NULL,
         PRIMARY KEY (render_id, platform)
       );
-      PRAGMA user_version = 2;
+      CREATE TABLE IF NOT EXISTS wechat_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_session TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS wechat_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('draft', 'publish')),
+        status TEXT NOT NULL CHECK (status IN ('running', 'draft', 'awaiting_confirmation', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_wechat_publications_user_created ON wechat_publications(user_id, created_at DESC);
+      PRAGMA user_version = 3;
     `)
+    // Never resend an operation that may already have reached WeChat before a restart.
+    this.run(`UPDATE wechat_publications SET status = 'uncertain', message = ?, updated_at = ?
+      WHERE status IN ('running', 'awaiting_confirmation')`,
+    ['服务已重启，无法确认上次操作结果。请先到微信公众号后台核实，避免重复发表。', nowIso()])
   }
 
   private all(sql: string, params: SqlValue[] = []): Row[] {
@@ -687,6 +732,11 @@ export class Database {
     return row ? this.mapMedia(row) : null
   }
 
+  getMediaByFilename(userId: string, filename: string): MediaAsset | null {
+    const row = this.get('SELECT * FROM media WHERE filename = ? AND user_id = ?', [filename, userId])
+    return row ? this.mapMedia(row) : null
+  }
+
   deleteMedia(userId: string, mediaId: string): boolean {
     return this.run('DELETE FROM media WHERE id = ? AND user_id = ?', [mediaId, userId]) > 0
   }
@@ -780,6 +830,84 @@ export class Database {
 
   deleteRender(userId: string, renderId: string): boolean {
     return this.run('DELETE FROM renders WHERE id = ? AND user_id = ?', [renderId, userId]) > 0
+  }
+
+  // -------------------------------------------------------------- WeChat
+
+  getWechatAccount(userId: string): WechatAccountSession | null {
+    const row = this.get('SELECT * FROM wechat_accounts WHERE user_id = ?', [userId])
+    return row ? {
+      encryptedSession: text(row.encrypted_session),
+      name: nullableText(row.name),
+      status: row.status === 'expired' ? 'expired' : 'connected',
+      checkedAt: text(row.checked_at),
+    } : null
+  }
+
+  saveWechatAccount(userId: string, values: WechatAccountSession): void {
+    this.run(`INSERT INTO wechat_accounts (user_id, encrypted_session, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET
+      encrypted_session = excluded.encrypted_session, name = excluded.name,
+      status = excluded.status, checked_at = excluded.checked_at`,
+    [userId, values.encryptedSession, values.name, values.status, values.checkedAt])
+  }
+
+  deleteWechatAccount(userId: string): boolean {
+    return this.run('DELETE FROM wechat_accounts WHERE user_id = ?', [userId]) > 0
+  }
+
+  private mapWechatPublication(row: Row): WechatPublication {
+    return {
+      id: text(row.id),
+      renderId: text(row.render_id),
+      title: text(row.title),
+      mode: row.mode as WechatPublication['mode'],
+      status: row.status as WechatPublication['status'],
+      message: text(row.message),
+      qrCode: null,
+      url: nullableText(row.url),
+      remoteId: nullableText(row.remote_id),
+      createdAt: text(row.created_at),
+      updatedAt: text(row.updated_at),
+    }
+  }
+
+  createWechatPublication(userId: string, values: CreateWechatPublicationValues): WechatPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO wechat_publications
+      (id, user_id, render_id, title, mode, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)
+      ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+    [randomUUID(), userId, values.renderId, values.title, values.mode, '正在处理公众号发布任务', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findWechatPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create WeChat publication')
+    return publication
+  }
+
+  getWechatPublication(userId: string, id: string): WechatPublication | null {
+    const row = this.get('SELECT * FROM wechat_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapWechatPublication(row) : null
+  }
+
+  findWechatPublication(userId: string, idempotencyKey: string): WechatPublication | null {
+    const row = this.get('SELECT * FROM wechat_publications WHERE user_id = ? AND idempotency_key = ?', [userId, idempotencyKey])
+    return row ? this.mapWechatPublication(row) : null
+  }
+
+  listWechatPublications(userId: string): WechatPublication[] {
+    return this.all('SELECT * FROM wechat_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId])
+      .map((row) => this.mapWechatPublication(row))
+  }
+
+  updateWechatPublication(userId: string, id: string, values: UpdateWechatPublicationValues): WechatPublication | null {
+    const current = this.getWechatPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE wechat_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?`,
+    [values.status ?? current.status, values.message ?? current.message,
+      values.url === undefined ? current.url : values.url,
+      values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getWechatPublication(userId, id)
   }
 }
 

@@ -12,7 +12,7 @@ import './app-shell.css'
 const NAV_ITEMS = [
   { to: '/library', label: '内容库', icon: LibraryBig, badge: null },
   { to: '/render', label: '智能渲染', icon: Sparkles, badge: null },
-  { to: '/publish', label: '发布管理', icon: Send, badge: '即将上线' },
+  { to: '/publish', label: '发布管理', icon: Send, badge: null },
 ] as const
 
 export default function AppShell() {
@@ -91,7 +91,7 @@ export default function AppShell() {
             </span>
             <div>
               <p className="app-sidebar-note-title">一次创作，多端适配</p>
-              <p className="app-sidebar-note-text">当前版本支持渲染预览与下载，发布功能正在规划中。</p>
+              <p className="app-sidebar-note-text">公众号支持扫码连接与发布，其他平台可渲染后下载。</p>
             </div>
           </div>
 

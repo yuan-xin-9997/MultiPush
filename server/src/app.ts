@@ -13,6 +13,9 @@ import { createRendersRouter } from './routes/renders'
 import { createMetaRouter } from './routes/meta'
 import { createUploadsRouter } from './static'
 import { errorHandler } from './errors'
+import { WechatService } from './wechat'
+import { PlaywrightWechatDriver, type WechatBrowserDriver } from './wechat-browser'
+import { createWechatRouter } from './routes/wechat'
 
 function securityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction): void {
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -66,8 +69,10 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver): express.Express {
   const app = express()
+  const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
+  app.locals.wechat = wechat
   app.disable('x-powered-by')
   app.use(securityHeaders)
 
@@ -85,6 +90,7 @@ export function createApp(config: AppConfig, database: Database): express.Expres
   app.use('/api/contents', requireAuth, createContentsRouter(database))
   app.use('/api/media', requireAuth, createMediaRouter(database, config))
   app.use('/api/renders', requireAuth, createRendersRouter(database, config))
+  app.use('/api/wechat', requireAuth, createWechatRouter(wechat))
   app.use('/api', createMetaRouter(config, requireAuth))
   app.use('/api', apiNotFound)
 

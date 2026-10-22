@@ -20,6 +20,10 @@ import type {
   PlatformAdjustment,
   PlatformRender,
   User,
+  WechatAccount,
+  WechatLogin,
+  WechatPublication,
+  WechatPublishInput,
 } from '@shared/types'
 
 const TOKEN_KEY = 'multipush_token'
@@ -194,6 +198,16 @@ export const api = {
 
   platforms: {
     list: () => request<{ platforms: PlatformInfo[] }>('/api/platforms'),
+  },
+
+  wechat: {
+    account: () => request<{ account: WechatAccount }>('/api/wechat/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: WechatLogin }>('/api/wechat/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: WechatLogin }>(`/api/wechat/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/wechat/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: WechatPublication[] }>('/api/wechat/publications', { cache: 'no-store' }),
+    publish: (input: WechatPublishInput) => request<{ publication: WechatPublication }>('/api/wechat/publications', { method: 'POST', body: JSON.stringify(input) }),
+    getPublication: (id: string) => request<{ publication: WechatPublication }>(`/api/wechat/publications/${encodeURIComponent(id)}`, { cache: 'no-store' }),
   },
 
   renders: {
