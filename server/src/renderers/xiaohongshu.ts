@@ -175,7 +175,6 @@ export async function renderXiaohongshu(
 
   const coverBody = [
     truncateToChars(prepared.summary || '一次创作，多平台发布', 72),
-    hashtags.slice(0, 3).join(' '),
   ].filter(Boolean)
   const cards: XhsCard[] = [
     {
@@ -244,7 +243,7 @@ export async function renderXiaohongshu(
       platform: 'xiaohongshu',
       title,
       text: caption,
-      tags: prepared.tags,
+      tags: includeTags ? prepared.tags : [],
       hashtags,
       images: prepared.media.images,
       videos: prepared.media.videos,
@@ -286,7 +285,7 @@ export async function renderXiaohongshu(
     text: caption,
     previewMode: prepared.media.videos.length > 0 ? 'video' : 'cards',
     themeColor: XHS_THEME,
-    meta: buildMeta(prepared),
+    meta: { ...buildMeta(prepared), tags: includeTags ? prepared.tags : [] },
     cards,
     assets,
     videos: prepared.media.videos,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toPng } from 'html-to-image'
 import {
@@ -51,7 +51,9 @@ import {
   type RenderOptions,
   type RenderRecord,
   type XhsCard,
+  type PlatformAdjustment,
 } from '@shared/types'
+import { getCaptionBody, parsePreferences, publishChecks } from '@shared/render-workbench'
 import { absoluteUrl, api } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { getErrorMessage } from '@/lib/errors'
@@ -68,6 +70,7 @@ import {
   plainTextFromHtml,
   xhsBodyFromText,
   type ExportedCardImage,
+  type ExportReport,
 } from './downloads'
 import {
   CARD_STYLE_OPTIONS,
@@ -77,6 +80,9 @@ import {
 import { useElementWidth } from './hooks'
 import PlatformGlyph from './platform-glyph'
 import XhsCardView from './XhsCardView'
+import PlatformEditor from './PlatformEditor'
+import { layoutCards, overflowingText, verifyCardImages } from './card-layout'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
@@ -333,11 +339,29 @@ export default function RenderPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [searchParams] = useSearchParams()
+  const preferenceKey = `multipush:render-defaults:${user?.id ?? ''}`
+  const defaults = useMemo(() => {
+    try { return parsePreferences(JSON.parse(localStorage.getItem(preferenceKey) ?? 'null')) }
+    catch { return null }
+  }, [preferenceKey])
 
   const [selectedContent, setSelectedContent] = useState<ContentSummary | null>(null)
-  const [platforms, setPlatforms] = useState<PlatformId[]>(DEFAULT_PLATFORMS)
-  const [options, setOptions] = useState<RenderOptions>({ cardStyle: 'clean', includeTags: true, includeToc: false })
-  const [authorName, setAuthorName] = useState('')
+  const [platforms, setPlatforms] = useState<PlatformId[]>(defaults?.platforms ?? DEFAULT_PLATFORMS)
+  const [options, setOptions] = useState<RenderOptions>(defaults?.options ?? { cardStyle: 'clean', includeTags: true, includeToc: false })
+  const [authorName, setAuthorName] = useState(defaults?.options.authorName ?? '')
+  const [generatedOptions, setGeneratedOptions] = useState<RenderOptions>({})
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [adjusting, setAdjusting] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<'reset' | 'regenerate' | null>(null)
+  const [layoutBusy, setLayoutBusy] = useState(false)
+  const [layoutErrors, setLayoutErrors] = useState<string[]>([])
+  const [report, setReport] = useState<ExportReport | null>(null)
+  const [captureFailures, setCaptureFailures] = useState<string[]>([])
+  const [lastExport, setLastExport] = useState<'all' | 'xhs'>('xhs')
+  const [assetChecks, setAssetChecks] = useState<{ url: string; error: string | null }[]>([])
+  const [checkingAssets, setCheckingAssets] = useState(false)
+  const captureCache = useRef({ key: '', images: new Map<string, ExportedCardImage>() })
+  const captureFailureRef = useRef(new Map<string, string>())
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [results, setResults] = useState<PlatformRender[] | null>(null)
   const [renderId, setRenderId] = useState<string | null>(null)
@@ -362,14 +386,51 @@ export default function RenderPage() {
   const autoHandledRef = useRef<string | null>(null)
   const cardNodeRefs = useRef(new Map<string, HTMLDivElement>())
 
-  const cardStyle = resolveCardStyle(options.cardStyle)
+  const cardStyle = resolveCardStyle(generatedOptions.cardStyle)
   const xhsRender = results?.find((render) => render.platform === 'xiaohongshu') ?? null
   const activeRender = results?.find((render) => render.platform === activePlatform) ?? results?.[0] ?? null
   const activeInfo = activeRender ? getPlatformInfo(activeRender.platform) : null
   const currentKey = renderSignature(selectedContent?.id, platforms, { ...options, authorName })
-  const stale = Boolean(results) && Boolean(lastRequestKey) && currentKey !== lastRequestKey
+  const sourceStale = Boolean(results?.some((result) => result.sourceUpdatedAt && result.sourceUpdatedAt !== selectedContent?.updatedAt))
+  const stale = sourceStale || Boolean(results) && Boolean(lastRequestKey) && currentKey !== lastRequestKey
   const cards = activeRender?.platform === 'xiaohongshu' ? activeRender.cards : []
   const safeCardIndex = cards.length === 0 ? 0 : Math.min(cardIndex, cards.length - 1)
+
+  useEffect(() => {
+    const id = selectedContent?.id
+    if (!id) return
+    let cancelled = false
+    const refresh = () => { if (!document.hidden) void api.contents.get(id).then(({ content }) => {
+      if (!cancelled) setSelectedContent(content)
+    }).catch(() => {}) }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => { cancelled = true; window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh) }
+  }, [selectedContent?.id])
+
+  useLayoutEffect(() => {
+    if (!xhsRender) { setLayoutErrors([]); return }
+    let cancelled = false
+    setLayoutBusy(true)
+    setLayoutErrors([])
+    void withTimeout(document.fonts.ready.then(() => undefined), FONT_WAIT_TIMEOUT_MS, '字体未就绪，请重试排版')
+      .then(() => {
+        if (cancelled) return
+        const next = layoutCards(xhsRender.cards, cardNodeRefs.current)
+        if (JSON.stringify(next) !== JSON.stringify(xhsRender.cards)) {
+          setResults((current) => current?.map((result) => result === xhsRender ? { ...result, cards: next } : result) ?? null)
+        } else {
+          setLayoutErrors(next.filter((card) => {
+            const node = cardNodeRefs.current.get(card.id)
+            return !node || overflowingText(node)
+          }).map((card) => `第 ${card.index} 张文字超出区域，请调整标题或卡片文字`))
+        }
+      }).catch((error) => { if (!cancelled) setLayoutErrors([getErrorMessage(error, '自动分页失败')]) })
+      .finally(() => { if (!cancelled) setLayoutBusy(false) })
+    return () => { cancelled = true }
+  }, [xhsRender, cardStyle])
+
+  useEffect(() => { setReport(null); setCaptureFailures([]); setAssetChecks([]) }, [results, cardStyle])
 
   const refreshHistory = useCallback(async () => {
     try {
@@ -400,6 +461,7 @@ export default function RenderPage() {
     setGeneratedAt(record.createdAt)
     setPlatforms(record.platforms)
     setOptions(record.options)
+    setGeneratedOptions(record.options)
     setAuthorName(record.options.authorName ?? '')
     setLastRequestKey(
       renderSignature(content?.id ?? record.contentId, record.platforms, record.options),
@@ -413,8 +475,9 @@ export default function RenderPage() {
   }, [])
 
   const runRender = useCallback(
-    async (content: ContentSummary | null, targetPlatforms: PlatformId[], targetOptions: RenderOptions) => {
-      if (!content || targetPlatforms.length === 0 || rendering) return
+    async (content: ContentSummary | null, targetPlatforms: PlatformId[], targetOptions: RenderOptions, confirmed = false) => {
+      if (!content || targetPlatforms.length === 0 || rendering || exporting || adjusting || layoutBusy) return
+      if (!confirmed && results?.some((result) => result.editedAt)) { setConfirmAction('regenerate'); return }
       setRendering(true)
       setRenderError(null)
       try {
@@ -426,6 +489,9 @@ export default function RenderPage() {
         setResults(render.results)
         setRenderId(render.id)
         setGeneratedAt(render.createdAt)
+        setGeneratedOptions(render.options)
+        const sourceUpdatedAt = render.results[0]?.sourceUpdatedAt
+        if (sourceUpdatedAt) setSelectedContent((current) => current?.id === content.id ? { ...current, updatedAt: sourceUpdatedAt } : current)
         setLastRequestKey(
           renderSignature(content.id, render.platforms, { ...targetOptions, authorName: (targetOptions.authorName ?? '').trim() }),
         )
@@ -447,7 +513,7 @@ export default function RenderPage() {
         setRendering(false)
       }
     },
-    [refreshHistory, rendering],
+    [refreshHistory, rendering, exporting, adjusting, layoutBusy, results],
   )
 
   const loadRecord = useCallback(
@@ -531,7 +597,7 @@ export default function RenderPage() {
     if (autoHandledRef.current === selectedContent.id) return
     autoPendingRef.current = false
     autoHandledRef.current = selectedContent.id
-    void runRender(selectedContent, DEFAULT_PLATFORMS, options)
+    void runRender(selectedContent, platforms, { ...options, authorName })
   }, [selectedContent, rendering, runRender, options])
 
   useEffect(() => {
@@ -595,10 +661,12 @@ export default function RenderPage() {
   const captureCard = useCallback(
     async (card: XhsCard, index: number): Promise<ExportedCardImage | null> => {
       const node = cardNodeRefs.current.get(card.id)
-      if (!node) return null
+      if (!node) { captureFailureRef.current.set(card.id, '卡片尚未就绪'); return null }
       try {
         await withTimeout(document.fonts.ready.then(() => undefined), FONT_WAIT_TIMEOUT_MS, '字体加载超时')
         await waitForImages(node)
+        await verifyCardImages(card.images.map(absoluteUrl))
+        if (overflowingText(node)) throw new Error('文字超出卡片区域，请先调整分页')
         const dataUrl = await withTimeout(
           toPng(node, {
             width: 540,
@@ -615,6 +683,8 @@ export default function RenderPage() {
         return { card, filename: cardImageFilename(card, index), blob }
       } catch (error) {
         console.error('[multipush] card export failed', error)
+        captureFailureRef.current.set(card.id, getErrorMessage(error, '生成失败'))
+        setCaptureFailures((current) => [...current, `第 ${index + 1} 张：${getErrorMessage(error, '生成失败')}`])
         return null
       }
     },
@@ -623,37 +693,36 @@ export default function RenderPage() {
 
   const captureCards = useCallback(
     async (render: PlatformRender): Promise<ExportedCardImage[]> => {
+      const key = JSON.stringify([render.cards, render.meta.tags, cardStyle])
+      if (captureCache.current.key !== key) captureCache.current = { key, images: new Map() }
+      setCaptureFailures([])
+      captureFailureRef.current.clear()
       const exported: ExportedCardImage[] = []
       for (let index = 0; index < render.cards.length; index += 1) {
         const card = render.cards[index]
         setExporting({ label: `正在生成第 ${index + 1} / ${render.cards.length} 张卡片…`, percent: Math.round((index / render.cards.length) * 60) })
-        const image = await captureCard(card, index)
-        if (image) exported.push(image)
+        const image = captureCache.current.images.get(card.id) ?? await captureCard(card, index)
+        if (image) { exported.push(image); captureCache.current.images.set(card.id, image) }
       }
       return exported
     },
-    [captureCard],
+    [captureCard, cardStyle],
   )
 
   async function handleDownloadXhsZip() {
-    if (!xhsRender || exporting) return
+    if (!xhsRender || exporting || rendering || layoutBusy || adjusting) return
+    setLastExport('xhs')
     setExporting({ label: '正在生成卡片…', percent: 0 })
     try {
       const exported = await captureCards(xhsRender)
-      if (exported.length === 0) {
-        toast.error('卡片生成失败，请稍后重试')
-        return
-      }
-      const { blob, skippedAssets } = await buildXhsZip(xhsRender, exported, (label, percent) =>
-        setExporting({ label, percent: Math.max(60, Math.round(percent ?? 0)) }),
+      const { blob, skippedAssets, report: exportResult } = await buildXhsZip(xhsRender, exported, (label, percent) =>
+        setExporting({ label, percent: Math.max(60, Math.round(percent ?? 0)) }), Object.fromEntries(captureFailureRef.current),
       )
       setExporting({ label: '正在保存 ZIP…', percent: 99 })
       downloadBlob(`${safeFilename(xhsRender.title, 'multipush')}-小红书素材-${dateStamp()}.zip`, blob)
-      toast.success(
-        skippedAssets > 0
-          ? `已导出 ZIP，其中 ${skippedAssets} 个素材获取失败，已跳过`
-          : '小红书卡片与文案 ZIP 已开始下载',
-      )
+      setReport(exportResult)
+      if (exportResult.failedCards.length || skippedAssets) toast.warning('导出不完整，缺失清单已写入 ZIP；请查看导出报告并重试')
+      else toast.success('小红书卡片与文案 ZIP 已完整导出')
     } catch (error) {
       toast.error(getErrorMessage(error, '导出小红书素材失败'))
     } finally {
@@ -662,20 +731,19 @@ export default function RenderPage() {
   }
 
   async function handleDownloadAllZip() {
-    if (!results || results.length === 0 || exporting) return
+    if (!results || results.length === 0 || exporting || rendering || layoutBusy || adjusting) return
+    setLastExport('all')
     setExporting({ label: '正在准备全部平台素材…', percent: 0 })
     try {
       const exported = xhsRender ? await captureCards(xhsRender) : []
-      const { blob, skippedAssets } = await buildAllZip(results, exported, (label, percent) =>
-        setExporting({ label, percent: Math.max(58, Math.round(percent ?? 0)) }),
+      const { blob, skippedAssets, report: exportResult } = await buildAllZip(results, exported, (label, percent) =>
+        setExporting({ label, percent: Math.max(58, Math.round(percent ?? 0)) }), Object.fromEntries(captureFailureRef.current),
       )
       setExporting({ label: '正在保存 ZIP…', percent: 99 })
       downloadBlob(`MultiPush-全部平台-${dateStamp()}.zip`, blob)
-      toast.success(
-        skippedAssets > 0
-          ? `已导出全部平台 ZIP，${skippedAssets} 个素材获取失败已跳过`
-          : '全部平台素材 ZIP 已开始下载',
-      )
+      setReport(exportResult)
+      if (exportResult.failedCards.length || skippedAssets) toast.warning('导出不完整，缺失清单已写入 ZIP；请查看导出报告并重试')
+      else toast.success('全部平台素材 ZIP 已完整导出')
     } catch (error) {
       toast.error(getErrorMessage(error, '导出全部平台失败'))
     } finally {
@@ -705,11 +773,12 @@ export default function RenderPage() {
     if (!activeRender) return
     try {
       if (activeRender.platform === 'wechat') {
-        await copyRichHtml(
+        const format = await copyRichHtml(
           htmlForClipboard(activeRender.html),
           plainTextFromHtml(activeRender.html),
         )
-        toast.success('公众号富文本已复制，可直接粘贴到公众号后台')
+        if (format === 'html') toast.success('公众号富文本已复制，可粘贴到公众号后台')
+        else toast.warning('浏览器仅复制了纯文本；如需保留排版，请下载 HTML')
         return
       }
       if (activeRender.platform === 'zhihu') {
@@ -746,11 +815,84 @@ export default function RenderPage() {
   }
 
   const downloads = activeRender ? downloadsFor(activeRender) : []
-  const authorLabel = authorName.trim() || user?.displayName || user?.username || 'MultiPush'
+  const authorLabel = activeRender?.authorName || generatedOptions.authorName?.trim() || user?.displayName || user?.username || 'MultiPush'
   const xhsNoteBody = activeRender?.platform === 'xiaohongshu' ? xhsBodyFromText(activeRender) : ''
+
+  async function saveAdjustment(input: PlatformAdjustment) {
+    if (!renderId || !activeRender) throw new Error('请先生成渲染记录')
+    const platform = activeRender.platform
+    setAdjusting(true)
+    try {
+      const { result } = await api.renders.adjust(renderId, platform, input)
+      setResults((current) => current?.map((item) => item.platform === platform ? result : item) ?? null)
+      toast.success('当前平台调整已保存，原文保持不变')
+    } finally { setAdjusting(false) }
+  }
+
+  async function resetAdjustment() {
+    if (!renderId || !activeRender) return
+    setAdjusting(true)
+    try {
+      const { result } = await api.renders.reset(renderId, activeRender.platform)
+      setResults((current) => current?.map((item) => item.platform === result.platform ? result : item) ?? null)
+      setConfirmAction(null)
+      toast.success('已恢复该平台最初生成的结果')
+    } catch (error) { toast.error(getErrorMessage(error, '恢复失败')) }
+    finally { setAdjusting(false) }
+  }
+
+  async function checkAssets() {
+    if (!activeRender || checkingAssets) return
+    setCheckingAssets(true)
+    setAssetChecks([])
+    const assets = [...activeRender.assets, ...activeRender.cards.flatMap((card) => card.images.map((url) => ({ url, kind: 'image' as const })))]
+    const unique = assets.filter((asset, index) => assets.findIndex((other) => other.url === asset.url) === index)
+    const checks: { url: string; error: string | null }[] = []
+    // Limit simultaneous downloads so checking a photo-heavy post stays usable.
+    let cursor = 0
+    try {
+      await Promise.all(Array.from({ length: Math.min(3, unique.length) }, async () => {
+        while (cursor < unique.length) {
+          const asset = unique[cursor++]
+          try {
+            if (asset.kind === 'image') await verifyCardImages([absoluteUrl(asset.url)])
+            else {
+              const response = await fetch(absoluteUrl(asset.url), { method: 'HEAD', signal: AbortSignal.timeout(15_000) })
+              if (!response.ok || !response.headers.get('content-type')?.startsWith('video/')) throw new Error('视频无法读取，请检查地址')
+            }
+            checks.push({ url: asset.url, error: null })
+          } catch (error) { checks.push({ url: asset.url, error: getErrorMessage(error, '素材无法读取') }) }
+          setAssetChecks([...checks])
+        }
+      }))
+      setAssetChecks(checks)
+    } finally { setCheckingAssets(false) }
+  }
+
+  async function copyPart(part: 'title' | 'body' | 'tags' | 'rich') {
+    if (!activeRender) return
+    try {
+      if (part === 'rich') {
+        const format = await copyRichHtml(htmlForClipboard(activeRender.html), plainTextFromHtml(activeRender.html))
+        if (format === 'text') { toast.warning('仅复制了纯文本，请下载 HTML 保留排版'); return }
+      } else await copyText(part === 'title' ? activeRender.title : part === 'tags' ? activeRender.meta.tags.map((tag) => `#${tag}`).join(' ') : getCaptionBody(activeRender))
+      toast.success('已复制')
+    } catch (error) { toast.error(getErrorMessage(error, '复制失败')) }
+  }
+
+  function saveDefaults() {
+    try {
+      localStorage.setItem(preferenceKey, JSON.stringify({ platforms, options: { ...options, authorName } }))
+      toast.success('已记住当前账号的默认平台、风格、署名与开关')
+    } catch { toast.error('浏览器无法保存默认设置') }
+  }
+
+  const checks = activeRender ? publishChecks(activeRender, stale) : []
+  const failedAssets = assetChecks.filter((item) => item.error)
 
   return (
     <div className="render-page">
+      <fieldset className="render-controls" disabled={rendering || Boolean(exporting) || layoutBusy || adjusting || checkingAssets}>
       <header className="render-head">
         <div className="render-head-copy">
           <span className="render-eyebrow">
@@ -856,7 +998,7 @@ export default function RenderPage() {
                 <button
                   key={style.id}
                   type="button"
-                  className={`render-style-option${cardStyle === style.id ? ' is-active' : ''}`}
+                  className={`render-style-option${resolveCardStyle(options.cardStyle) === style.id ? ' is-active' : ''}`}
                   onClick={() => setCardStyle(style.id)}
                 >
                   <span className="render-style-swatches">
@@ -868,7 +1010,7 @@ export default function RenderPage() {
                     <strong>{style.name}</strong>
                     <small>{style.hint}</small>
                   </span>
-                  {cardStyle === style.id ? <Check size={13} /> : null}
+                  {resolveCardStyle(options.cardStyle) === style.id ? <Check size={13} /> : null}
                 </button>
               ))}
             </div>
@@ -884,8 +1026,8 @@ export default function RenderPage() {
             <Toggle
               checked={options.includeToc === true}
               onChange={() => setOptions((current) => ({ ...current, includeToc: !current.includeToc }))}
-              label="知乎自动目录"
-              hint="根据标题生成文章目录"
+              label="文章自动目录"
+              hint="公众号和知乎根据标题生成目录"
             />
             <label className="render-author-field">
               <span>作者署名</span>
@@ -897,6 +1039,7 @@ export default function RenderPage() {
                 maxLength={40}
               />
             </label>
+            <button className="btn btn-sm" type="button" title="在当前浏览器记忆设置，按账号区分" onClick={saveDefaults}>保存为我的默认设置</button>
           </div>
         </section>
       ) : null}
@@ -904,7 +1047,7 @@ export default function RenderPage() {
       {stale ? (
         <div className="render-stale">
           <CircleAlert size={14} />
-          <span>内容或渲染设置已变化，当前结果仍是上一次生成的版本。</span>
+          <span>{sourceStale ? '原文已修改，当前结果尚未更新。' : '渲染设置已变化；预览与导出仍使用上一次生成的设置。'}</span>
           <button
             type="button"
             className="btn btn-sm"
@@ -915,6 +1058,8 @@ export default function RenderPage() {
           </button>
         </div>
       ) : null}
+      {layoutBusy ? <div className="render-stale" role="status">正在按实际字体和图片高度检查分页…</div> : null}
+      {renderError && results ? <div className="render-stale" role="alert">本次生成失败：{renderError}。当前仍展示上一次结果。</div> : null}
 
       <div className="render-work">
         <main className="render-preview">
@@ -1407,6 +1552,29 @@ export default function RenderPage() {
                 </button>
               </div>
 
+              <section className="render-side-section render-publish-checks" aria-label="发布前检查">
+                <div className="render-side-section-head"><h3>发布前检查</h3><small>平台上限仅供参考</small></div>
+                {checks.map((check) => <div className={`render-check ${check.ok ? 'is-ok' : 'is-warning'}`} key={check.label}>
+                  <span>{check.ok ? '✓' : '!'}</span><div><strong>{check.label}</strong><small>{check.detail}</small></div>
+                  {!check.ok ? <button className="btn btn-sm" onClick={() => {
+                    if (check.action === 'render') void runRender(selectedContent, platforms, { ...options, authorName })
+                    else if (check.action === 'assets') void checkAssets()
+                    else setEditorOpen(true)
+                  }}>{check.action === 'render' ? '重新生成' : check.action === 'assets' ? '检查' : '调整'}</button> : null}
+                </div>)}
+                {activeRender.platform === 'xiaohongshu' ? <div className={`render-check ${layoutErrors.length ? 'is-warning' : 'is-ok'}`}>
+                  <span>{layoutErrors.length ? '!' : '✓'}</span><div><strong>卡片文字溢出</strong><small>{layoutErrors.length ? layoutErrors.join('；') : '未发现溢出'}</small></div>
+                  {layoutErrors.length ? <><button className="btn btn-sm" onClick={() => setEditorOpen(true)}>调整</button><button className="btn btn-sm" onClick={() => setResults((current) => current?.map((item) => item.platform === 'xiaohongshu' ? { ...item } : item) ?? null)}>重试排版</button></> : null}
+                </div> : null}
+                <div className="render-check"><div><strong>素材可读取性</strong><small>{assetChecks.length ? `${assetChecks.length - failedAssets.length} / ${assetChecks.length} 个通过` : '尚未检查，导出时还会再次验证'}</small></div><button className="btn btn-sm" onClick={() => void checkAssets()}>{checkingAssets ? '检查中…' : '检查素材'}</button></div>
+                {failedAssets.map((asset) => <p className="render-check-error" key={asset.url}>{asset.error}<a href={absoluteUrl(asset.url)} target="_blank" rel="noreferrer">打开素材</a></p>)}
+                <div className="render-edit-toolbar">
+                  <button className="btn btn-sm btn-primary" onClick={() => setEditorOpen(true)}>调整当前平台</button>
+                  <button className="btn btn-sm" disabled={!activeRender.editedAt} onClick={() => setConfirmAction('reset')}>恢复生成结果</button>
+                </div>
+                {activeRender.editedAt ? <small>当前平台已调整，保存于 {formatDateTime(activeRender.editedAt)}</small> : null}
+              </section>
+
               <div className="render-stats">
                 <span>
                   <strong>{formatNumber(activeRender.meta.wordCount)}</strong>
@@ -1474,6 +1642,12 @@ export default function RenderPage() {
                   <h3>快速交付</h3>
                 </div>
                 <div className="render-quick-actions">
+                  <button className="btn btn-sm" onClick={() => void copyPart('title')}>复制标题</button>
+                  {activeRender.platform === 'xiaohongshu' || activeRender.platform === 'douyin' ? <>
+                    <button className="btn btn-sm" onClick={() => void copyPart('body')}>复制正文</button>
+                    <button className="btn btn-sm" onClick={() => void copyPart('tags')}>复制话题</button>
+                  </> : null}
+                  {activeRender.platform === 'zhihu' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
                   <button type="button" className="btn btn-sm" onClick={() => void copyCurrent()}>
                     <Copy size={14} />
                     {activeRender.platform === 'wechat'
@@ -1527,6 +1701,14 @@ export default function RenderPage() {
                     </span>
                   </div>
                 ) : null}
+                {report ? <div className="render-export-report" role="status">
+                  <strong>{report.failedCards.length || report.failedAssets.length ? '导出不完整' : '导出完整'}</strong>
+                  <p>卡片应有 {report.expectedCards} 张，成功 {report.successfulCards} 张；素材失败 {report.failedAssets.length} 个。</p>
+                  <ul>{report.failedCards.map((item) => <li key={item}>{item}</li>)}{report.failedAssets.map((item, i) => <li key={i}>{item}</li>)}</ul>
+                  {captureFailures.length ? <details><summary>卡片失败原因</summary>{captureFailures.map((item) => <p key={item}>{item}</p>)}</details> : null}
+                  {report.failedCards.length || report.failedAssets.length ? <button className="btn btn-sm" onClick={() => void (lastExport === 'all' ? handleDownloadAllZip() : handleDownloadXhsZip())}>重试失败项并重新导出</button> : null}
+                  <small>ZIP 内含完整导出报告。已成功的卡片会复用。</small>
+                </div> : null}
               </section>
 
               {activeRender.assets.length > 0 ? (
@@ -1603,6 +1785,15 @@ export default function RenderPage() {
           ))}
         </div>
       ) : null}
+      </fieldset>
+
+      {editorOpen && activeRender ? <PlatformEditor render={activeRender} style={cardStyle} onClose={() => setEditorOpen(false)} onSave={saveAdjustment} /> : null}
+      <ConfirmDialog open={confirmAction !== null} title={confirmAction === 'reset' ? '恢复生成结果？' : '生成新的渲染版本？'} tone="primary"
+        description={confirmAction === 'reset' ? '将移除当前平台的专属调整，恢复此记录最初生成的内容。原文和其他平台保持不变。' : '新结果会根据原文生成，不会带入平台专属调整；旧记录及其调整仍可从历史中打开。'}
+        loading={adjusting || rendering} onClose={() => setConfirmAction(null)} onConfirm={async () => {
+          if (confirmAction === 'reset') await resetAdjustment()
+          else { setConfirmAction(null); await runRender(selectedContent, platforms, { ...options, authorName }, true) }
+        }} />
 
       <Modal
         open={pickerOpen}

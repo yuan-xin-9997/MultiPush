@@ -33,7 +33,8 @@ export async function renderPlatforms(input: RenderInput): Promise<PlatformRende
       throw new Error(`不支持的平台：${platform}`)
     }
     try {
-      results.push(await renderer({ ...input, platforms }, context))
+      const authorName = input.options.authorName?.trim() || input.authorName
+      results.push({ ...await renderer({ ...input, authorName, platforms }, context), sourceUpdatedAt: input.content.updatedAt, authorName })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`渲染${platform}失败：${message}`)

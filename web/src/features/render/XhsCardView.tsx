@@ -58,8 +58,8 @@ const TOKENS: Record<CardStyle, StyleTokens> = {
   },
 }
 
-function imageStyle(url: string): CSSProperties {
-  return { backgroundImage: `url("${absoluteUrl(url).replace(/"/g, '\\"')}")` }
+function imageStyle(url: string, position?: XhsCard['imagePosition']): CSSProperties {
+  return { backgroundImage: `url("${absoluteUrl(url).replace(/"/g, '\\"')}")`, backgroundPosition: `${position?.x ?? 50}% ${position?.y ?? 50}%` }
 }
 
 export default function XhsCardView({ card, style, tags = [], className }: XhsCardViewProps) {
@@ -98,7 +98,7 @@ export default function XhsCardView({ card, style, tags = [], className }: XhsCa
       {isCover ? (
         <>
           {hasImage ? (
-            <div className="xhs-cover-photo" style={imageStyle(card.images[0])}>
+            <div className="xhs-cover-photo" style={imageStyle(card.images[0], card.imagePosition)}>
               <div className="xhs-cover-photo-shade" />
             </div>
           ) : null}
@@ -117,8 +117,6 @@ export default function XhsCardView({ card, style, tags = [], className }: XhsCa
               <div className="xhs-cover-summary">
                 {card.body
                   .filter(Boolean)
-                  .filter((line) => !line.trim().startsWith('#'))
-                  .slice(0, 2)
                   .map((line, index) => (
                     <p key={`${line}-${index}`}>{line}</p>
                   ))}
@@ -176,7 +174,7 @@ export default function XhsCardView({ card, style, tags = [], className }: XhsCa
             {hasImage ? (
               <div className={cn('xhs-content-media', card.images.length > 1 && 'is-multi')}>
                 {card.images.slice(0, 2).map((image, index) => (
-                  <div className="xhs-content-photo" style={imageStyle(image)} key={`${image}-${index}`} />
+                  <div className="xhs-content-photo" style={imageStyle(image, card.imagePosition)} key={`${image}-${index}`} />
                 ))}
               </div>
             ) : null}

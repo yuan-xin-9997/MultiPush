@@ -29,6 +29,25 @@ afterEach(() => {
 })
 
 describe('database user isolation', () => {
+  it('saves platform drafts separately and enforces ownership on read, save and reset', () => {
+    const database = tempDatabase()
+    const alice = database.createUser({ username: 'draft_alice', email: 'draft-alice@example.com', passwordHash: 'hash', displayName: 'Alice' })
+    const bob = database.createUser({ username: 'draft_bob', email: 'draft-bob@example.com', passwordHash: 'hash', displayName: 'Bob' })
+    const content = database.createContent(alice.id, { title: '原文', bookId: null, contentJson: {}, contentHtml: '<p>原文</p>', excerpt: '', coverImage: null, tags: [], status: 'draft', favorite: false, wordCount: 2, imageCount: 0, videoCount: 0 })
+    const result = { platform: 'wechat' as const, title: '生成标题', html: '<p>生成结果</p>', markdown: null, text: '生成结果', previewMode: 'article' as const, themeColor: '#00b96b', meta: { wordCount: 4, imageCount: 0, videoCount: 0, readMinutes: 1, tags: [], titleLength: 4, summary: '' }, cards: [], assets: [], videos: [], warnings: [], downloads: [], generatedAt: content.updatedAt }
+    const record = database.createRender(alice.id, { contentId: content.id, contentTitle: content.title, platforms: ['wechat'], options: {}, results: [result] })
+    const draft = { ...result, title: '专属标题' }
+    expect(database.saveRenderDraft(bob.id, record.id, draft)).toBe(false)
+    expect(database.saveRenderDraft(alice.id, record.id, draft)).toBe(true)
+    expect(database.getRender(alice.id, record.id)?.results[0].title).toBe('专属标题')
+    expect(database.getRender(alice.id, record.id, true)?.results[0].title).toBe('生成标题')
+    expect(database.getRender(bob.id, record.id)).toBeNull()
+    expect(database.resetRenderDraft(bob.id, record.id, 'wechat')).toBe(false)
+    expect(database.getContentDetail(alice.id, content.id)?.title).toBe('原文')
+    expect(database.resetRenderDraft(alice.id, record.id, 'wechat')).toBe(true)
+    expect(database.getRender(alice.id, record.id)?.results[0].title).toBe('生成标题')
+  })
+
   it('does not expose another user\'s content or books', () => {
     const database = tempDatabase()
     const alice = database.createUser({

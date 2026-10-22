@@ -6,9 +6,33 @@ import type { Database } from '../db'
 import { ApiError, asyncHandler, notFound } from '../errors'
 import { renderPlatforms } from '../renderers'
 import { parseInput, renderListQuerySchema, renderRequestSchema } from '../validation'
+import { platformAdjustmentSchema, renderPlatformParamsSchema } from '../validation'
+import { adjustPlatformRender } from '../render-adjustment'
 
 export function createRendersRouter(database: Database, config: AppConfig): Router {
   const router = Router()
+
+  router.patch('/:id/platforms/:platform', asyncHandler(async (req, res) => {
+    const user = currentUser(req)
+    const { id, platform } = parseInput(renderPlatformParamsSchema, req.params)
+    const record = database.getRender(user.id, id)
+    const current = record?.results.find((item) => item.platform === platform)
+    if (!record || !current) throw notFound('渲染记录不存在')
+    const input = parseInput(platformAdjustmentSchema, req.body)
+    const baseUrl = config.publicBaseUrl || `${req.protocol}://${req.get('host')}`
+    const original = database.getRender(user.id, id, true)?.results.find((item) => item.platform === platform)
+    const result = await adjustPlatformRender(current, input, record.options, baseUrl, original)
+    if (!database.saveRenderDraft(user.id, id, result)) throw notFound('渲染记录不存在')
+    res.json({ result })
+  }))
+
+  router.delete('/:id/platforms/:platform', asyncHandler((req, res) => {
+    const user = currentUser(req)
+    const { id, platform } = parseInput(renderPlatformParamsSchema, req.params)
+    if (!database.resetRenderDraft(user.id, id, platform)) throw notFound('渲染记录不存在')
+    const result = database.getRender(user.id, id, true)?.results.find((item) => item.platform === platform)
+    res.json({ result })
+  }))
 
   router.post(
     '/',

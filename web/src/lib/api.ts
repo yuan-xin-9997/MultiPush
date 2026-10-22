@@ -17,6 +17,8 @@ import type {
   RenderListItem,
   RenderRecord,
   RenderRequest,
+  PlatformAdjustment,
+  PlatformRender,
   User,
 } from '@shared/types'
 
@@ -195,6 +197,8 @@ export const api = {
   },
 
   renders: {
+    adjust: (id: string, platform: PlatformId, input: PlatformAdjustment) => request<{ result: PlatformRender }>(`/api/renders/${id}/platforms/${platform}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    reset: (id: string, platform: PlatformId) => request<{ result: PlatformRender }>(`/api/renders/${id}/platforms/${platform}`, { method: 'DELETE' }),
     create: (input: RenderRequest) =>
       request<{ render: RenderRecord }>('/api/renders', { method: 'POST', body: JSON.stringify(input) }),
     list: (contentId?: string) =>

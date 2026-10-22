@@ -215,6 +215,15 @@ export interface XhsCard {
   body: string[]
   images: string[]
   footer: string
+  imagePosition?: { x: number; y: number }
+}
+
+export interface PlatformAdjustment {
+  title: string
+  html?: string
+  body?: string
+  tags: string[]
+  cards?: XhsCard[]
 }
 
 export interface RenderedAsset {
@@ -256,6 +265,10 @@ export interface PlatformRender {
   warnings: string[]
   downloads: RenderDownload[]
   generatedAt: string
+  sourceUpdatedAt?: string
+  captionBody?: string
+  editedAt?: string
+  authorName?: string
 }
 
 export interface RenderRecord {

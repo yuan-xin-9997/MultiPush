@@ -102,6 +102,21 @@ export const favoriteBodySchema = z.object({
 })
 
 const platformSchema = z.enum(['wechat', 'xiaohongshu', 'zhihu', 'douyin'])
+const mediaUrlSchema = z.string().max(2048).refine((value) => /^(https?:\/\/|\/uploads\/|data:image\/(png|jpeg|webp|gif);base64,)/i.test(value), '图片地址无效')
+export const renderPlatformParamsSchema = z.object({ id: z.string().max(100), platform: platformSchema })
+export const platformAdjustmentSchema = z.object({
+  title: z.string().trim().min(1, '请输入标题').max(500),
+  html: z.string().max(1_000_000).optional(),
+  body: z.string().max(100_000).optional(),
+  tags: z.array(z.string().trim().min(1).max(24)).max(10),
+  cards: z.array(z.object({
+    id: z.string().min(1).max(100), type: z.enum(['cover', 'content', 'quote', 'end']),
+    index: z.number().int().min(1), total: z.number().int().min(1),
+    title: z.string().max(500), body: z.array(z.string().max(100_000)).max(1000),
+    images: z.array(mediaUrlSchema).max(2), footer: z.string().max(200),
+    imagePosition: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) }).optional(),
+  })).min(1).max(1000).refine((cards) => new Set(cards.map((card) => card.id)).size === cards.length, '卡片 ID 重复').optional(),
+})
 
 export const renderOptionsSchema = z.object({
   cardStyle: z.enum(['clean', 'warm', 'bold']).optional(),

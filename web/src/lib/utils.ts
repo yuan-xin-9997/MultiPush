@@ -111,7 +111,7 @@ export async function copyText(text: string): Promise<void> {
   if (!legacyCopyText(text)) throw new Error('浏览器不允许访问剪贴板')
 }
 
-export async function copyRichHtml(html: string, plainText?: string): Promise<void> {
+export async function copyRichHtml(html: string, plainText?: string): Promise<'html' | 'text'> {
   if (window.isSecureContext && typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
     try {
       const item = new ClipboardItem({
@@ -119,7 +119,7 @@ export async function copyRichHtml(html: string, plainText?: string): Promise<vo
         'text/plain': new Blob([plainText ?? html.replace(/<[^>]+>/g, '')], { type: 'text/plain' }),
       })
       await navigator.clipboard.write([item])
-      return
+      return 'html'
     } catch {
       // Fall through to the selection-based copy path.
     }
@@ -146,7 +146,9 @@ export async function copyRichHtml(html: string, plainText?: string): Promise<vo
   }
   selection?.removeAllRanges()
   container.remove()
-  if (!copied) await copyText(plainText ?? html.replace(/<[^>]+>/g, ''))
+  if (copied) return 'html'
+  await copyText(plainText ?? html.replace(/<[^>]+>/g, ''))
+  return 'text'
 }
 
 export function safeFilename(value: string, fallback = 'multipush'): string {

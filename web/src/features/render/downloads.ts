@@ -15,6 +15,30 @@ export interface ExportedCardImage {
 export interface ZipBuildResult {
   blob: Blob
   skippedAssets: number
+  report: ExportReport
+}
+
+export interface ExportReport {
+  expectedCards: number
+  successfulCards: number
+  failedCards: string[]
+  failedAssets: string[]
+}
+
+export function exportReport(renders: PlatformRender[], cards: ExportedCardImage[], failedAssets: string[], cardFailures: Record<string, string> = {}): ExportReport {
+  const expected = renders.find((render) => render.platform === 'xiaohongshu')?.cards ?? []
+  const ids = new Set(cards.map((image) => image.card.id))
+  return { expectedCards: expected.length, successfulCards: expected.filter((card) => ids.has(card.id)).length,
+    failedCards: expected.filter((card) => !ids.has(card.id)).map((card) => `第 ${card.index} 张（${card.id}）${cardFailures[card.id] ? `：${cardFailures[card.id]}` : ''}`), failedAssets }
+}
+
+function addExportReport(zip: JSZip, report: ExportReport): void {
+  zip.file('导出报告.json', JSON.stringify(report, null, 2))
+  zip.file('导出报告.txt', [
+    `卡片：应有 ${report.expectedCards} 张，成功 ${report.successfulCards} 张`,
+    report.failedCards.length || report.failedAssets.length ? '本次导出不完整，请在工作台重试失败项。' : '卡片及素材已完整导出。',
+    '缺失卡片：', ...report.failedCards, '缺失素材（地址与原因）：', ...report.failedAssets,
+  ].join('\n'))
 }
 
 const CARD_TYPE_LABELS: Record<XhsCard['type'], string> = {
@@ -111,7 +135,12 @@ export function buildHtmlDownload(render: PlatformRender): RenderDownload {
 /** Backend downloads plus safe client-side fallbacks for every platform. */
 export function downloadsFor(render: PlatformRender): RenderDownload[] {
   const info = getPlatformInfo(render.platform)
-  const downloads = [...render.downloads]
+  const downloads = render.downloads.map((download) => {
+    if (download.kind === 'json' && render.platform === 'xiaohongshu') {
+      return { ...download, content: xhsNoteJson(render) }
+    }
+    return download
+  })
   const baseName = safeFilename(render.title, info.shortName)
 
   if (render.html && !downloads.some((download) => download.kind === 'html')) {
@@ -242,13 +271,15 @@ function assetFilename(asset: AssetRef, index: number, blob: Blob, url: string):
 const ASSET_FETCH_TIMEOUT_MS = 20_000
 const ASSET_FETCH_CONCURRENCY = 3
 
-async function fetchAssetBlob(url: string): Promise<Blob> {
+async function fetchAssetBlob(url: string, kind: AssetRef['kind']): Promise<Blob> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), ASSET_FETCH_TIMEOUT_MS)
   try {
     const response = await fetch(url, { signal: controller.signal })
     if (!response.ok) throw new Error(`素材请求失败：${response.status}`)
-    return await response.blob()
+    const blob = await response.blob()
+    if (!blob.size || !blob.type.startsWith(`${kind}/`)) throw new Error('素材为空或返回了错误的文件类型')
+    return blob
   } finally {
     clearTimeout(timer)
   }
@@ -259,11 +290,11 @@ async function addAssetsToZip(
   assets: AssetRef[],
   folder: string,
   onProgress?: ProgressReporter,
-): Promise<number> {
+): Promise<string[]> {
   const total = assets.length
-  if (total === 0) return 0
+  if (total === 0) return []
 
-  let skipped = 0
+  const failures: string[] = []
   let completed = 0
   let cursor = 0
   onProgress?.(`正在获取素材 0/${total}…`)
@@ -278,16 +309,16 @@ async function addAssetsToZip(
       if (!asset) continue
       try {
         const url = absoluteUrl(asset.url)
-        const blob = await fetchAssetBlob(url)
+        const blob = await fetchAssetBlob(url, asset.kind)
         const typeFolder = asset.kind === 'video' ? '视频' : '图片'
         // Images and videos are already compressed; storing them avoids a
         // slow, pointless DEFLATE pass over tens of megabytes.
         zip.file(`${folder}/${typeFolder}/${assetFilename(asset, index, blob, url)}`, blob, {
           compression: 'STORE',
         })
-      } catch {
+      } catch (error) {
         // Assets are best-effort: the archive must still be downloadable.
-        skipped += 1
+        failures.push(`${asset.url}：${error instanceof Error ? error.message : '下载失败'}`)
       } finally {
         completed += 1
         onProgress?.(`正在获取素材 ${completed}/${total}…`)
@@ -298,7 +329,7 @@ async function addAssetsToZip(
   await Promise.all(
     Array.from({ length: Math.min(ASSET_FETCH_CONCURRENCY, total) }, () => worker()),
   )
-  return skipped
+  return failures
 }
 
 function uniqueZipPath(zip: JSZip, path: string): string {
@@ -338,6 +369,7 @@ export async function buildXhsZip(
   render: PlatformRender,
   cards: ExportedCardImage[],
   onProgress?: ProgressReporter,
+  cardFailures: Record<string, string> = {},
 ): Promise<ZipBuildResult> {
   const zip = new JSZip()
   const folder = '小红书'
@@ -357,10 +389,12 @@ export async function buildXhsZip(
   }
 
   onProgress?.('正在整理原图与视频素材…', 22)
-  const skippedAssets = await addAssetsToZip(zip, assetRefs(render), `${folder}/素材`, onProgress)
+  const failures = await addAssetsToZip(zip, assetRefs(render), `${folder}/素材`, onProgress)
+  const report = exportReport([render], cards, failures, cardFailures)
+  addExportReport(zip, report)
   onProgress?.('正在压缩小红书素材…', 88)
   const blob = await generateZip(zip, onProgress)
-  return { blob, skippedAssets }
+  return { blob, skippedAssets: failures.length, report }
 }
 
 /**
@@ -371,12 +405,13 @@ export async function buildAllZip(
   renders: PlatformRender[],
   xhsCards: ExportedCardImage[],
   onProgress?: ProgressReporter,
+  cardFailures: Record<string, string> = {},
 ): Promise<ZipBuildResult> {
   const zip = new JSZip()
   const ordered = [...renders].sort(
     (left, right) => PLATFORM_ORDER.indexOf(left.platform) - PLATFORM_ORDER.indexOf(right.platform),
   )
-  let skippedAssets = 0
+  const failures: string[] = []
 
   for (let index = 0; index < ordered.length; index += 1) {
     const render = ordered[index]
@@ -404,15 +439,17 @@ export async function buildAllZip(
       zip.file(uniqueZipPath(zip, `${folder}/笔记.json`), xhsNoteJson(render))
     }
 
-    skippedAssets += await addAssetsToZip(
+    failures.push(...await addAssetsToZip(
       zip,
       assetRefs(render),
       `${folder}/素材`,
       (message) => onProgress?.(`「${info.shortName}」${message}`, basePercent),
-    )
+    ))
   }
 
   onProgress?.('正在压缩全部素材…', 88)
+  const report = exportReport(renders, xhsCards, failures, cardFailures)
+  addExportReport(zip, report)
   const blob = await generateZip(zip, onProgress)
-  return { blob, skippedAssets }
+  return { blob, skippedAssets: failures.length, report }
 }

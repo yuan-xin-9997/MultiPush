@@ -256,7 +256,13 @@ export class Database {
       CREATE INDEX IF NOT EXISTS idx_renders_user_created ON renders(user_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_renders_content ON renders(content_id);
 
-      PRAGMA user_version = 1;
+      CREATE TABLE IF NOT EXISTS render_drafts (
+        render_id TEXT NOT NULL REFERENCES renders(id) ON DELETE CASCADE,
+        platform TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        PRIMARY KEY (render_id, platform)
+      );
+      PRAGMA user_version = 2;
     `)
   }
 
@@ -744,9 +750,32 @@ export class Database {
     }))
   }
 
-  getRender(userId: string, renderId: string): RenderRecord | null {
+  getRender(userId: string, renderId: string, original = false): RenderRecord | null {
     const row = this.get('SELECT * FROM renders WHERE id = ? AND user_id = ?', [renderId, userId])
-    return row ? this.mapRenderRecord(row) : null
+    if (!row) return null
+    const record = this.mapRenderRecord(row)
+    if (!original) {
+      for (const draft of this.all('SELECT platform, result_json FROM render_drafts WHERE render_id = ?', [renderId])) {
+        const result = parseJson(draft.result_json) as RenderRecord['results'][number] | null
+        if (result) record.results = record.results.map((item) => item.platform === draft.platform ? result : item)
+      }
+    }
+    return record
+  }
+
+  saveRenderDraft(userId: string, renderId: string, result: RenderRecord['results'][number]): boolean {
+    const record = this.getRender(userId, renderId)
+    if (!record?.platforms.includes(result.platform)) return false
+    this.run(`INSERT INTO render_drafts (render_id, platform, result_json) VALUES (?, ?, ?)
+      ON CONFLICT(render_id, platform) DO UPDATE SET result_json = excluded.result_json`,
+    [renderId, result.platform, JSON.stringify(result)])
+    return true
+  }
+
+  resetRenderDraft(userId: string, renderId: string, platform: PlatformId): boolean {
+    if (!this.getRender(userId, renderId)?.platforms.includes(platform)) return false
+    this.run('DELETE FROM render_drafts WHERE render_id = ? AND platform = ?', [renderId, platform])
+    return true
   }
 
   deleteRender(userId: string, renderId: string): boolean {
