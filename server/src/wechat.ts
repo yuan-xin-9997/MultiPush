@@ -8,6 +8,7 @@ import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
 import { UPLOAD_FILENAME_PATTERN } from './upload'
+import { downloadWechatImage } from './wechat-image'
 import type { WechatBrowserDriver, WechatLoginAttempt, WechatStorageState } from './wechat-browser'
 
 const LOGIN_TTL = 5 * 60_000
@@ -42,6 +43,7 @@ export function decryptWechatSession(value: string, key: Buffer, userId: string)
 
 type LoginEntry = { userId: string; value: WechatLogin; attempt: WechatLoginAttempt; timer: ReturnType<typeof setTimeout>; polling?: Promise<WechatLogin> }
 type Article = Parameters<WechatBrowserDriver['publish']>[1]
+type PreparedArticle = Article & { externalImages: string[] }
 
 export class WechatService {
   private readonly key: Buffer
@@ -191,7 +193,7 @@ export class WechatService {
     }
   }
 
-  private async article(userId: string, input: WechatPublishInput, baseUrl?: string): Promise<Article> {
+  private async article(userId: string, input: WechatPublishInput, baseUrl?: string): Promise<PreparedArticle> {
     const record = this.database.getRender(userId, input.renderId)
     const render = record?.results.find((item) => item.platform === 'wechat')
     if (!record || !render) throw notFound('公众号渲染记录不存在')
@@ -205,24 +207,29 @@ export class WechatService {
     if (Buffer.byteLength(render.html) > 1024 * 1024) throw new ApiError(400, 'wechat_body_size', '公众号正文 HTML 不能超过 1 MB')
     if ($('video,audio,iframe').length || render.videos.length) throw new ApiError(400, 'wechat_video_unsupported', '请先移除视频或音频；当前自动发布支持图文文章')
     if ($('img').length > 100) throw new ApiError(400, 'wechat_image_count', '公众号正文最多支持 100 张图片')
+    const cover = await this.mediaFile(userId, input.coverMediaId)
     const images: Article['images'] = new Map()
+    const externalImages: string[] = []
     for (const element of $('img').toArray()) {
       const src = $(element).attr('src') || ''
       $(element).removeAttr('srcset')
-      if (images.has(src)) continue
+      if (images.has(src) || externalImages.includes(src)) continue
       let url: URL
       try { url = new URL(src, 'https://multipush.invalid') } catch { throw new ApiError(400, 'wechat_image_invalid', '正文包含无效图片地址，请重新上传图片') }
       if (url.protocol === 'https:' && ['mmbiz.qpic.cn', 'mmbiz.qlogo.cn', 'mmecoa.com'].some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))) continue
-      // Read only owned uploads; never make server-side requests to arbitrary image URLs.
       const allowedOrigin = this.config.publicBaseUrl || baseUrl
       const ownedOrigin = url.origin === 'https://multipush.invalid' || (allowedOrigin && url.origin === new URL(allowedOrigin).origin)
       const filename = ownedOrigin && url.pathname.startsWith('/uploads/') ? url.pathname.slice('/uploads/'.length) : ''
-      if (!UPLOAD_FILENAME_PATTERN.test(filename)) throw new ApiError(400, 'wechat_external_image', '正文含外链图片，请在编辑器上传该图片后重新渲染；微信会过滤外链图片')
+      if (!filename && (url.protocol === 'data:' || url.origin !== 'https://multipush.invalid' && !ownedOrigin)) {
+        externalImages.push(src)
+        continue
+      }
+      if (!UPLOAD_FILENAME_PATTERN.test(filename)) throw new ApiError(400, 'wechat_image_invalid', '正文包含无效图片地址，请重新上传图片')
       const media = this.database.getMediaByFilename(userId, filename)
       if (!media) throw notFound('正文图片不存在或无权访问，请在编辑器重新上传')
       images.set(src, await this.mediaFile(userId, media.id))
     }
-    return { title, html: $.html(), author: input.author ?? Array.from(render.authorName ?? '').slice(0, 8).join(''), digest: input.digest ?? Array.from(render.meta.summary ?? '').slice(0, 120).join(''), cover: await this.mediaFile(userId, input.coverMediaId), images }
+    return { title, html: $.html(), author: input.author ?? Array.from(render.authorName ?? '').slice(0, 8).join(''), digest: input.digest ?? Array.from(render.meta.summary ?? '').slice(0, 120).join(''), cover, images, externalImages }
   }
 
   private withQr(publication: WechatPublication): WechatPublication {
@@ -269,8 +276,13 @@ export class WechatService {
     } finally { if (!handedOff) this.activeUsers.delete(userId) }
   }
 
-  private async runPublication(userId: string, id: string, state: WechatStorageState, article: Article, mode: WechatPublishInput['mode']): Promise<void> {
+  private async runPublication(userId: string, id: string, state: WechatStorageState, article: PreparedArticle, mode: WechatPublishInput['mode']): Promise<void> {
     try {
+      for (const [index, src] of article.externalImages.entries()) {
+        this.database.updateWechatPublication(userId, id, { status: 'running', message: `正在读取正文图片 ${index + 1}/${article.externalImages.length}，随后上传到微信` })
+        const url = new URL(src, 'https://multipush.invalid')
+        article.images.set(src, await downloadWechatImage(url.href))
+      }
       const result = await this.driver.publish(state, article, mode, (update) => {
         const { qrCode, ...values } = update
         if (qrCode) this.qrCodes.set(id, qrCode)
@@ -282,7 +294,7 @@ export class WechatService {
     } catch (error) {
       const account = this.database.getWechatAccount(userId)
       if (error instanceof ApiError && error.code === 'wechat_session_expired' && account) this.database.saveWechatAccount(userId, { ...account, status: 'expired', checkedAt: now() })
-      const knownRejection = error instanceof ApiError && ['wechat_session_expired', 'wechat_rejected', 'wechat_preparation_failed', 'wechat_browser_unavailable', 'wechat_publish_not_submitted', 'wechat_notification_unverified'].includes(error.code)
+      const knownRejection = error instanceof ApiError && ['wechat_session_expired', 'wechat_rejected', 'wechat_preparation_failed', 'wechat_browser_unavailable', 'wechat_publish_not_submitted', 'wechat_notification_unverified', 'wechat_image_download'].includes(error.code)
       this.database.updateWechatPublication(userId, id, {
         status: knownRejection ? 'failed' : 'uncertain',
         message: error instanceof ApiError ? error.message : '公众号操作中断，结果未确认。请到微信后台核实草稿与发表记录，避免重复发表。',

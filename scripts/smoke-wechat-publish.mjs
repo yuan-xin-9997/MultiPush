@@ -13,7 +13,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const qrCode = `data:image/png;base64,${png.toString('base64')}`
 const user = { id: 'alice', username: 'alice', email: 'alice@example.com', displayName: 'Alice', avatarUrl: null, createdAt: time }
 const content = { id: 'content-1', title: '公众号联调文章', excerpt: '这是摘要', coverImage: null, contentHtml: '<p>这是一篇测试文章。</p>' }
-const article = { platform: 'wechat', title: '公众号联调文章', html: '<section><p style="line-height:1.8">这是一篇测试文章。</p></section>', meta: { summary: '这是摘要' }, warnings: [] }
+const article = { platform: 'wechat', title: '公众号联调文章', html: '<section><p style="line-height:1.8">这是一篇测试文章。</p></section>', meta: { summary: '这是摘要' }, warnings: ['包含 5 张外部图片（非本站上传），下载或发布时可能无法正常显示。'] }
 const render = { id: 'render-1', contentId: content.id, contentTitle: content.title, platforms: ['wechat'], results: [article], options: { authorName: '测试作者' }, createdAt: time }
 const media = { id: 'cover-1', kind: 'image', url: '/uploads/cover.png', filename: 'cover.png', originalName: 'cover.png', mimeType: 'image/png', size: png.length, createdAt: time }
 let connected = false
@@ -36,6 +36,7 @@ app.post('/api/media', (_req, res) => res.json({ media }))
 app.get('/uploads/cover.png', (_req, res) => res.type('png').send(png))
 app.get('/api/wechat/publications', (_req, res) => res.json({ publications }))
 app.post('/api/wechat/publications', (req, res) => {
+  if (mode === 'failure') { res.status(400).json({ error: 'wechat_image_download', message: '正文图片读取失败，请检查链接后重试' }); return }
   submissions.push(req.body)
   const publication = { id: `publication-${submissions.length}`, renderId: render.id, title: article.title, mode: req.body.mode, status: mode === 'uncertain' ? 'uncertain' : 'running', message: '正在处理', qrCode: null, url: null, remoteId: 'draft-1', createdAt: time, updatedAt: time, polls: 0 }
   publications.unshift(publication)
@@ -70,6 +71,14 @@ try {
   await page.getByText('已连接', { exact: true }).waitFor({ timeout: 15000 })
   assert.equal(await page.getByRole('dialog').count(), 0, 'Login dialog should close after connection')
   await page.getByLabel('上传公众号封面').setInputFiles({ name: 'cover.png', mimeType: 'image/png', buffer: png })
+  await page.getByText('检测到 5 张外链图片，提交时将自动读取并上传到微信，正文地址会替换为微信图片地址。').waitFor()
+  mode = 'failure'
+  await page.getByRole('button', { name: '正式发表', exact: true }).click()
+  await page.getByRole('button', { name: '确认正式发表', exact: true }).click()
+  await page.locator('.publish-error').filter({ hasText: '正文图片读取失败' }).waitFor()
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  assert.equal(await page.getByRole('button', { name: '正式发表', exact: true }).isEnabled(), true)
+  mode = 'normal'
   await page.getByRole('button', { name: '保存到草稿箱', exact: true }).click()
   await page.getByText('已保存草稿', { exact: true }).waitFor({ timeout: 10000 })
   assert.equal(submissions.length, 1)

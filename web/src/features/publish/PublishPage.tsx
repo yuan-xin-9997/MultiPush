@@ -193,8 +193,10 @@ export default function PublishPage() {
       if (!mounted.current) return
       setPublications((current) => [result.publication, ...current.filter((item) => item.id !== result.publication.id)])
       setConfirmation(null)
+      toast.success(mode === 'draft' ? '已提交保存草稿，请在发布记录查看进度' : '已提交发表，请在发布记录查看进度和微信验证')
+      requestAnimationFrame(() => document.getElementById('publish-history-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     } catch (cause) {
-      if (mounted.current) { setConfirmation(null); setError(getErrorMessage(cause)) }
+      if (mounted.current) { setConfirmation(null); setError(getErrorMessage(cause)); toast.error(getErrorMessage(cause)) }
       // Recover a job accepted before a lost HTTP response, instead of submitting it again.
       try {
         const result = await api.wechat.listPublications()
@@ -252,10 +254,10 @@ export default function PublishPage() {
               {uploading ? <p className="publish-muted" role="status"><LoaderCircle size={14} className="spin" />正在上传封面…</p> : null}
               <label className="publish-field">作者（选填）<input className="input" value={author} maxLength={8} disabled={submitting} placeholder="最多 8 个字" onChange={(event) => setAuthor(event.target.value)} /></label>
               <label className="publish-field">摘要（选填）<textarea className="input" rows={3} maxLength={120} value={digest} disabled={submitting} placeholder="简短介绍文章内容" onChange={(event) => setDigest(event.target.value)} /><small>{digest.length} / 120</small></label>
-              {article.warnings.length ? <div className="publish-warning"><strong>排版提醒</strong><ul>{article.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div> : null}
+              {article.warnings.length ? <div className="publish-warning"><strong>排版提醒</strong><ul>{article.warnings.map((warning) => <li key={warning}>{warning.replace(/^包含 (\d+) 张外部图片（非本站上传），下载或发布时可能无法正常显示。$/, '检测到 $1 张外链图片，提交时将自动读取并上传到微信，正文地址会替换为微信图片地址。')}</li>)}</ul></div> : null}
               {selectedUncertain ? <p className="publish-warning">这篇内容有结果待核实的提交，请先到公众号后台检查，避免重复发表。</p> : null}
               <div className="publish-submit-actions"><button type="button" className="btn" disabled={!canPublish} onClick={() => void publish('draft')}><FileText size={16} />保存到草稿箱</button><button type="button" className="btn btn-primary" disabled={!canPublish} onClick={() => setConfirmation('publish')}>{submitting || processing ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}正式发表</button></div>
-              <p className="publish-form-hint">{account?.status !== 'connected' ? '请先扫码连接公众号。' : !cover ? '请选择封面后提交。' : processing ? '任务正在处理，请在下方查看进度并完成微信验证。' : '正文图片将自动上传到微信。正式发表时，微信可能要求管理员再次扫码确认。'}</p>
+              <p className="publish-form-hint" role="status">{submitting ? '正在检查内容并读取正文图片，请稍候…' : account?.status !== 'connected' ? '请先扫码连接公众号。' : !cover ? '请选择封面后提交。' : processing ? '任务正在处理，请在下方查看进度并完成微信验证。' : '正文图片（含外链图片）将自动上传到微信并替换地址。正式发表时，微信可能要求管理员再次扫码确认。'}</p>
             </> : <p className="publish-muted">未能加载公众号排版，请重新选择内容或返回渲染工作台。</p>}
           </>}
         </section>

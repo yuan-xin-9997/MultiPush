@@ -13,6 +13,7 @@ import { openDatabase, type Database } from '../src/db'
 import { ApiError } from '../src/errors'
 import { decryptWechatSession, encryptWechatSession, loadWechatKey, WechatService } from '../src/wechat'
 import type { WechatBrowserDriver, WechatLoginAttempt, WechatStorageState } from '../src/wechat-browser'
+import * as remoteImages from '../src/wechat-image'
 
 const directories: string[] = []
 const databases: Database[] = []
@@ -187,7 +188,36 @@ describe('WeChat article submission', () => {
     expect(driver.publish).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects another user’s cover and body images, external URLs, and unsupported embedded video before publication', async () => {
+  it('loads external images once per URL and includes their bytes for upload to WeChat', async () => {
+    const { service, driver, alice, seedAccount, image, article } = setup()
+    seedAccount()
+    const cover = image(alice.id, 'cover.png')
+    const download = vi.spyOn(remoteImages, 'downloadWechatImage').mockResolvedValue({ name: 'body.png', mimeType: 'image/png', buffer: Buffer.from('remote-image') })
+    const render = article('<p>正文</p><img src="https://example.com/a.png" srcset="https://example.com/b.png 2x"><img src="https://example.com/a.png">')
+    const publication = await service.publish(alice.id, { renderId: render.id, mode: 'publish', coverMediaId: cover.id })
+    expect((await finished(service, alice.id, publication.id)).status).toBe('published')
+    expect(download).toHaveBeenCalledExactlyOnceWith('https://example.com/a.png')
+    const submitted = driver.publish.mock.calls[0][1]
+    expect(submitted.images.get('https://example.com/a.png')?.buffer.toString()).toBe('remote-image')
+    expect(submitted.html).not.toContain('srcset')
+  })
+
+  it('records image download failures before sending anything to WeChat and permits retry', async () => {
+    const { service, driver, alice, seedAccount, image, article } = setup()
+    seedAccount()
+    const cover = image(alice.id, 'cover.png')
+    const render = article('<p>正文</p><img src="https://example.com/a.png">')
+    const download = vi.spyOn(remoteImages, 'downloadWechatImage').mockRejectedValueOnce(new ApiError(400, 'wechat_image_download', '图片读取失败'))
+    const input: WechatPublishInput = { renderId: render.id, mode: 'draft', coverMediaId: cover.id }
+    const failed = await service.publish(alice.id, input)
+    expect(await finished(service, alice.id, failed.id)).toMatchObject({ status: 'failed', message: '图片读取失败' })
+    expect(driver.publish).not.toHaveBeenCalled()
+    download.mockResolvedValueOnce({ name: 'body.png', mimeType: 'image/png', buffer: Buffer.from('remote-image') })
+    const publication = await service.publish(alice.id, input)
+    expect((await finished(service, alice.id, publication.id)).status).toBe('draft')
+  })
+
+  it('rejects another user’s cover and body images and unsupported embedded video before publication', async () => {
     const { service, driver, alice, bob, seedAccount, image, article } = setup()
     const remoteFetch = vi.spyOn(globalThis, 'fetch')
     seedAccount()
@@ -197,9 +227,6 @@ describe('WeChat article submission', () => {
     await expect(service.publish(alice.id, { renderId: clean.id, mode: 'draft', coverMediaId: other.id })).rejects.toMatchObject({ status: 404 })
     for (const [html, code] of [
       ['<p>正文</p><img src="/uploads/other.png">', 'not_found'],
-      ['<p>正文</p><img src="http://127.0.0.1:1234/private.png">', 'wechat_external_image'],
-      ['<p>正文</p><img src="https://example.com/image.png">', 'wechat_external_image'],
-      ['<p>正文</p><img src="https://example.com/uploads/cover.png">', 'wechat_external_image'],
       ['<p>正文</p><video src="/uploads/video.mp4"></video>', 'wechat_video_unsupported'],
     ]) {
       const render = article(html)

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -37,13 +38,29 @@ export default function Dropdown({
   const [open, setOpen] = useState(false)
   const [submenu, setSubmenu] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
+
+  useLayoutEffect(() => {
+    if (!open || !rootRef.current || !menuRef.current) return
+    const anchor = rootRef.current.getBoundingClientRect()
+    const { offsetWidth: width, offsetHeight: height } = menuRef.current
+    const left = Math.max(8, Math.min(align === 'start' ? anchor.left : anchor.right - width, window.innerWidth - width - 8))
+    const below = anchor.bottom + 6
+    const top = below + height <= window.innerHeight - 8 ? below : Math.max(8, anchor.top - height - 6)
+    setPosition({ top, left })
+  }, [open, align, minWidth, submenu])
 
   useEffect(() => {
     if (!open) return
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
       const target = event.target
       if (!(target instanceof Node)) return
-      if (rootRef.current && !rootRef.current.contains(target)) close()
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) close()
+    }
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return
+      close()
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -54,16 +71,21 @@ export default function Dropdown({
     document.addEventListener('mousedown', onPointerDown)
     document.addEventListener('touchstart', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', close)
     return () => {
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('touchstart', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', close)
     }
   }, [open])
 
   function close() {
     setOpen(false)
     setSubmenu(null)
+    setPosition(null)
   }
 
   function select(item: DropdownItem) {
@@ -80,17 +102,21 @@ export default function Dropdown({
     >
       <div
         className="dropdown-trigger"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => open ? close() : setOpen(true)}
         aria-haspopup="menu"
         aria-expanded={open}
       >
         {trigger}
       </div>
-      {open ? (
+      {open ? createPortal(
         <div
+          ref={menuRef}
           className={cn('dropdown-menu', align === 'start' && 'left', menuClassName)}
           role="menu"
-          style={minWidth ? { minWidth } : undefined}
+          style={{
+            position: 'fixed', top: position?.top ?? 0, left: position?.left ?? 0, right: 'auto',
+            minWidth, maxWidth: 'calc(100vw - 16px)', visibility: position ? 'visible' : 'hidden',
+          }}
         >
           {header ? (
             <>
@@ -109,8 +135,8 @@ export default function Dropdown({
                 <div
                   key={entry.key}
                   className="dropdown-submenu"
-                  onMouseEnter={() => setSubmenu(entry.key)}
-                  onMouseLeave={() => setSubmenu((current) => (current === entry.key ? null : current))}
+                  onMouseEnter={() => { if (window.innerWidth > 640) setSubmenu(entry.key) }}
+                  onMouseLeave={() => { if (window.innerWidth > 640) setSubmenu((current) => (current === entry.key ? null : current)) }}
                 >
                   <button
                     type="button"
@@ -118,7 +144,7 @@ export default function Dropdown({
                     role="menuitem"
                     aria-haspopup="menu"
                     aria-expanded={expanded}
-                    onClick={() => setSubmenu(expanded ? null : entry.key)}
+                    onClick={() => setSubmenu(entry.key)}
                   >
                     {entry.icon}
                     <span className="dropdown-item-label">{entry.label}</span>
@@ -164,7 +190,7 @@ export default function Dropdown({
               </button>
             )
           })}
-        </div>
+        </div>, document.body
       ) : null}
     </div>
   )
