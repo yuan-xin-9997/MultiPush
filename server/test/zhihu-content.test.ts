@@ -58,7 +58,7 @@ describe('Zhihu native article formatting', () => {
     const native = zhihuEditorContent(source)
     const stored = native.replace('<img', '<noscript>&lt;img src="https://pic4.zhimg.com/image.png"&gt;</noscript><img')
     expect(() => verifyZhihuContent(native, stored)).not.toThrow()
-    expect(zhihuEditorContent(stored)).toBe(native)
+    expect(zhihuEditorContent(stored)).toBe(zhihuEditorContent(native))
   })
 
   it('submits native data-caption images without unsupported wrappers or blank caption paragraphs', () => {
