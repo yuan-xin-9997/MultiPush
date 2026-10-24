@@ -148,6 +148,20 @@ export function parseWechatUpload(value: unknown): { id: string; url: string } {
   throw new ApiError(502, 'wechat_image_upload_failed', '微信图片上传未返回有效素材，请重试')
 }
 
+export function applyWechatImage($: ReturnType<typeof load>, src: string, uploaded: { id: string; url: string }, mimeType: string): void {
+  // The mobile draft editor needs material identity and format, not just a CDN URL.
+  $('img').each((_, node) => {
+    const image = $(node)
+    if (image.attr('src') !== src) return
+    image.attr({
+      src: uploaded.url, 'data-src': uploaded.url, 'data-imgfileid': uploaded.id,
+      'data-type': mimeType.slice('image/'.length), type: 'block',
+    }).addClass('rich_pages wxw-img js_insertlocalimg').removeAttr('srcset')
+    if (mimeType === 'image/gif') image.removeAttr('data-s')
+    else image.attr('data-s', '300,640')
+  })
+}
+
 export function wechatSwitchState(value: { checked?: boolean; ariaChecked?: string | null; className?: string | null }): boolean | null {
   if (typeof value.checked === 'boolean') return value.checked
   if (value.ariaChecked === 'true') return true
@@ -324,7 +338,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
       const html = load(article.html, null, false)
       for (const [src, image] of article.images) {
         const uploaded = await upload(image)
-        html('img').each((_, node) => { if (html(node).attr('src') === src) html(node).attr('src', uploaded.url) })
+        applyWechatImage(html, src, uploaded, image.mimeType)
       }
       const create = new URL('/cgi-bin/operate_appmsg', HOME)
       create.search = new URLSearchParams({ t: 'ajax-response', sub: 'create', type: '77', token: info.token, lang: 'zh_CN' }).toString()

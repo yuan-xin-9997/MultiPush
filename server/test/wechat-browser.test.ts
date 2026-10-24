@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '../src/errors'
-import { assertWechatResponse, classifyWechatFailure, findPublishedArticle, isWechatLoginScanned, parseWechatPage, parseWechatUpload, wechatSwitchState } from '../src/wechat-browser'
+import { load } from 'cheerio'
+import { applyWechatImage, assertWechatResponse, classifyWechatFailure, findPublishedArticle, isWechatLoginScanned, parseWechatPage, parseWechatUpload, wechatSwitchState } from '../src/wechat-browser'
 
 describe('WeChat browser responses', () => {
+  it.each(['png', 'jpeg', 'gif'])('writes mobile editor material metadata for uploaded %s images', (format) => {
+    const $ = load('<section><p>正文</p><img src="/uploads/body.png" alt="图一" style="max-width:100%"><img src="/uploads/body.png" srcset="https://external.test/image.png 2x"><img src="https://mmbiz.qpic.cn/other"></section>', null, false)
+    const uploaded = { id: '100000843', url: 'https://mmbiz.qpic.cn/image/0?wx_fmt=png&from=appmsg' }
+    applyWechatImage($, '/uploads/body.png', uploaded, `image/${format}`)
+    for (const node of $('img').slice(0, 2).toArray()) {
+      expect($(node).attr()).toMatchObject({ src: uploaded.url, 'data-src': uploaded.url, 'data-imgfileid': uploaded.id, 'data-type': format, type: 'block' })
+      expect($(node).hasClass('js_insertlocalimg')).toBe(true)
+      expect($(node).attr('data-s')).toBe(format === 'gif' ? undefined : '300,640')
+      expect($(node).attr('srcset')).toBeUndefined()
+    }
+    expect($('img').first().attr('alt')).toBe('图一')
+    expect($('img').first().attr('style')).toBe('max-width:100%')
+    expect($('img').last().attr('src')).toBe('https://mmbiz.qpic.cn/other')
+    expect($('p').text()).toBe('正文')
+  })
+
   it('requires an explicit successful remote result and maps expired sessions', () => {
     expect(assertWechatResponse({ base_resp: { ret: '0' } }, '保存')).toEqual({ base_resp: { ret: '0' } })
     expect(() => assertWechatResponse({ base_resp: { ret: 200003 } }, '保存')).toThrow('登录已过期')
