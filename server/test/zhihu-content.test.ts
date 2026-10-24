@@ -54,6 +54,13 @@ describe('Zhihu native article formatting', () => {
     expect(() => verifyZhihuContent(html, $.html())).not.toThrow()
   })
 
+  it('ignores Zhihu nonvisual image fallbacks during publication readback', () => {
+    const native = zhihuEditorContent(source)
+    const stored = native.replace('<img', '<noscript>&lt;img src="https://pic4.zhimg.com/image.png"&gt;</noscript><img')
+    expect(() => verifyZhihuContent(native, stored)).not.toThrow()
+    expect(zhihuEditorContent(stored)).toBe(native)
+  })
+
   it('submits native data-caption images without unsupported wrappers or blank caption paragraphs', () => {
     const semantic = prepareZhihuContent(source), native = zhihuEditorContent(semantic), $ = load(native)
     expect($('img').attr('data-caption')).toBe('图 1：说明')

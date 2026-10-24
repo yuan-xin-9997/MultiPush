@@ -12,7 +12,7 @@ export function zhihuImageUrl(value: unknown): string | null {
 
 export function prepareZhihuContent(html: string): string {
   const $ = load(html, null, false)
-  $('script,style,meta,link').remove()
+  $('script,noscript,style,meta,link').remove()
   normalizeArticleLists($)
   $('section').each((_, node) => { node.name = 'div' })
   $('img').each((_, node) => {
