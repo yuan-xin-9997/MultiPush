@@ -243,7 +243,7 @@ export class ZhihuService {
       if (previous && previous.status !== 'failed') return previous
       const publication = previous ?? this.database.createZhihuPublication(userId, { renderId: input.renderId, title: article.title, mode: input.mode, idempotencyKey })
       this.database.updateZhihuPublication(userId, publication.id, { status: 'running', message: '正在准备知乎正文及图片' })
-      const task = this.run(userId, publication.id, checked, article, input.mode, previous?.remoteId || undefined)
+      const task = this.run(userId, publication.id, checked, article, input.mode, previous?.remoteId || undefined, previous?.resolutions?.some(entry => entry.action === 'not_published') || false)
       this.jobs.set(publication.id, task)
       handedOff = true
       void task.finally(() => { this.jobs.delete(publication.id); this.active.delete(userId) }).catch(() => {})
@@ -259,8 +259,22 @@ export class ZhihuService {
     if (account && error instanceof ApiError && error.code === 'zhihu_session_expired') this.database.saveZhihuAccount(userId, { ...account, status: 'expired', checkedAt: now() })
   }
 
-  private async run(userId: string, id: string, checked: Awaited<ReturnType<ZhihuDriver['checkSession']>>, article: ZhihuArticle & { external: string[] }, mode: 'draft' | 'publish', resumeDraftId?: string): Promise<void> {
+  private async run(userId: string, id: string, checked: Awaited<ReturnType<ZhihuDriver['checkSession']>>, article: ZhihuArticle & { external: string[] }, mode: 'draft' | 'publish', resumeDraftId?: string, confirmedUnpublished = false): Promise<void> {
     try {
+      if (resumeDraftId) {
+        const result = await this.driver.checkPublication(checked.state, resumeDraftId, article.title)
+        this.save(userId, result.state, checked.identity)
+        checked.state = result.state
+        if (result.status === 'published') {
+          this.database.updateZhihuPublication(userId, id, { status: 'published', message: result.message, url: result.url })
+          return
+        }
+        if (result.status === 'missing') {
+          if (!confirmedUnpublished) throw new ApiError(409, 'zhihu_result_uncertain', result.message)
+          resumeDraftId = undefined
+          this.database.updateZhihuPublication(userId, id, { remoteId: null, url: null, message: '已确认未发布，原草稿失效，正在重新上传图片并创建草稿' })
+        }
+      }
       for (const [index, src] of (resumeDraftId ? [] : article.external).entries()) {
         this.database.updateZhihuPublication(userId, id, { message: `正在读取正文图片 ${index + 1}/${article.external.length}，随后上传到知乎` })
         article.images.set(src, await downloadPublisherImage(src, 'zhihu'))
@@ -270,7 +284,7 @@ export class ZhihuService {
       this.database.updateZhihuPublication(userId, id, result)
     } catch (error) {
       this.expire(userId, error)
-      const uncertain = !(error instanceof ApiError) || error.code === 'zhihu_result_uncertain'
+      const uncertain = !(error instanceof ApiError) || ['zhihu_result_uncertain', 'zhihu_draft_missing'].includes(error.code)
       this.database.updateZhihuPublication(userId, id, { status: uncertain ? 'uncertain' : 'failed', message: error instanceof ApiError ? error.message : '知乎操作中断，结果未确认，请先核对知乎后台，避免重复提交' })
     }
   }

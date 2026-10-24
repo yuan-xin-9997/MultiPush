@@ -43,6 +43,18 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
 }
 
 describe('Zhihu browser publishing', () => {
+  it('distinguishes missing articles and drafts from an inconclusive check', async () => {
+    const { driver, post } = fixture()
+    expect(await driver.checkPublication(state, '999', '测试文章')).toMatchObject({ status: 'missing' })
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('requires reconciliation when the resumed draft disappears', async () => {
+    const { driver, article, post, patch } = fixture()
+    await expect(driver.publish(state, article, 'publish', vi.fn(), '999')).rejects.toMatchObject({ code: 'zhihu_draft_missing' })
+    expect(post).not.toHaveBeenCalled()
+    expect(patch).not.toHaveBeenCalled()
+  })
   it('rechecks a published result only when its identity, title and author match', async () => {
     const { driver, post } = fixture({ checkState: 'published' })
     expect(await driver.checkPublication(state, '123', '测试文章')).toMatchObject({ status: 'published', url: 'https://zhuanlan.zhihu.com/p/123' })

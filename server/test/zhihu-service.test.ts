@@ -203,6 +203,39 @@ describe('Zhihu account lifecycle and publishing', () => {
     expect(reopened.getZhihuPublication(alice.id, publication.id)).toMatchObject({ status: 'uncertain' })
   })
 
+  it('recreates a missing draft only after manual confirmation and an explicit retry', async () => {
+    const { service, driver, alice, seed, article } = setup()
+    const download = vi.spyOn(images, 'downloadPublisherImage').mockResolvedValue({ name: 'body.png', mimeType: 'image/png', buffer: png })
+    seed(); const render = article('<p>正文</p><img src="https://example.com/body.png">'), input = { renderId: render.id, mode: 'publish' as const }
+    driver.publish.mockImplementationOnce(async (_state, _article, _mode, progress) => { progress({ remoteId: '123' }); throw new ApiError(502, 'zhihu_rejected', '失败') })
+    const job = await service.publish(alice.id, input)
+    await finished(service, alice.id, job.id)
+    driver.checkPublication.mockResolvedValue({ state: session, status: 'missing', url: null, message: '原草稿不存在，请确认未发布' })
+    await service.publish(alice.id, input)
+    expect(await finished(service, alice.id, job.id)).toMatchObject({ status: 'uncertain', remoteId: '123' })
+    expect(driver.publish).toHaveBeenCalledTimes(1)
+    expect(download).toHaveBeenCalledTimes(1)
+    await service.resolve(alice.id, job.id, { action: 'not_published' })
+    expect(driver.publish).toHaveBeenCalledTimes(1)
+    await service.publish(alice.id, input)
+    expect(await finished(service, alice.id, job.id)).toMatchObject({ status: 'published' })
+    expect(driver.publish.mock.calls[1][4]).toBeUndefined()
+    expect(download).toHaveBeenCalledTimes(2)
+    expect(driver.publish.mock.calls[1][1].images.get('https://example.com/body.png')?.buffer).toEqual(png)
+  })
+
+  it('links an already published article before retrying a failed draft', async () => {
+    const { service, driver, alice, seed, article } = setup()
+    seed(); const render = article(), input = { renderId: render.id, mode: 'publish' as const }
+    driver.publish.mockImplementationOnce(async (_state, _article, _mode, progress) => { progress({ remoteId: '123' }); throw new ApiError(502, 'zhihu_rejected', '失败') })
+    const job = await service.publish(alice.id, input)
+    await finished(service, alice.id, job.id)
+    driver.checkPublication.mockResolvedValue({ state: session, status: 'published', url: 'https://zhuanlan.zhihu.com/p/123', message: '已核实发布' })
+    await service.publish(alice.id, input)
+    expect(await finished(service, alice.id, job.id)).toMatchObject({ status: 'published', remoteId: '123' })
+    expect(driver.publish).toHaveBeenCalledTimes(1)
+  })
+
   it('unlocks a manually verified unpublished task and preserves the draft and audit record through retry', async () => {
     const { service, driver, alice, seed, article } = setup()
     seed(); const render = article(), input = { renderId: render.id, mode: 'publish' as const }

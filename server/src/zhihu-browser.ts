@@ -16,7 +16,7 @@ export interface ZhihuLoginAttempt {
 export interface ZhihuDriver {
   beginLogin(): Promise<ZhihuLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: ZhihuIdentity }>
-  checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'draft' | 'unknown'; url: string | null; message: string }>
+  checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'draft' | 'missing' | 'unknown'; url: string | null; message: string }>
   publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: (value: Partial<Pick<ZhihuPublication, 'message' | 'remoteId' | 'url'>>) => void, resumeDraftId?: string): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   close(): Promise<void>
 }
@@ -136,6 +136,9 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
         }
       }
       const response = await context.request.get(`${COLUMN}api/articles/${remoteId}/draft`, { headers, timeout: 15_000 })
+      if (publishedResponse.status() === 404 && response.status() === 404) {
+        return { state: await context.storageState(), status: 'missing' as const, url: null, message: '原知乎文章和草稿均不存在。请确认未发布；确认后再次提交将重新上传图片并创建草稿' }
+      }
       if (response.status() !== 404) {
         const draft = await zhihuResponse(response, '重新核实知乎草稿')
         if (String(draft.id) === remoteId && draft.title === title && String(object(draft.author).id) === identity.accountId && draft.state === 'draft' && draft.has_publishing_draft === false) {
@@ -157,7 +160,11 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
       await this.identity(context)
       const cookies = await context.cookies([HOME, COLUMN])
       const headers = { 'x-requested-with': 'fetch', 'x-xsrftoken': cookies.find(cookie => cookie.name === '_xsrf')?.value || '', Referer: `${COLUMN}write`, Origin: COLUMN.slice(0, -1) }
-      const read = async (id: string, kind: 'draft' | 'published') => zhihuResponse(await context.request.get(`${COLUMN}api/articles/${id}${kind === 'draft' ? '/draft' : ''}`, { headers, timeout: 30_000 }), kind === 'draft' ? '核对知乎草稿' : '核对知乎文章')
+      const read = async (id: string, kind: 'draft' | 'published') => {
+        const response = await context.request.get(`${COLUMN}api/articles/${id}${kind === 'draft' ? '/draft' : ''}`, { headers, timeout: 30_000 })
+        if (kind === 'draft' && response.status() === 404) throw new ApiError(409, 'zhihu_draft_missing', '原知乎草稿已不存在，请核实发布结果；确认未发布后可重新创建草稿')
+        return zhihuResponse(response, kind === 'draft' ? '核对知乎草稿' : '核对知乎文章')
+      }
       const upload = async (image: PublisherImage): Promise<string> => {
         const data = await zhihuResponse(await context.request.post(`${COLUMN}api/uploaded_images`, { headers, multipart: { picture: image, source: 'article' }, timeout: 30_000 }), '上传知乎图片')
         const src = zhihuImageUrl(data.src)
