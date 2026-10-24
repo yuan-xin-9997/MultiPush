@@ -49,7 +49,8 @@ function setup() {
   const directory = mkdtempSync(path.join(tmpdir(), 'multipush-wechat-service-'))
   directories.push(directory)
   const config = loadConfig({ dataDir: directory, jwtSecret: 'wechat-test-jwt', nodeEnv: 'test' })
-  const database = openDatabase(config.dbPath)
+  // Disk persistence has separate coverage; service tests should not depend on CI fsync latency.
+  const database = openDatabase(':memory:')
   databases.push(database)
   const alice = database.createUser({ username: 'alice', email: 'alice@example.com', displayName: 'Alice', passwordHash: 'unused' })
   const bob = database.createUser({ username: 'bob', email: 'bob@example.com', displayName: 'Bob', passwordHash: 'unused' })
