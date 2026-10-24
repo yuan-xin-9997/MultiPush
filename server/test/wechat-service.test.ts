@@ -172,6 +172,21 @@ describe('WeChat session security', () => {
 })
 
 describe('WeChat article submission', () => {
+  it('passes the read-original address to the driver and includes it in submission identity', async () => {
+    const { service, driver, alice, seedAccount, image, article } = setup()
+    seedAccount()
+    const cover = image(alice.id, 'cover.png'), render = article()
+    const input = { renderId: render.id, mode: 'draft' as const, coverMediaId: cover.id, sourceUrl: 'https://github.com/org/repo' }
+    const first = await service.publish(alice.id, input)
+    await finished(service, alice.id, first.id)
+    expect(driver.publish.mock.calls[0][1].sourceUrl).toBe(input.sourceUrl)
+    expect((await service.publish(alice.id, input)).id).toBe(first.id)
+    const second = await service.publish(alice.id, { ...input, sourceUrl: 'https://github.com/org/repo/releases' })
+    expect(second.id).not.toBe(first.id)
+    await finished(service, alice.id, second.id)
+    expect(driver.publish.mock.calls[1][1].sourceUrl).toBe('https://github.com/org/repo/releases')
+  })
+
   it('publishes the saved platform adjustment and reads only the owner’s uploaded image files', async () => {
     const { service, database, driver, alice, seedAccount, image, article } = setup()
     seedAccount()
@@ -347,5 +362,9 @@ describe('WeChat API authentication', () => {
     expect((await fetch(`${base}/api/wechat/login/${login.id}`, { headers: otherHeaders })).status).toBe(404)
     const invalid = await fetch(`${base}/api/wechat/publications`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ renderId: 'bad-id', coverMediaId: 'bad-id', mode: 'publish' }) })
     expect(invalid.status).toBe(400)
+    for (const sourceUrl of ['javascript:alert(1)', 'file:///etc/passwd', 'not a URL']) {
+      const rejected = await fetch(`${base}/api/wechat/publications`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ renderId: alice.id, coverMediaId: alice.id, mode: 'draft', sourceUrl }) })
+      expect(rejected.status).toBe(400)
+    }
   })
 })

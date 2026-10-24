@@ -34,6 +34,7 @@ export default function PublishPage() {
   const [cover, setCover] = useState<MediaAsset | null>(null)
   const [author, setAuthor] = useState('')
   const [digest, setDigest] = useState('')
+  const [sourceUrl, setSourceUrl] = useState('')
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [refreshing, setRefreshing] = useState(true)
@@ -77,6 +78,7 @@ export default function PublishPage() {
     setRecord(null)
     setCover(null)
     setDigest('')
+    setSourceUrl('')
     setAuthor('')
     if (!selectedId) return
     setRecordLoading(true)
@@ -189,7 +191,7 @@ export default function PublishPage() {
     setSubmitting(true)
     setError('')
     try {
-      const result = await api.wechat.publish({ renderId: record.id, mode, coverMediaId: cover.id, author: author.trim(), digest: digest.trim() })
+      const result = await api.wechat.publish({ renderId: record.id, mode, coverMediaId: cover.id, author: author.trim(), digest: digest.trim(), sourceUrl: sourceUrl.trim() })
       if (!mounted.current) return
       setPublications((current) => [result.publication, ...current.filter((item) => item.id !== result.publication.id)])
       setConfirmation(null)
@@ -253,6 +255,7 @@ export default function PublishPage() {
               <div className="publish-cover-field"><label className="publish-field">封面图片<span className="publish-muted">使用内容封面，或上传 JPG / PNG，建议比例 2.35:1。</span><input type="file" accept="image/jpeg,image/png" onChange={(event) => void uploadCover(event)} disabled={busy} aria-label="上传公众号封面" /></label>{cover ? <img className="publish-cover-preview" src={absoluteUrl(cover.url)} alt="待发布的公众号封面" /> : <div className="publish-cover-empty"><ImagePlus size={23} /><span>请选择封面</span></div>}</div>
               {uploading ? <p className="publish-muted" role="status"><LoaderCircle size={14} className="spin" />正在上传封面…</p> : null}
               <label className="publish-field">作者（选填）<input className="input" value={author} maxLength={8} disabled={submitting} placeholder="最多 8 个字" onChange={(event) => setAuthor(event.target.value)} /></label>
+              <label className="publish-field">阅读原文链接（选填）<input className="input" type="url" value={sourceUrl} maxLength={2048} disabled={busy} placeholder="https://…" onChange={(event) => setSourceUrl(event.target.value)} /><span className="publish-muted">读者可通过文章底部的“阅读原文”打开此地址。公众号未开通正文外链权限时，正文链接将保留为可复制地址。</span></label>
               <label className="publish-field">摘要（选填）<textarea className="input" rows={3} maxLength={120} value={digest} disabled={submitting} placeholder="简短介绍文章内容" onChange={(event) => setDigest(event.target.value)} /><small>{digest.length} / 120</small></label>
               {article.warnings.length ? <div className="publish-warning"><strong>排版提醒</strong><ul>{article.warnings.map((warning) => <li key={warning}>{warning.replace(/^包含 (\d+) 张外部图片（非本站上传），下载或发布时可能无法正常显示。$/, '检测到 $1 张外链图片，提交时将自动读取并上传到微信，正文地址会替换为微信图片地址。')}</li>)}</ul></div> : null}
               {selectedUncertain ? <p className="publish-warning">这篇内容有结果待核实的提交，请先到公众号后台检查，避免重复发表。</p> : null}

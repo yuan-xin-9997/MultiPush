@@ -232,7 +232,7 @@ export class WechatService {
       if (!media) throw notFound('正文图片不存在或无权访问，请在编辑器重新上传')
       images.set(src, await this.mediaFile(userId, media.id))
     }
-    return { title, html: $.html(), author: input.author ?? Array.from(render.authorName ?? '').slice(0, 8).join(''), digest: input.digest ?? Array.from(render.meta.summary ?? '').slice(0, 120).join(''), cover, images, externalImages }
+    return { title, html: $.html(), author: input.author ?? Array.from(render.authorName ?? '').slice(0, 8).join(''), digest: input.digest ?? Array.from(render.meta.summary ?? '').slice(0, 120).join(''), sourceUrl: input.sourceUrl || '', cover, images, externalImages }
   }
 
   private withQr(publication: WechatPublication): WechatPublication {
@@ -259,7 +259,7 @@ export class WechatService {
       this.saveState(userId, checked.state, checked.name)
       const article = await this.article(userId, input, baseUrl)
       const identity = checked.state.cookies.filter((cookie) => ['bizuin', 'data_bizuin', 'slave_user'].includes(cookie.name)).map((cookie) => `${cookie.name}=${cookie.value}`).sort()
-      const idempotencyKey = createHash('sha256').update(JSON.stringify({ identity: identity.length ? identity : checked.name, contentId: this.database.getRender(userId, input.renderId)?.contentId, mode: input.mode, author: article.author, digest: article.digest, title: article.title, html: article.html })).update(article.cover.buffer).digest('hex')
+      const idempotencyKey = createHash('sha256').update(JSON.stringify({ identity: identity.length ? identity : checked.name, contentId: this.database.getRender(userId, input.renderId)?.contentId, mode: input.mode, author: article.author, digest: article.digest, title: article.title, html: article.html, ...(article.sourceUrl ? { sourceUrl: article.sourceUrl } : {}) })).update(article.cover.buffer).digest('hex')
       const previous = this.database.findWechatPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return this.withQr(previous)
       const publication = previous ?? this.database.createWechatPublication(userId, { renderId: input.renderId, title: article.title, mode: input.mode, idempotencyKey })

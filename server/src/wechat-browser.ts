@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { load } from 'cheerio'
+import { load, type CheerioAPI } from 'cheerio'
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright-core'
 import { ApiError } from './errors'
 
@@ -20,6 +20,7 @@ export interface WechatArticle {
   html: string
   author: string
   digest: string
+  sourceUrl?: string
   cover: WechatImage
   images: Map<string, WechatImage>
 }
@@ -50,6 +51,26 @@ const CONFIRM_QR = '.safe_check img.qrcode:visible, .qrcode_scan img:visible, im
 const DIALOG = '[role="dialog"]:visible, .weui-desktop-dialog:visible, .mass-send:visible'
 const FIVE_MINUTES = 5 * 60_000
 type JsonObject = Record<string, unknown>
+
+export function prepareWechatLinks($: CheerioAPI, editorHtml: string): number {
+  const enabled = (flag: string) => new RegExp(`(?:^|\\n)\\s*wx\\.cgiData\\.${flag}\\s*=\\s*["']?1(?:["']|\\s*;)`).test(editorHtml)
+  if (enabled('can_use_hyperlink') && enabled('can_use_appmsg_outer_url')) return 0
+  let converted = 0
+  $('a[href]').each((_, node) => {
+    const link = $(node)
+    let url: URL
+    try { url = new URL(link.attr('href')!) } catch { return }
+    if (!['http:', 'https:'].includes(url.protocol) || url.hostname === 'mp.weixin.qq.com') return
+    // Accounts without external-link permission lose href on save; retain the address as text.
+    const replacement = $('<span>').attr('style', 'word-break:break-all;').append(link.contents())
+    if (replacement.text().trim() !== url.href && replacement.text().trim() !== link.attr('href')) {
+      replacement.append($('<span>').text(`（${url.href}）`))
+    }
+    link.replaceWith(replacement)
+    converted++
+  })
+  return converted
+}
 
 function object(value: unknown): JsonObject {
   if (typeof value === 'string') {
@@ -336,6 +357,8 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
       onProgress({ status: 'running', message: '正在上传公众号封面和正文图片' })
       const cover = await upload(article.cover)
       const html = load(article.html, null, false)
+      const convertedLinks = prepareWechatLinks(html, editorHtml)
+      const linkNotice = convertedLinks ? `；${convertedLinks} 个正文外链已保留为可复制地址（当前公众号未开通外链权限）` : ''
       for (const [src, image] of article.images) {
         const uploaded = await upload(image)
         applyWechatImage(html, src, uploaded, image.mimeType)
@@ -347,7 +370,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
         headers: { Referer: editor.href, 'X-Requested-With': 'XMLHttpRequest' },
         form: {
           token: info.token, lang: 'zh_CN', f: 'json', ajax: '1', random: String(Math.random()), AppMsgId: '', count: '1', data_seq: '0', operate_from: 'Chrome', isnew: '1', articlenum: '1',
-          title0: article.title, author0: article.author, digest0: article.digest, content0: html.html(), sourceurl0: '', show_cover_pic0: '0', thumb_media_id0: cover.id,
+          title0: article.title, author0: article.author, digest0: article.digest, content0: html.html(), sourceurl0: article.sourceUrl || '', show_cover_pic0: '0', thumb_media_id0: cover.id,
           cdn_url0: cover.url, cdn_235_1_url0: cover.url, cdn_1_1_url0: cover.url, cdn_16_9_url0: cover.url,
           shortvideofileid0: '', copyright_type0: '0', fileid0: '', need_open_comment0: '0', only_fans_can_comment0: '0', can_reward0: '0',
         },
@@ -357,7 +380,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
       remoteId = String(saved.appMsgId ?? saved.appmsgid ?? saved.app_id ?? '')
       if (!remoteId || !/^\d+$/.test(remoteId)) throw new ApiError(502, 'wechat_draft_unverified', '微信未返回草稿编号，暂时无法确认保存结果，请查看微信草稿箱')
       onProgress({ status: 'running', message: '文章已保存到公众号草稿箱', remoteId })
-      if (mode === 'draft') return { state: await snapshot(), status: 'draft' as const, message: '已保存到公众号草稿箱', url: null, remoteId }
+      if (mode === 'draft') return { state: await snapshot(), status: 'draft' as const, message: `已保存到公众号草稿箱${linkNotice}`, url: null, remoteId }
 
       const publishUrl = new URL('/cgi-bin/appmsg', HOME)
       publishUrl.search = new URLSearchParams({ t: 'media/appmsg_edit', action: 'edit', type: '77', appmsgid: remoteId, isMul: '1', replaceScene: '0', isSend: '1', isFreePublish: '0', token: info.token, lang: 'zh_CN' }).toString()
@@ -396,7 +419,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
           const match = findPublishedArticle(await result.json().catch(() => null), remoteId)
           if (match) {
             onProgress({ status: 'published', message: '文章已发表，已核对微信发表记录', qrCode: null, url: match.url, remoteId })
-            return { state: await snapshot(), status: 'published' as const, message: '文章已发表', url: match.url, remoteId }
+            return { state: await snapshot(), status: 'published' as const, message: `文章已发表${linkNotice}`, url: match.url, remoteId }
           }
         }
         await page.waitForTimeout(1500)

@@ -11,6 +11,7 @@ const publicationSchema = z.object({
   coverMediaId: z.uuid(),
   author: z.string().trim().max(8, '作者最多 8 个字').optional(),
   digest: z.string().trim().max(120, '摘要最多 120 个字').optional(),
+  sourceUrl: z.union([z.literal(''), z.url({ protocol: /^https?$/ }).max(2048)]).optional(),
 }).strict()
 
 export function createWechatRouter(service: WechatService): Router {

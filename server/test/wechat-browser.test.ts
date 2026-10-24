@@ -1,9 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '../src/errors'
 import { load } from 'cheerio'
-import { applyWechatImage, assertWechatResponse, classifyWechatFailure, findPublishedArticle, isWechatLoginScanned, parseWechatPage, parseWechatUpload, wechatSwitchState } from '../src/wechat-browser'
+import { applyWechatImage, assertWechatResponse, classifyWechatFailure, findPublishedArticle, isWechatLoginScanned, parseWechatPage, parseWechatUpload, prepareWechatLinks, wechatSwitchState } from '../src/wechat-browser'
 
 describe('WeChat browser responses', () => {
+  it('preserves external addresses as text when the account cannot save clickable links', () => {
+    const $ = load('<ul><li><a href="https://github.com/org/repo?a=1&amp;b=2"><strong>项目源码</strong></a></li><li><a href="https://example.com/">https://example.com/</a></li><li><a href="https://example.com/image"><img src="image.png" data-imgfileid="123"></a></li></ul><a href="https://mp.weixin.qq.com/s/article">微信文章</a><a href="#heading">目录</a>', null, false)
+    const editor = 'wx.cgiData.can_use_hyperlink = 0;\n//wx.cgiData.can_use_hyperlink = 1;\nwx.cgiData.can_use_appmsg_outer_url = 1;'
+    expect(prepareWechatLinks($, editor)).toBe(3)
+    expect($('li').length).toBe(3)
+    expect($('li').first().text()).toBe('项目源码（https://github.com/org/repo?a=1&b=2）')
+    expect($('li').eq(1).text()).toBe('https://example.com/')
+    expect($('strong').text()).toBe('项目源码')
+    expect($('img').attr('data-imgfileid')).toBe('123')
+    expect($('a').map((_, n) => $(n).attr('href')).get()).toEqual(['https://mp.weixin.qq.com/s/article', '#heading'])
+    const once = $.html()
+    expect(prepareWechatLinks($, editor)).toBe(0)
+    expect($.html()).toBe(once)
+  })
+
+  it('keeps clickable links when both permissions are present, and retains addresses for unknown permissions', () => {
+    const $ = load('<a href="https://github.com/org/repo">项目</a>', null, false)
+    const before = $.html()
+    expect(prepareWechatLinks($, 'wx.cgiData.can_use_hyperlink = 1;\nwx.cgiData.can_use_appmsg_outer_url = "1" * 1;')).toBe(0)
+    expect($.html()).toBe(before)
+    expect(prepareWechatLinks($, '')).toBe(1)
+    expect($.text()).toContain('https://github.com/org/repo')
+  })
+
   it.each(['png', 'jpeg', 'gif'])('writes mobile editor material metadata for uploaded %s images', (format) => {
     const $ = load('<section><p>正文</p><img src="/uploads/body.png" alt="图一" style="max-width:100%"><img src="/uploads/body.png" srcset="https://external.test/image.png 2x"><img src="https://mmbiz.qpic.cn/other"></section>', null, false)
     const uploaded = { id: '100000843', url: 'https://mmbiz.qpic.cn/image/0?wx_fmt=png&from=appmsg' }

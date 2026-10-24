@@ -26,6 +26,8 @@
 
 「保存草稿」调用后台素材及草稿接口，并取得草稿 ID；「正式发表」继续操作官方编辑器。发表会明确关闭群发通知；如果后台结构变化，无法确认通知状态，会停止操作并保留草稿。安全校验由管理员在本系统显示的二维码上完成。最终按微信发表记录中的草稿关联 ID 和文章永久链接核实，不用标题、弹窗消失或接口受理作为成功依据。
 
+正文外部超链接受公众号权限限制。提交时读取微信编辑器的外链权限；无权限或无法识别权限时，将外链转换为“原文字（完整地址）”，保留图片和文字格式，避免微信过滤链接后地址丢失。微信文章链接和目录锚点保持原样；有外链权限的账号保留可点击链接。发布表单可另填一个 HTTP(S)「阅读原文链接」，通过微信的 `sourceurl0` 保存，读者可在文章底部打开。
+
 同一公众号、原文、模式、实际排版、作者、摘要和封面产生相同幂等标识，重复请求返回已有任务。网络中断、服务重启、提交结果无法确认时标记「结果待核实」，不自动重发。草稿与正式发表有不同幂等标识，保存草稿后仍可提交正式发表。
 
 ## API
@@ -38,7 +40,7 @@
 | `POST /api/wechat/login` | 获取官方登录二维码 |
 | `GET /api/wechat/login/:id` | 查询扫码结果 |
 | `DELETE /api/wechat/account` | 清除保存的会话 |
-| `POST /api/wechat/publications` | 提交 `{renderId, mode: "draft"或"publish", coverMediaId, author?, digest?}` |
+| `POST /api/wechat/publications` | 提交 `{renderId, mode: "draft"或"publish", coverMediaId, author?, digest?, sourceUrl?}` |
 | `GET /api/wechat/publications` | 当前用户最近 50 条发布记录 |
 | `GET /api/wechat/publications/:id` | 查询进度、安全二维码与最终链接 |
 

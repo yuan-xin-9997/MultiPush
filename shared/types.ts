@@ -309,6 +309,7 @@ export interface WechatPublishInput {
   coverMediaId: string
   author?: string
   digest?: string
+  sourceUrl?: string
 }
 
 export interface WechatPublication {
