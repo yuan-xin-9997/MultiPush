@@ -27,6 +27,16 @@ export function normalizeWechatLists($: CheerioAPI): void {
   }
 }
 
+function setWechatMargins(element: ReturnType<CheerioAPI>, overrides: { top?: string; bottom?: string }): void {
+  const [top = '0', right = top, bottom = top, left = right] = (element.css('margin') || '0').trim().split(/\s+/)
+  const sides = [top, right, bottom, left].map((value, index) => element.css(`margin-${['top', 'right', 'bottom', 'left'][index]}`) || value)
+  sides[0] = overrides.top ?? sides[0]
+  sides[2] = overrides.bottom ?? sides[2]
+  // Native editors need one margin declaration rather than shorthand/longhand overrides.
+  const style = (element.attr('style') || '').split(';').filter(part => !/^\s*margin(?:-(?:top|right|bottom|left))?\s*:/i.test(part)).join(';')
+  element.attr('style', style).css('margin', sides.join(' '))
+}
+
 export function normalizeWechatCaptions($: CheerioAPI): void {
   $('img').each((_, node) => {
     const image = $(node)
@@ -42,9 +52,9 @@ export function normalizeWechatCaptions($: CheerioAPI): void {
     if (!caption.is('figcaption') && !(caption.is('p,section') && /^(?:图\s*[0-9一二三四五六七八九十百]+|fig(?:ure)?\.?\s*\d+)(?:\s|[:：.．、-]|$)/i.test(caption.text().trim()))) return
     // Image and paragraph margins must not add up to a blank line before a caption.
     for (const spacer of spacers) spacer.remove()
-    image.css('margin-bottom', '0')
-    if (block[0] !== node) block.css('margin-bottom', '0')
-    caption.css('margin-top', '8px')
+    setWechatMargins(image, { bottom: '0' })
+    if (block[0] !== node) setWechatMargins(block, { bottom: '0' })
+    setWechatMargins(caption, { top: '8px' })
   })
 }
 

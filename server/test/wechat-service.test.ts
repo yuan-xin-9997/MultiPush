@@ -188,7 +188,7 @@ describe('WeChat article submission', () => {
     expect(submitted.html).toContain('<ul><li>列表一</li><li>列表二</li></ul>')
     const $ = load(submitted.html)
     expect($('img').parent().next().text()).toBe('图 1：说明')
-    expect($('img').parent().next().css('margin-top')).toBe('8px')
+    expect($('img').parent().next().css('margin')).toBe('8px 0 0 0')
     expect(submitted.images.get('/uploads/body.png')?.buffer.toString()).toBe('image-bytes-for-body.png')
     await expect(service.publish(alice.id, { renderId: render.id, mode: 'draft', coverMediaId: cover.id })).resolves.toMatchObject({ id: publication.id })
     expect(driver.publish).toHaveBeenCalledTimes(1)

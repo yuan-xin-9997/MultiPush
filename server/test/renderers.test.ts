@@ -3,6 +3,7 @@ import { load } from 'cheerio'
 import type { ContentDetail, RenderOptions } from '../../shared/types'
 import { renderPlatforms } from '../src/renderers'
 import { paginateForCards } from '../src/renderers/xiaohongshu'
+import { normalizeWechatCaptions } from '../src/renderers/wechat'
 
 function content(overrides: Partial<ContentDetail> = {}): ContentDetail {
   return {
@@ -85,18 +86,36 @@ describe('renderPlatforms', () => {
     const [result] = await renderPlatforms(input(['wechat'], { contentHtml: '<p><img src="/uploads/first.png" alt="首图"></p><p><br></p><p><em>图 1：图片说明</em></p><p>后续正文</p><figure><img src="/uploads/figure.png"><figcaption>语义图注</figcaption></figure><p><img src="/uploads/plain.png"></p><p><br></p><p>普通正文不应当作图注</p>' }))
     const $ = load(result.html)
     const first = $('img').first()
-    expect(first.css('margin-bottom')).toBe('0')
-    expect(first.parent().css('margin-bottom')).toBe('0')
+    expect(first.css('margin')).toBe('20px auto 0 auto')
+    expect(first.parent().css('margin')).toBe('0 0 0 0')
     expect(first.parent().next().text()).toBe('图 1：图片说明')
-    expect(first.parent().next().css('margin-top')).toBe('8px')
+    expect(first.parent().next().css('margin')).toBe('8px 0 16px 0')
     expect(first.parent().next().find('em').length).toBe(1)
     expect(first.attr('alt')).toBe('首图')
-    expect($('figcaption').css('margin-top')).toBe('8px')
-    expect($('figure img').css('margin-bottom')).toBe('0')
+    expect($('figcaption').css('margin')).toBe('8px 0 0 0')
+    expect($('figure img').css('margin')).toBe('20px auto 0 auto')
+    for (const element of [first, first.parent(), first.parent().next()]) {
+      expect(element.attr('style')).not.toMatch(/margin-(?:top|right|bottom|left)\s*:/)
+    }
     expect($('img').last().css('margin-bottom')).toBeUndefined()
     expect($('img').last().parent().next().text()).toBe('普通正文不应当作图注')
     expect($('img').last().parent().css('margin-bottom')).toBeUndefined()
     expect(result.downloads[0].content).toContain(result.html)
+  })
+
+  it('flattens legacy overlapping image margins without changing material metadata or text', () => {
+    const $ = load('<section style="margin:0 0 16px;margin-bottom:0;color:#333"><img data-imgfileid="100000843" src="https://mmbiz.qpic.cn/image" style="margin:20px auto;margin-bottom:0;max-width:100%"></section><p style="margin:0 0 16px;margin-top:8px"><em>图 1：说明</em></p>', null, false)
+    normalizeWechatCaptions($)
+    expect($('img').css('margin')).toBe('20px auto 0 auto')
+    expect($('section').css('margin')).toBe('0 0 0 0')
+    expect($('p').css('margin')).toBe('8px 0 16px 0')
+    expect($.html()).not.toMatch(/margin-(?:top|right|bottom|left)\s*:/)
+    expect($('img').attr('data-imgfileid')).toBe('100000843')
+    expect($('section').css('color')).toBe('#333')
+    expect($('p em').text()).toBe('图 1：说明')
+    const normalized = $.html()
+    normalizeWechatCaptions($)
+    expect($.html()).toBe(normalized)
   })
 
   it('renders Xiaohongshu cards, caption and hashtags', async () => {
