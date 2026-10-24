@@ -14,6 +14,7 @@ import { ApiError } from '../src/errors'
 import { decryptWechatSession, encryptWechatSession, loadWechatKey, WechatService } from '../src/wechat'
 import type { WechatBrowserDriver, WechatLoginAttempt, WechatStorageState } from '../src/wechat-browser'
 import * as remoteImages from '../src/wechat-image'
+import { load } from 'cheerio'
 
 const directories: string[] = []
 const databases: Database[] = []
@@ -177,7 +178,7 @@ describe('WeChat article submission', () => {
     const cover = image(alice.id, 'cover.png')
     image(alice.id, 'body.png')
     const render = article()
-    database.saveRenderDraft(alice.id, render.id, { ...render.results[0], title: '调整后标题', html: '<p>调整后正文</p><img src="/uploads/body.png"><ul>\n<li>列表一</li>\n<li><section><span><br></span></section></li>\n<li>列表二</li>\n</ul>', authorName: '作者' })
+    database.saveRenderDraft(alice.id, render.id, { ...render.results[0], title: '调整后标题', html: '<p>调整后正文</p><p><img src="/uploads/body.png" style="margin:20px auto;"></p><p><br></p><p><em>图 1：说明</em></p><ul>\n<li>列表一</li>\n<li><section><span><br></span></section></li>\n<li>列表二</li>\n</ul>', authorName: '作者' })
     const publication = await service.publish(alice.id, { renderId: render.id, mode: 'draft', coverMediaId: cover.id })
     expect((await finished(service, alice.id, publication.id)).status).toBe('draft')
     const submitted = driver.publish.mock.calls[0][1]
@@ -185,6 +186,9 @@ describe('WeChat article submission', () => {
     expect(submitted.html).toContain('调整后正文')
     expect(submitted.html).not.toContain('原始正文')
     expect(submitted.html).toContain('<ul><li>列表一</li><li>列表二</li></ul>')
+    const $ = load(submitted.html)
+    expect($('img').parent().next().text()).toBe('图 1：说明')
+    expect($('img').parent().next().css('margin-top')).toBe('8px')
     expect(submitted.images.get('/uploads/body.png')?.buffer.toString()).toBe('image-bytes-for-body.png')
     await expect(service.publish(alice.id, { renderId: render.id, mode: 'draft', coverMediaId: cover.id })).resolves.toMatchObject({ id: publication.id })
     expect(driver.publish).toHaveBeenCalledTimes(1)

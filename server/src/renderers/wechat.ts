@@ -27,6 +27,27 @@ export function normalizeWechatLists($: CheerioAPI): void {
   }
 }
 
+export function normalizeWechatCaptions($: CheerioAPI): void {
+  $('img').each((_, node) => {
+    const image = $(node)
+    const parent = image.closest('p,section')
+    const block = parent.length && parent.find('img').length === 1 && !parent.text().trim()
+      && !parent.find('video,audio,iframe,table,hr').length ? parent : image
+    let caption = block.next()
+    const spacers = []
+    while (caption.is('p,section,br') && !caption.text().replace(/\u200b/g, '').trim() && !caption.find('img,video,audio,iframe,svg,table,hr').length) {
+      spacers.push(caption)
+      caption = caption.next()
+    }
+    if (!caption.is('figcaption') && !(caption.is('p,section') && /^(?:图\s*[0-9一二三四五六七八九十百]+|fig(?:ure)?\.?\s*\d+)(?:\s|[:：.．、-]|$)/i.test(caption.text().trim()))) return
+    // Image and paragraph margins must not add up to a blank line before a caption.
+    for (const spacer of spacers) spacer.remove()
+    image.css('margin-bottom', '0')
+    if (block[0] !== node) block.css('margin-bottom', '0')
+    caption.css('margin-top', '8px')
+  })
+}
+
 const WECHAT_STYLES: Record<string, string> = {
   p: 'font-size:16px;line-height:1.8;color:#333;margin:0 0 16px;letter-spacing:0.5px;word-break:break-word;',
   h1: 'font-size:22px;line-height:1.5;color:#1a1a1a;font-weight:700;margin:30px 0 16px;letter-spacing:0.5px;',
@@ -102,6 +123,7 @@ export async function renderWechat(input: RenderInput, context?: RendererContext
   })
   const $ = load(article.html, null, false)
   normalizeWechatLists($)
+  normalizeWechatCaptions($)
   article.html = $.html()
 
   const document = buildHtmlDocument({

@@ -81,6 +81,24 @@ describe('renderPlatforms', () => {
     expect(result.downloads[0].content).toContain(result.html)
   })
 
+  it('keeps images close to numbered and semantic captions while retaining ordinary paragraph spacing', async () => {
+    const [result] = await renderPlatforms(input(['wechat'], { contentHtml: '<p><img src="/uploads/first.png" alt="首图"></p><p><br></p><p><em>图 1：图片说明</em></p><p>后续正文</p><figure><img src="/uploads/figure.png"><figcaption>语义图注</figcaption></figure><p><img src="/uploads/plain.png"></p><p><br></p><p>普通正文不应当作图注</p>' }))
+    const $ = load(result.html)
+    const first = $('img').first()
+    expect(first.css('margin-bottom')).toBe('0')
+    expect(first.parent().css('margin-bottom')).toBe('0')
+    expect(first.parent().next().text()).toBe('图 1：图片说明')
+    expect(first.parent().next().css('margin-top')).toBe('8px')
+    expect(first.parent().next().find('em').length).toBe(1)
+    expect(first.attr('alt')).toBe('首图')
+    expect($('figcaption').css('margin-top')).toBe('8px')
+    expect($('figure img').css('margin-bottom')).toBe('0')
+    expect($('img').last().css('margin-bottom')).toBeUndefined()
+    expect($('img').last().parent().next().text()).toBe('普通正文不应当作图注')
+    expect($('img').last().parent().css('margin-bottom')).toBeUndefined()
+    expect(result.downloads[0].content).toContain(result.html)
+  })
+
   it('renders Xiaohongshu cards, caption and hashtags', async () => {
     const [result] = await renderPlatforms(input(['xiaohongshu']))
     expect(result.previewMode).toBe('cards')

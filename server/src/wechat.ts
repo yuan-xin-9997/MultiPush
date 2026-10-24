@@ -9,7 +9,7 @@ import type { Database } from './db'
 import { ApiError, notFound } from './errors'
 import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { downloadWechatImage } from './wechat-image'
-import { normalizeWechatLists } from './renderers/wechat'
+import { normalizeWechatCaptions, normalizeWechatLists } from './renderers/wechat'
 import type { WechatBrowserDriver, WechatLoginAttempt, WechatStorageState } from './wechat-browser'
 
 const LOGIN_TTL = 5 * 60_000
@@ -204,6 +204,7 @@ export class WechatService {
     const title = render.title.trim()
     const $ = load(render.html, {}, false)
     normalizeWechatLists($)
+    normalizeWechatCaptions($)
     if (!title || Array.from(title).length > 64) throw new ApiError(400, 'wechat_title_invalid', '公众号标题需要 1–64 个字')
     if (!$('*').text().trim()) throw new ApiError(400, 'wechat_body_empty', '请先填写公众号正文')
     if (Buffer.byteLength(render.html) > 1024 * 1024) throw new ApiError(400, 'wechat_body_size', '公众号正文 HTML 不能超过 1 MB')
