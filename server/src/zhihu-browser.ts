@@ -177,7 +177,7 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
         progress({ message: '正在恢复已有知乎草稿', remoteId, url: `${COLUMN}p/${remoteId}/edit` })
         const existing = await read(remoteId, 'draft')
         if (existing.state !== 'draft' || existing.title !== article.title || typeof existing.content !== 'string') throw new ApiError(409, 'zhihu_draft_changed', '已有知乎草稿状态或标题已变更，已停止重试，请到知乎核对')
-        verifyZhihuContent(prepareZhihuContent(article.html), existing.content)
+        verifyZhihuContent(prepareZhihuContent(article.html), zhihuEditorContent(existing.content))
         const saved = load(existing.content, null, false), urls = saved('img').toArray().map(n => saved(n).attr('src') || saved(n).attr('data-original-src'))
         $('img').each((index, node) => { $(node).attr('src', urls[index]!) })
       } else {

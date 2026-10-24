@@ -11,7 +11,7 @@ const response = (data: unknown, status = 200) => ({ status: () => status, ok: (
 
 afterEach(async () => { for (const driver of drivers.splice(0)) await driver.close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
-function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publishTimeout?: boolean; draftId?: string; existing?: boolean; checkState?: 'published' | 'draft' | 'reviewing'; foreignAuthor?: boolean } = {}) {
+function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publishTimeout?: boolean; draftId?: string; existing?: boolean; existingSpacing?: boolean; checkState?: 'published' | 'draft' | 'reviewing'; foreignAuthor?: boolean } = {}) {
   const draftId = options.draftId || '123'
   let saved: Record<string, unknown> = { id: draftId, state: 'draft' }, publishListener: (value: unknown) => void = () => {}
   const upload = vi.fn(async () => response({ src: 'https://pic4.zhimg.com/uploaded.png' }))
@@ -38,6 +38,7 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
   const driver = new PlaywrightZhihuDriver(); drivers.push(driver)
   const article: ZhihuArticle = { title: '测试文章', html: '<h2>标题</h2><p><img src="https://external.test/image.png"></p><p><br></p><p><em>图 1：说明</em></p><ul>\n<li><a href="https://github.com/org/repo">项目源码</a></li>\n<li><br></li>\n<li>第二项</li>\n</ul><pre><code class="language-js">  hello\n    world</code></pre>', images: new Map([['https://external.test/image.png', { name: 'body.png', mimeType: 'image/png', buffer: Buffer.from('image') }]]) }
   if (options.existing) saved = { ...saved, title: article.title, content: zhihuEditorContent(article.html.replace('https://external.test/image.png', 'https://pic4.zhimg.com/uploaded.png')) }
+  if (options.existingSpacing) saved.content = String(saved.content).replace('</h2>', '</h2>\n<p><br></p>\n')
   if (options.checkState) saved = { ...saved, title: article.title, author: { id: options.foreignAuthor ? 'other-account' : 'account' }, state: options.checkState === 'published' ? 'published' : 'draft', has_publishing_draft: options.checkState === 'reviewing' }
   return { driver, article, post, patch, get, page, click, context }
 }
@@ -100,6 +101,15 @@ describe('Zhihu browser publishing', () => {
     expect(await driver.publish(state, article, 'draft', vi.fn(), id)).toMatchObject({ status: 'draft', remoteId: id })
     expect(post).not.toHaveBeenCalled()
     expect(get.mock.calls.map(call => call[0])).toContain(`https://zhuanlan.zhihu.com/api/articles/${id}/draft`)
+  })
+
+  it('cleans legacy empty paragraphs when resuming a verified draft', async () => {
+    const { driver, article, post, patch } = fixture({ existing: true, existingSpacing: true })
+    expect(await driver.publish(state, article, 'draft', vi.fn(), '123')).toMatchObject({ status: 'draft', remoteId: '123' })
+    expect(post).not.toHaveBeenCalled()
+    const $ = load(String(patch.mock.calls[1][1].data.content), null, false)
+    expect($.root().contents().toArray().every(n => n.type === 'tag')).toBe(true)
+    expect($('p').toArray().some(n => !$(n).text().trim() && !$(n).find('img').length)).toBe(false)
   })
 
   it('does not overwrite a resumed draft whose content changed outside the system', async () => {

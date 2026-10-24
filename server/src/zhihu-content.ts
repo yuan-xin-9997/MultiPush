@@ -84,6 +84,18 @@ export function zhihuEditorContent(html: string): string {
     if (element.children('p,h1,h2,h3,h4,h5,h6,ul,ol,blockquote,pre,table,img,hr').length) element.replaceWith(element.contents())
     else node.name = 'p'
   }
+  // Zhihu turns whitespace between block nodes into visible empty paragraphs.
+  $('p').each((_, node) => {
+    const paragraph = $(node)
+    if (!paragraph.parents('pre,code,td,th').length && !paragraph.text().replace(/[\s\u200b]/g, '') && !paragraph.find('img,video,audio,table,hr').length) paragraph.remove()
+  })
+  for (const container of [$.root().get(0)!, ...$('blockquote,li').toArray()]) {
+    $(container).contents().each((_, node) => {
+      if (node.type !== 'text' || node.data.trim()) return
+      const block = 'p,h1,h2,h3,h4,h5,h6,ul,ol,li,blockquote,pre,table,img,hr'
+      if (!node.prev || !node.next || $(node.prev).is(block) || $(node.next).is(block)) $(node).remove()
+    })
+  }
   return $.html()
 }
 
@@ -106,9 +118,10 @@ export function verifyZhihuContent(expected: string, stored: string): void {
   const code = ($: ReturnType<typeof load>) => $('pre').toArray().map(n => $(n).text())
   const structure = ($: ReturnType<typeof load>) => $('h1,h2,h3,h4,h5,h6,ul,ol').toArray().map(n => ({ tag: n.type === 'tag' ? n.name : '', heading: $(n).is('h1,h2,h3,h4,h5,h6') ? $(n).text() : '', start: $(n).attr('start') || '', depth: $(n).parents('li').length }))
   const emptyItems = rawStored('li').toArray().some(n => !rawStored(n).text().replace(/\u200b/g, '').trim() && !rawStored(n).find('img').length)
+  const emptyParagraphs = rawStored('p').toArray().some(n => !rawStored(n).parents('pre,code,td,th').length && !rawStored(n).text().replace(/[\s\u200b]/g, '') && !rawStored(n).find('img,video,audio,table,hr').length)
   if (text(before) !== text(after) || before('img').length !== images.length
     || images.some(n => !zhihuImageUrl(after(n).attr('src') || after(n).attr('data-original-src')))
-    || before('li').length !== after('li').length || emptyItems
+    || before('li').length !== after('li').length || emptyItems || emptyParagraphs
     || urls(before).some(url => !links.includes(url))
     || JSON.stringify(captions(before)) !== JSON.stringify(captions(after))
     || JSON.stringify(code(before)) !== JSON.stringify(code(after))
