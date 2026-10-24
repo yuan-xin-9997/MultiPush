@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'reac
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, CheckCircle2, ExternalLink, FileText, LoaderCircle, LogOut, QrCode, RefreshCw, Send, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
-import type { MediaAsset, RenderListItem, RenderRecord, ZhihuAccount, ZhihuLogin, ZhihuPublication } from '@shared/types'
+import type { MediaAsset, RenderListItem, RenderRecord, ZhihuAccount, ZhihuLogin, ZhihuPublication, ZhihuResolveInput } from '@shared/types'
 import { absoluteUrl, api, ApiError } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { formatDateTime } from '@/lib/utils'
@@ -30,10 +30,16 @@ export default function ZhihuPublishPage() {
   const [refreshing, setRefreshing] = useState(true)
   const [error, setError] = useState('')
   const [confirmation, setConfirmation] = useState<'publish' | 'disconnect' | null>(null)
+  const [resolveItem, setResolveItem] = useState<ZhihuPublication | null>(null)
+  const [resolveChoice, setResolveChoice] = useState<'not_published' | 'published' | null>(null)
+  const [resolveUrl, setResolveUrl] = useState('')
+  const [resolveBusy, setResolveBusy] = useState(false)
+  const [resolveError, setResolveError] = useState('')
   const article = record?.results.find(result => result.platform === 'zhihu')
   const processing = publications.some(item => item.status === 'running')
-  const busy = submitting || uploading || processing
-  const uncertain = publications.some(item => item.renderId === selectedId && item.status === 'uncertain')
+  const busy = submitting || uploading || processing || resolveBusy
+  const uncertainItems = publications.filter(item => item.renderId === selectedId && item.status === 'uncertain')
+  const uncertain = uncertainItems.length > 0
   const ready = account?.status === 'connected' && !!article && !busy && !recordLoading && !uncertain
 
   const refresh = useCallback(async () => {
@@ -141,6 +147,22 @@ export default function ZhihuPublishPage() {
     finally { if (mounted.current) setSubmitting(false) }
   }
 
+  function openResolution(item: ZhihuPublication) {
+    setResolveItem(item); setResolveChoice(null); setResolveUrl(''); setResolveError('')
+  }
+  async function resolveResult(action: ZhihuResolveInput['action']) {
+    if (!resolveItem || resolveBusy) return
+    setResolveBusy(true); setResolveError('')
+    try {
+      const result = await api.zhihu.resolve(resolveItem.id, action === 'published' ? { action, articleUrl: resolveUrl.trim() } : { action })
+      if (!mounted.current) return
+      setPublications(current => current.map(item => item.id === result.publication.id ? result.publication : item))
+      setResolveItem(null)
+      toast.success(action === 'check' ? '正在重新核实，请查看任务进度' : result.publication.message)
+    } catch (cause) { if (mounted.current) setResolveError(getErrorMessage(cause)) }
+    finally { if (mounted.current) setResolveBusy(false) }
+  }
+
   return <div className="publish-page zhihu-publish-page">
     <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 知乎</span><h1>把内容发布到知乎</h1><p>连接知乎账号，选择排版，一键保存草稿或正式发布文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
@@ -156,14 +178,26 @@ export default function ZhihuPublishPage() {
         <div className="publish-article-title"><FileText size={16} /><strong>{article.title}</strong><button type="button" className="btn btn-sm" onClick={() => navigate(`/render?renderId=${encodeURIComponent(selectedId)}`)}>检查排版<ArrowRight size={13} /></button></div>
         <div className="publish-cover-field"><label className="publish-field">封面图片（选填）<span className="publish-muted">使用内容封面，或上传 10 MB 以内的图片。</span><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" disabled={busy} onChange={event => void uploadCover(event)} /></label>{cover ? <><img className="publish-cover-preview" src={absoluteUrl(cover.url)} alt="待发布的知乎封面" /><button type="button" className="btn btn-sm" disabled={busy} onClick={() => setCover(null)}>移除封面</button></> : null}</div>
         <p className="publish-warning">正文图片会自动上传到知乎。系统会核对知乎保存的图片、列表、图注、链接和代码；内容不一致时停止发布，并保留草稿供检查。</p>
-        {uncertain ? <p className="publish-warning">这篇内容有结果待核实的任务，请先检查知乎后台，避免重复发布。</p> : null}
+        {uncertain ? <div className="publish-warning"><p>这篇内容有 {uncertainItems.length} 个结果待核实的任务。核实后可在这里确认结果并继续操作。</p><button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(uncertainItems[0])}>核实并继续</button></div> : null}
         <div className="publish-submit-actions"><button type="button" className="btn" disabled={!ready} onClick={() => void publish('draft')}><FileText size={16} />保存到知乎草稿</button><button type="button" className="btn btn-primary" disabled={!ready} onClick={() => setConfirmation('publish')}>{busy ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}正式发布到知乎</button></div>
         <p className="publish-form-hint" role="status">{account?.status !== 'connected' ? '请先扫码连接知乎。' : busy ? '任务正在处理，请在下方查看进度。' : '发布后文章可能公开显示在你的知乎主页。'}</p>
       </> : null}
     </section><aside className="publish-panel publish-preview-panel"><div className="publish-section-head"><h2>知乎文章预览</h2><p>以知乎实际排版和审核结果为准。</p></div>{article ? <><h3>{article.title}</h3><iframe title="待发布的知乎正文" sandbox="" srcDoc={`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>body{padding:18px;font-family:sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}</style><body>${article.html}</body></html>`} /></> : <div className="publish-empty"><p>选择内容后预览知乎排版</p></div>}</aside></div>
-    <section className="publish-panel publish-history"><div className="publish-section-head"><h2>知乎发布记录</h2><p>草稿和正式发布分别记录，处理中的任务会自动更新。</p></div>{!publications.length ? <div className="publish-empty"><p>还没有知乎发布记录</p></div> : <div className="publish-history-list">{publications.map(item => <article key={item.id} className="publish-history-item"><div className="publish-history-title"><strong>{item.title}</strong><span className={`publish-status ${item.status === 'published' || item.status === 'draft' ? 'is-success' : item.status === 'failed' ? 'is-error' : ''}`}>{labels[item.status]}</span></div><small>{item.mode === 'draft' ? '保存草稿' : '正式发布'} · {formatDateTime(item.createdAt)}</small><p>{item.message}</p>{safeUrl(item.url) ? <a className="btn btn-sm" href={item.url!} target="_blank" rel="noreferrer">{item.status === 'published' ? '查看知乎文章' : '打开知乎草稿'}<ExternalLink size={13} /></a> : null}</article>)}</div>}</section>
+    <section className="publish-panel publish-history"><div className="publish-section-head"><h2>知乎发布记录</h2><p>草稿和正式发布分别记录，处理中的任务会自动更新。</p></div>{!publications.length ? <div className="publish-empty"><p>还没有知乎发布记录</p></div> : <div className="publish-history-list">{publications.map(item => <article key={item.id} className="publish-history-item"><div className="publish-history-title"><strong>{item.title}</strong><span className={`publish-status ${item.status === 'published' || item.status === 'draft' ? 'is-success' : item.status === 'failed' ? 'is-error' : ''}`}>{labels[item.status]}</span></div><small>{item.mode === 'draft' ? '保存草稿' : '正式发布'} · {formatDateTime(item.createdAt)}</small><p>{item.message}</p>{safeUrl(item.url) ? <a className="btn btn-sm" href={item.url!} target="_blank" rel="noreferrer">{item.status === 'published' ? '查看知乎文章' : '打开知乎草稿'}<ExternalLink size={13} /></a> : null}{item.status === 'uncertain' ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(item)}>核实结果</button> : null}{item.resolutions?.length ? <details className="publish-resolution-history"><summary>核实记录（{item.resolutions.length}）</summary>{item.resolutions.map(entry => <p key={entry.id}><small>{formatDateTime(entry.createdAt)}</small> · {entry.message}</p>)}</details> : null}</article>)}</div>}</section>
     <p className="publish-bottom-note"><ShieldCheck size={14} />使用知乎官方二维码登录，无需提供知乎密码。知乎要求额外安全验证时，会显示原因并保留草稿。</p>
     <Modal open={loginOpen} onClose={() => setLoginOpen(false)} title="连接知乎" subtitle="使用知乎 App 扫码，并在手机上确认登录" size="compact"><div className="publish-login" aria-live="polite">{loginBusy || login?.status === 'waiting' && !login.qrCode ? <><LoaderCircle size={30} className="spin" /><p>正在获取知乎官方登录二维码…</p></> : login ? <>{login.qrCode && ['waiting', 'scanned'].includes(login.status) ? <img className="publish-login-qr" src={login.qrCode} alt="知乎官方登录二维码" /> : <QrCode size={32} />}<p>{login.message}</p><small>有效期至 {formatDateTime(login.expiresAt)}</small>{!['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn" onClick={() => void startLogin()}>重新获取二维码</button> : null}</> : null}{loginError ? <p className="publish-failure-message" role="alert">{loginError}</p> : null}{!loginBusy && !login ? <button type="button" className="btn btn-primary" onClick={() => void startLogin()}>重新连接</button> : null}</div></Modal>
+    <Modal open={!!resolveItem} onClose={() => { if (!resolveBusy) setResolveItem(null) }} title="核实知乎发布结果" subtitle={resolveItem?.title} size="compact" closeOnBackdrop={!resolveBusy}>
+      <div className="publish-resolution-actions">
+        {safeUrl(resolveItem?.url || null) ? <a className="btn" href={resolveItem!.url!} target="_blank" rel="noreferrer">打开知乎核对<ExternalLink size={14} /></a> : null}
+        <button type="button" className="btn" disabled={resolveBusy} onClick={() => void resolveResult('check')}><RefreshCw size={14} />重新自动核实</button>
+        <button type="button" className={`btn ${resolveChoice === 'not_published' ? 'btn-primary' : ''}`} disabled={resolveBusy} onClick={() => { setResolveChoice('not_published'); setResolveError('') }}>我已核实，未发布</button>
+        <button type="button" className={`btn ${resolveChoice === 'published' ? 'btn-primary' : ''}`} disabled={resolveBusy} onClick={() => { setResolveChoice('published'); setResolveError('') }}>我已核实，已发布</button>
+      </div>
+      {resolveChoice === 'not_published' ? <><p className="publish-warning">请确认知乎后台尚未发布这篇文章。确认后将解除限制，允许你再次提交，并优先复用原草稿；此操作不会立即发布文章。若核实有误，再次提交可能重复发布。</p><button type="button" className="btn btn-primary" disabled={resolveBusy} onClick={() => void resolveResult('not_published')}>确认未发布，解除限制</button></> : null}
+      {resolveChoice === 'published' ? <><label className="publish-field">已发布文章链接<input className="input" type="url" value={resolveUrl} maxLength={2048} disabled={resolveBusy} placeholder="https://zhuanlan.zhihu.com/p/…" onChange={event => setResolveUrl(event.target.value)} /></label><p className="publish-muted">将按你的核实结果标记已发布并关联链接，不会再次发布这篇文章。</p><button type="button" className="btn btn-primary" disabled={resolveBusy || !resolveUrl.trim()} onClick={() => void resolveResult('published')}>确认已发布并关联</button></> : null}
+      {resolveBusy ? <p className="publish-muted"><LoaderCircle size={15} className="spin" />正在保存核实结果…</p> : null}
+      {resolveError ? <p className="publish-failure-message" role="alert">{resolveError}</p> : null}
+    </Modal>
     <ConfirmDialog open={confirmation === 'publish'} title="正式发布到知乎？" description={<><strong>{article?.title}</strong><p>将发布至「{account?.name || '已连接知乎账号'}」，文章可能对外公开。</p></>} confirmLabel="确认发布到知乎" tone="primary" loading={submitting} onConfirm={() => publish('publish')} onClose={() => setConfirmation(null)} />
     <ConfirmDialog open={confirmation === 'disconnect'} title="断开知乎连接？" description="删除系统保存的知乎登录状态，下次发布需要重新扫码。知乎上的草稿和文章保持不变。" confirmLabel="断开连接" loading={submitting} onConfirm={disconnect} onClose={() => setConfirmation(null)} />
   </div>

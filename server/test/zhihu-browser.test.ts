@@ -11,7 +11,7 @@ const response = (data: unknown, status = 200) => ({ status: () => status, ok: (
 
 afterEach(async () => { for (const driver of drivers.splice(0)) await driver.close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
-function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publishTimeout?: boolean; draftId?: string; existing?: boolean } = {}) {
+function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publishTimeout?: boolean; draftId?: string; existing?: boolean; checkState?: 'published' | 'draft' | 'reviewing'; foreignAuthor?: boolean } = {}) {
   const draftId = options.draftId || '123'
   let saved: Record<string, unknown> = { id: draftId, state: 'draft' }, publishListener: (value: unknown) => void = () => {}
   const upload = vi.fn(async () => response({ src: 'https://pic4.zhimg.com/uploaded.png' }))
@@ -23,7 +23,7 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
   const patch = vi.fn(async (_url: string, value: { data: Record<string, unknown> }) => { saved = { ...saved, ...value.data }; return response({}) })
   const get = vi.fn(async (url: string) => {
     if (url.endsWith('/me')) return response({ id: 'account', name: '作者' })
-    if (url === `https://zhuanlan.zhihu.com/api/articles/${draftId}/draft` || saved.state === 'published' && url === 'https://zhuanlan.zhihu.com/api/articles/456') return response({ ...saved, ...(options.mismatch ? { content: '<p>丢失的内容</p>' } : {}) })
+    if (url === `https://zhuanlan.zhihu.com/api/articles/${draftId}/draft` || saved.state === 'published' && url === `https://zhuanlan.zhihu.com/api/articles/${saved.id}`) return response({ ...saved, ...(options.mismatch ? { content: '<p>丢失的内容</p>' } : {}) })
     return response({ error: { code: 4041 } }, 404)
   })
   const click = vi.fn(async () => {
@@ -38,10 +38,26 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
   const driver = new PlaywrightZhihuDriver(); drivers.push(driver)
   const article: ZhihuArticle = { title: '测试文章', html: '<h2>标题</h2><p><img src="https://external.test/image.png"></p><p><br></p><p><em>图 1：说明</em></p><ul>\n<li><a href="https://github.com/org/repo">项目源码</a></li>\n<li><br></li>\n<li>第二项</li>\n</ul><pre><code class="language-js">  hello\n    world</code></pre>', images: new Map([['https://external.test/image.png', { name: 'body.png', mimeType: 'image/png', buffer: Buffer.from('image') }]]) }
   if (options.existing) saved = { ...saved, title: article.title, content: zhihuEditorContent(article.html.replace('https://external.test/image.png', 'https://pic4.zhimg.com/uploaded.png')) }
+  if (options.checkState) saved = { ...saved, title: article.title, author: { id: options.foreignAuthor ? 'other-account' : 'account' }, state: options.checkState === 'published' ? 'published' : 'draft', has_publishing_draft: options.checkState === 'reviewing' }
   return { driver, article, post, patch, get, page, click, context }
 }
 
 describe('Zhihu browser publishing', () => {
+  it('rechecks a published result only when its identity, title and author match', async () => {
+    const { driver, post } = fixture({ checkState: 'published' })
+    expect(await driver.checkPublication(state, '123', '测试文章')).toMatchObject({ status: 'published', url: 'https://zhuanlan.zhihu.com/p/123' })
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it.each([{ checkState: 'published' as const, foreignAuthor: true }, { checkState: 'reviewing' as const }])('does not confirm a different author or pending review: %j', async options => {
+    const { driver } = fixture(options)
+    expect(await driver.checkPublication(state, '123', '测试文章')).toMatchObject({ status: 'unknown' })
+  })
+
+  it('reports an existing draft without asserting it is safe to republish', async () => {
+    const { driver } = fixture({ checkState: 'draft' })
+    expect(await driver.checkPublication(state, '123', '测试文章')).toMatchObject({ status: 'draft' })
+  })
   it('uploads image bytes, writes native formatting, and reads the stored draft before reporting success', async () => {
     const { driver, article, post, patch, get } = fixture()
     const progress = vi.fn()

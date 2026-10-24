@@ -28,6 +28,7 @@ import type {
   ZhihuLogin,
   ZhihuPublication,
   ZhihuPublishInput,
+  ZhihuResolveInput,
 } from '@shared/types'
 
 const TOKEN_KEY = 'multipush_token'
@@ -217,6 +218,7 @@ export const api = {
   },
 
   zhihu: {
+    resolve: (id: string, input: ZhihuResolveInput) => request<{ publication: ZhihuPublication }>(`/api/zhihu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
     account: () => request<{ account: ZhihuAccount }>('/api/zhihu/account', { cache: 'no-store' }),
     startLogin: () => request<{ login: ZhihuLogin }>('/api/zhihu/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: ZhihuLogin }>(`/api/zhihu/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),

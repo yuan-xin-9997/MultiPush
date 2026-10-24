@@ -6,6 +6,7 @@ import { parseInput } from '../validation'
 import type { ZhihuService } from '../zhihu'
 
 const schema = z.object({ renderId: z.uuid(), mode: z.enum(['draft', 'publish']), coverMediaId: z.uuid().optional() }).strict()
+const resolveSchema = z.discriminatedUnion('action', [z.object({ action: z.literal('check') }).strict(), z.object({ action: z.literal('not_published') }).strict(), z.object({ action: z.literal('published'), articleUrl: z.string().trim().min(1).max(2048) }).strict()])
 
 export function createZhihuRouter(service: ZhihuService): Router {
   const router = Router()
@@ -16,6 +17,10 @@ export function createZhihuRouter(service: ZhihuService): Router {
   router.get('/login/:id', asyncHandler(async (req, res) => { res.json({ login: await service.pollLogin(currentUser(req).id, req.params.id) }) }))
   router.get('/publications', asyncHandler((req, res) => { res.json({ publications: service.list(currentUser(req).id) }) }))
   router.get('/publications/:id', asyncHandler((req, res) => { res.json({ publication: service.get(currentUser(req).id, req.params.id) }) }))
+  router.post('/publications/:id/resolve', asyncHandler(async (req, res) => {
+    const input = parseInput(resolveSchema, req.body)
+    res.status(input.action === 'check' ? 202 : 200).json({ publication: await service.resolve(currentUser(req).id, req.params.id, input) })
+  }))
   router.post('/publications', asyncHandler(async (req, res) => {
     res.status(202).json({ publication: await service.publish(currentUser(req).id, parseInput(schema, req.body), `${req.protocol}://${req.get('host')}`) })
   }))

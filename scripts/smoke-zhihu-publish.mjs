@@ -41,8 +41,21 @@ app.post('/api/zhihu/publications', (req, res) => {
   const item = { id: `pub-${submissions.length}`, renderId: render.id, title: article.title, mode: req.body.mode, status: mode === 'uncertain' ? 'uncertain' : 'running', message: '正在处理', url: null, remoteId: '123', createdAt: time, updatedAt: time }
   publications.unshift(item); res.status(202).json({ publication: item })
 })
+app.post('/api/zhihu/publications/:id/resolve', (req, res) => {
+  const item = publications.find(p => p.id === req.params.id)
+  assert.equal(item.status, 'uncertain')
+  if (req.body.action === 'check') Object.assign(item, { status: 'running', checking: true })
+  else {
+    Object.assign(item, { status: req.body.action === 'published' ? 'published' : 'failed', message: req.body.action === 'published' ? '用户已人工核实文章发布成功' : '用户已核实未发布，已解除限制', ...(req.body.action === 'published' ? { url: req.body.articleUrl } : {}) })
+    item.resolutions = [{ id: `resolution-${Date.now()}`, action: req.body.action, message: item.message, articleUrl: req.body.articleUrl || null, createdAt: time }, ...(item.resolutions || [])]
+  }
+  res.json({ publication: item })
+})
 app.get('/api/zhihu/publications', (_req, res) => {
-  for (const item of publications) if (item.status === 'running') Object.assign(item, { status: item.mode === 'draft' ? 'draft' : 'published', message: '已核对知乎保存的正文', url: `https://zhuanlan.zhihu.com/p/123${item.mode === 'draft' ? '/edit' : ''}` })
+  for (const item of publications) if (item.status === 'running') {
+    if (item.checking) Object.assign(item, { status: 'uncertain', checking: false, message: '仍有草稿，请人工核实' })
+    else Object.assign(item, { status: item.mode === 'draft' ? 'draft' : 'published', message: '已核对知乎保存的正文', url: `https://zhuanlan.zhihu.com/p/123${item.mode === 'draft' ? '/edit' : ''}` })
+  }
   res.json({ publications })
 })
 app.use(express.static(path.join(root, 'web', 'dist')))
@@ -91,6 +104,30 @@ try {
   await page.reload()
   await page.getByText('结果待核实', { exact: true }).waitFor()
   assert.equal(submissions.length, 3)
+  await page.getByRole('button', { name: '核实并继续', exact: true }).click()
+  await page.getByRole('button', { name: '重新自动核实', exact: true }).click()
+  await page.getByText('仍有草稿，请人工核实', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '正式发布到知乎', exact: true }).isDisabled(), true)
+  await page.getByRole('button', { name: '核实并继续', exact: true }).click()
+  await page.getByRole('button', { name: '我已核实，未发布', exact: true }).click()
+  assert.equal(submissions.length, 3, 'Selecting a resolution must not publish')
+  await page.getByRole('button', { name: '确认未发布，解除限制', exact: true }).click()
+  await page.getByRole('dialog', { name: '核实知乎发布结果' }).waitFor({ state: 'hidden' })
+  assert.equal(await page.getByRole('button', { name: '正式发布到知乎', exact: true }).isEnabled(), true)
+  assert.equal(submissions.length, 3, 'Resolving an uncertain result must not automatically retry')
+  await page.reload()
+  await page.getByText('用户已核实未发布，已解除限制', { exact: true }).first().waitFor()
+  await page.getByRole('button', { name: '正式发布到知乎', exact: true }).click()
+  await page.getByRole('dialog', { name: '正式发布到知乎？' }).waitFor()
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  mode = 'uncertain'
+  await page.getByRole('button', { name: '保存到知乎草稿', exact: true }).click()
+  await page.getByRole('button', { name: '核实并继续', exact: true }).click()
+  await page.getByRole('button', { name: '我已核实，已发布', exact: true }).click()
+  await page.getByLabel('已发布文章链接').fill('https://zhuanlan.zhihu.com/p/456')
+  await page.getByRole('button', { name: '确认已发布并关联', exact: true }).click()
+  await page.locator('a[href="https://zhuanlan.zhihu.com/p/456"]').waitFor()
+  assert.equal(submissions.length, 4)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.frameLocator('iframe').getByText('这是一篇知乎测试文章。').waitFor()
   await page.locator('iframe').scrollIntoViewIfNeeded()

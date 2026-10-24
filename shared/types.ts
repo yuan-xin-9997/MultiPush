@@ -357,6 +357,20 @@ export interface ZhihuPublication {
   remoteId: string | null
   createdAt: string
   updatedAt: string
+  resolutions?: ZhihuResolution[]
+}
+
+export interface ZhihuResolution {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
+}
+
+export interface ZhihuResolveInput {
+  action: ZhihuResolution['action']
+  articleUrl?: string
 }
 
 export interface ApiHealth {

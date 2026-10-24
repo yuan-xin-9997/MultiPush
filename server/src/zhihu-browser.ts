@@ -16,6 +16,7 @@ export interface ZhihuLoginAttempt {
 export interface ZhihuDriver {
   beginLogin(): Promise<ZhihuLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: ZhihuIdentity }>
+  checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'draft' | 'unknown'; url: string | null; message: string }>
   publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: (value: Partial<Pick<ZhihuPublication, 'message' | 'remoteId' | 'url'>>) => void, resumeDraftId?: string): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   close(): Promise<void>
 }
@@ -118,6 +119,33 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'zhihu_check_failed', '知乎连接检查未完成，请检查网络后重试')
+    } finally { await context.close().catch(() => {}) }
+  }
+
+  async checkPublication(state: PublisherStorageState, remoteId: string, title: string) {
+    if (!/^\d+$/.test(remoteId)) throw new ApiError(400, 'zhihu_draft_invalid', '远端编号无效，无法自动核实')
+    const context = await this.context(state)
+    try {
+      const identity = await this.identity(context)
+      const headers = { 'x-requested-with': 'fetch', Referer: `${COLUMN}p/${remoteId}/edit` }
+      const publishedResponse = await context.request.get(`${COLUMN}api/articles/${remoteId}`, { headers, timeout: 15_000 })
+      if (publishedResponse.status() !== 404) {
+        const published = await zhihuResponse(publishedResponse, '重新核实知乎文章')
+        if (String(published.id) === remoteId && published.title === title && String(object(published.author).id) === identity.accountId && (published.state === 'published' || published.is_published === true)) {
+          return { state: await context.storageState(), status: 'published' as const, url: `${COLUMN}p/${remoteId}`, message: '已重新核实：知乎确认该文章已发布' }
+        }
+      }
+      const response = await context.request.get(`${COLUMN}api/articles/${remoteId}/draft`, { headers, timeout: 15_000 })
+      if (response.status() !== 404) {
+        const draft = await zhihuResponse(response, '重新核实知乎草稿')
+        if (String(draft.id) === remoteId && draft.title === title && String(object(draft.author).id) === identity.accountId && draft.state === 'draft' && draft.has_publishing_draft === false) {
+          return { state: await context.storageState(), status: 'draft' as const, url: `${COLUMN}p/${remoteId}/edit`, message: '知乎仍有这份草稿。请确认未通过其他记录发布，再选择“已核实未发布，允许重试”' }
+        }
+      }
+      return { state: await context.storageState(), status: 'unknown' as const, url: null, message: '知乎暂未给出可确认的发布结果，请核对知乎后台后选择人工核实结果' }
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'zhihu_check_failed', '重新核实知乎结果未完成，请稍后重试或人工核实')
     } finally { await context.close().catch(() => {}) }
   }
 

@@ -33,6 +33,7 @@ function setup(persistent = false) {
   const driver = {
     beginLogin: vi.fn<ZhihuDriver['beginLogin']>().mockResolvedValue(attempt),
     checkSession: vi.fn<ZhihuDriver['checkSession']>().mockResolvedValue({ state: session, identity }),
+    checkPublication: vi.fn<ZhihuDriver['checkPublication']>().mockResolvedValue({ state: session, status: 'unknown', url: null, message: '暂不能自动确认，请人工核实' }),
     publish: vi.fn<ZhihuDriver['publish']>().mockImplementation(async (_state, _article, mode) => ({ state: session, status: mode === 'draft' ? 'draft' : 'published', remoteId: '123', url: `https://zhuanlan.zhihu.com/p/123${mode === 'draft' ? '/edit' : ''}`, message: '完成' })),
     close: vi.fn(async () => {}),
   }
@@ -202,6 +203,63 @@ describe('Zhihu account lifecycle and publishing', () => {
     expect(reopened.getZhihuPublication(alice.id, publication.id)).toMatchObject({ status: 'uncertain' })
   })
 
+  it('unlocks a manually verified unpublished task and preserves the draft and audit record through retry', async () => {
+    const { service, driver, alice, seed, article } = setup()
+    seed(); const render = article(), input = { renderId: render.id, mode: 'publish' as const }
+    driver.publish.mockImplementationOnce(async (_state, _article, _mode, progress) => { progress({ remoteId: '123', url: 'https://zhuanlan.zhihu.com/p/123/edit' }); throw new ApiError(502, 'zhihu_result_uncertain', '请核对结果') })
+    const job = await service.publish(alice.id, input)
+    await finished(service, alice.id, job.id)
+    const resolved = await service.resolve(alice.id, job.id, { action: 'not_published' })
+    expect(resolved).toMatchObject({ status: 'failed', remoteId: '123', resolutions: [{ action: 'not_published' }] })
+    expect(driver.publish).toHaveBeenCalledTimes(1)
+    expect((await service.publish(alice.id, input)).id).toBe(job.id)
+    expect(await finished(service, alice.id, job.id)).toMatchObject({ status: 'published', resolutions: [{ action: 'not_published' }] })
+    expect(driver.publish.mock.calls[1][4]).toBe('123')
+  })
+
+  it('accepts a manual published link, rejects unsafe links, isolates owners and persists the resolution', async () => {
+    const { database, directory, service, driver, alice, bob } = setup(true)
+    const job = database.createZhihuPublication(alice.id, { renderId: 'render', title: '标题', mode: 'publish', idempotencyKey: 'key' })
+    database.updateZhihuPublication(alice.id, job.id, { status: 'uncertain' })
+    await expect(service.resolve(bob.id, job.id, { action: 'not_published' })).rejects.toMatchObject({ status: 404 })
+    for (const articleUrl of ['https://zhuanlan.zhihu.com.evil.test/p/1', 'https://zhuanlan.zhihu.com/p/1/edit', 'javascript:alert(1)', 'https://user:pass@zhuanlan.zhihu.com/p/1']) await expect(service.resolve(alice.id, job.id, { action: 'published', articleUrl })).rejects.toMatchObject({ status: 400 })
+    const resolved = await service.resolve(alice.id, job.id, { action: 'published', articleUrl: 'https://zhuanlan.zhihu.com/p/456?share_code=temporary#x' })
+    expect(resolved).toMatchObject({ status: 'published', remoteId: '456', url: 'https://zhuanlan.zhihu.com/p/456', resolutions: [{ action: 'published', articleUrl: 'https://zhuanlan.zhihu.com/p/456' }] })
+    expect(driver.publish).not.toHaveBeenCalled()
+    await expect(service.resolve(alice.id, job.id, { action: 'not_published' })).rejects.toMatchObject({ status: 409 })
+    await service.close(); database.close()
+    const reopened = openDatabase(path.join(directory, 'test.sqlite')); databases.push(reopened)
+    expect(reopened.getZhihuPublication(alice.id, job.id)?.resolutions).toHaveLength(1)
+  })
+
+  it('checks uncertain results asynchronously and keeps an inconclusive check available for manual resolution', async () => {
+    const { database, service, driver, alice, seed } = setup()
+    seed()
+    const job = database.createZhihuPublication(alice.id, { renderId: 'render', title: '标题', mode: 'publish', idempotencyKey: 'key' })
+    database.updateZhihuPublication(alice.id, job.id, { status: 'uncertain', remoteId: '123' })
+    let complete!: (value: Awaited<ReturnType<ZhihuDriver['checkPublication']>>) => void
+    driver.checkPublication.mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    try {
+      expect(await service.resolve(alice.id, job.id, { action: 'check' })).toMatchObject({ status: 'running' })
+      await expect(service.resolve(alice.id, job.id, { action: 'not_published' })).rejects.toMatchObject({ code: 'zhihu_busy' })
+      complete({ state: session, status: 'draft', url: 'https://zhuanlan.zhihu.com/p/123/edit', message: '仍有草稿，请人工确认' })
+      expect(await finished(service, alice.id, job.id)).toMatchObject({ status: 'uncertain', resolutions: [{ action: 'check' }] })
+      expect(await service.resolve(alice.id, job.id, { action: 'not_published' })).toMatchObject({ status: 'failed', resolutions: [{ action: 'not_published' }, { action: 'check' }] })
+      expect(driver.publish).not.toHaveBeenCalled()
+    } finally { complete({ state: session, status: 'unknown', url: null, message: '结束' }) }
+  })
+
+  it('automatically links an author-verified published result without sending another publication', async () => {
+    const { database, service, driver, alice, seed } = setup()
+    seed()
+    const job = database.createZhihuPublication(alice.id, { renderId: 'render', title: '标题', mode: 'publish', idempotencyKey: 'key' })
+    database.updateZhihuPublication(alice.id, job.id, { status: 'uncertain', remoteId: '123' })
+    driver.checkPublication.mockResolvedValueOnce({ state: session, status: 'published', url: 'https://zhuanlan.zhihu.com/p/123', message: '知乎已确认发布' })
+    await service.resolve(alice.id, job.id, { action: 'check' })
+    expect(await finished(service, alice.id, job.id)).toMatchObject({ status: 'published', resolutions: [{ action: 'check' }] })
+    expect(driver.publish).not.toHaveBeenCalled()
+  })
+
   it('authenticates API access, validates inputs, isolates records and keeps responses credential-free', async () => {
     const { database, config, driver, alice, bob } = setup()
     const app = createApp(config, database, undefined, driver); services.push(app.locals.zhihu)
@@ -214,5 +272,12 @@ describe('Zhihu account lifecycle and publishing', () => {
     expect((await fetch(`${base}/api/zhihu/publications`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ renderId: alice.id, mode: 'wrong' }) })).status).toBe(400)
     const publication = database.createZhihuPublication(alice.id, { renderId: 'render', title: '标题', mode: 'draft', idempotencyKey: 'key' })
     expect((await fetch(`${base}/api/zhihu/publications/${publication.id}`, { headers: { Authorization: `Bearer ${signToken(bob, config.jwtSecret)}` } })).status).toBe(404)
+    database.updateZhihuPublication(alice.id, publication.id, { status: 'uncertain' })
+    const resolve = (tokenHeaders: Record<string, string>, body: unknown) => fetch(`${base}/api/zhihu/publications/${publication.id}/resolve`, { method: 'POST', headers: { ...tokenHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    expect((await resolve({ Authorization: `Bearer ${signToken(bob, config.jwtSecret)}` }, { action: 'not_published' })).status).toBe(404)
+    expect((await resolve(headers, { action: 'published' })).status).toBe(400)
+    expect((await resolve(headers, { action: 'delete' })).status).toBe(400)
+    expect((await resolve(headers, { action: 'not_published' })).status).toBe(200)
+    expect((await resolve(headers, { action: 'not_published' })).status).toBe(409)
   })
 })

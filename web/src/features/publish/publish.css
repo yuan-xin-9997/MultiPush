@@ -89,3 +89,7 @@
 .zhihu-publish-page .publish-section-head { display: block; }
 @media (max-width: 1100px) { .publish-platform-tabs { padding: 24px 24px 0; } }
 @media (max-width: 640px) { .publish-platform-tabs { padding: 20px 14px 0; } }
+
+.publish-resolution-actions { display: grid; gap: 10px; margin-bottom: 18px; }
+.publish-resolution-history { margin-top: 12px; font-size: 12px; color: var(--muted); }
+.publish-resolution-history summary { cursor: pointer; }

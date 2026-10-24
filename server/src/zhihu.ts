@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { load } from 'cheerio'
-import type { ZhihuAccount, ZhihuLogin, ZhihuPublishInput, ZhihuPublication } from '../../shared/types'
+import type { ZhihuAccount, ZhihuLogin, ZhihuPublishInput, ZhihuPublication, ZhihuResolveInput } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -184,6 +184,47 @@ export class ZhihuService {
     const value = this.database.getZhihuPublication(userId, id)
     if (!value) throw notFound('知乎发布记录不存在')
     return value
+  }
+
+  async resolve(userId: string, id: string, input: ZhihuResolveInput): Promise<ZhihuPublication> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status !== 'uncertain') throw new ApiError(409, 'zhihu_resolution_stale', '任务状态已变化，请刷新后再操作')
+    this.active.add(userId)
+    let handedOff = false
+    try {
+      if (input.action === 'check') {
+        const state = this.state(userId)
+        this.database.updateZhihuPublication(userId, id, { status: 'running', message: '正在重新核实知乎发布结果' })
+        const task = this.recheck(userId, id, state, current)
+        this.jobs.set(id, task); handedOff = true
+        void task.finally(() => { this.jobs.delete(id); this.active.delete(userId) }).catch(() => {})
+        return this.get(userId, id)
+      }
+      let values: Pick<ZhihuPublication, 'status' | 'message' | 'url' | 'remoteId'>
+      if (input.action === 'not_published') {
+        values = { status: 'failed', message: '用户已核实未发布，已解除限制；再次提交会优先复用原草稿', url: current.url, remoteId: current.remoteId }
+      } else {
+        let url: URL
+        try { url = new URL(input.articleUrl || '') } catch { throw new ApiError(400, 'zhihu_article_url', '请填写已发布的知乎文章链接') }
+        const match = url.pathname.match(/^\/p\/(\d+)\/?$/)
+        if (url.protocol !== 'https:' || url.hostname !== 'zhuanlan.zhihu.com' || url.port || url.username || url.password || !match) throw new ApiError(400, 'zhihu_article_url', '请填写 https://zhuanlan.zhihu.com/p/文章编号 格式的文章链接')
+        values = { status: 'published', message: '用户已人工核实文章发布成功，并关联文章链接', remoteId: match[1], url: `https://zhuanlan.zhihu.com/p/${match[1]}` }
+      }
+      const result = this.database.resolveZhihuPublication(userId, id, input.action, values)
+      if (!result) throw new ApiError(409, 'zhihu_resolution_stale', '任务状态已变化，请刷新后再操作')
+      return result
+    } finally { if (!handedOff) this.active.delete(userId) }
+  }
+
+  private async recheck(userId: string, id: string, state: PublisherStorageState, current: ZhihuPublication): Promise<void> {
+    try {
+      const result = current.remoteId ? await this.driver.checkPublication(state, current.remoteId, current.title) : { status: 'unknown', url: null, message: '没有可核对的远端编号，请在知乎后台核实后选择人工核实结果' }
+      this.database.resolveZhihuPublication(userId, id, 'check', { status: result.status === 'published' ? 'published' : 'uncertain', message: result.message, url: result.url || current.url, remoteId: current.remoteId })
+    } catch (error) {
+      this.expire(userId, error)
+      this.database.resolveZhihuPublication(userId, id, 'check', { status: 'uncertain', message: error instanceof ApiError ? error.message : '自动核实未完成，请稍后重试或填写人工核实结果', url: current.url, remoteId: current.remoteId })
+    }
   }
 
   async publish(userId: string, input: ZhihuPublishInput, baseUrl?: string): Promise<ZhihuPublication> {

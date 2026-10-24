@@ -18,6 +18,7 @@ import type {
   User,
   WechatPublication,
   ZhihuPublication,
+  ZhihuResolution,
 } from '../../shared/types'
 import { PLATFORM_ORDER } from '../../shared/types'
 import { DEFAULT_BOOK_COLOR } from './config'
@@ -330,7 +331,17 @@ export class Database {
         UNIQUE (user_id, idempotency_key)
       );
       CREATE INDEX IF NOT EXISTS idx_zhihu_publications_user_created ON zhihu_publications(user_id, created_at DESC);
-      PRAGMA user_version = 4;
+      CREATE TABLE IF NOT EXISTS zhihu_publication_resolutions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL REFERENCES zhihu_publications(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN ('check', 'not_published', 'published')),
+        message TEXT NOT NULL,
+        article_url TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_zhihu_resolutions_publication ON zhihu_publication_resolutions(publication_id, created_at DESC);
+      PRAGMA user_version = 5;
     `)
     // Never resend an operation that may already have reached WeChat before a restart.
     this.run(`UPDATE wechat_publications SET status = 'uncertain', message = ?, updated_at = ?
@@ -954,7 +965,8 @@ export class Database {
   deleteZhihuAccount(userId: string): void { this.run('DELETE FROM zhihu_accounts WHERE user_id = ?', [userId]) }
 
   private mapZhihuPublication(row: Row): ZhihuPublication {
-    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as ZhihuPublication['mode'], status: row.status as ZhihuPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at) }
+    const resolutions: ZhihuResolution[] = this.all('SELECT * FROM zhihu_publication_resolutions WHERE publication_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 10', [text(row.id), text(row.user_id)]).map(r => ({ id: text(r.id), action: r.action as ZhihuResolution['action'], message: text(r.message), articleUrl: nullableText(r.article_url), createdAt: text(r.created_at) }))
+    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as ZhihuPublication['mode'], status: row.status as ZhihuPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at), resolutions }
   }
 
   createZhihuPublication(userId: string, values: CreateWechatPublicationValues): ZhihuPublication {
@@ -987,6 +999,15 @@ export class Database {
     this.run(`UPDATE zhihu_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
       [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
     return this.getZhihuPublication(userId, id)
+  }
+
+  resolveZhihuPublication(userId: string, id: string, action: ZhihuResolution['action'], values: Pick<ZhihuPublication, 'status' | 'message' | 'url' | 'remoteId'>): ZhihuPublication | null {
+    return this.transaction(() => {
+      const current = this.getZhihuPublication(userId, id)
+      if (!current || !['uncertain', 'running'].includes(current.status)) return null
+      this.run('INSERT INTO zhihu_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
+      return this.updateZhihuPublication(userId, id, values)
+    })
   }
 }
 
