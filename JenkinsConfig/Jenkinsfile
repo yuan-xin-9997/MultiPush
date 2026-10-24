@@ -55,6 +55,12 @@ pipeline {
             }
         }
 
+        stage('Publishing UI regression') {
+            steps {
+                sh 'npm run test:publish-ui'
+            }
+        }
+
         stage('Stop service') {
             steps {
                 sh '''

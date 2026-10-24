@@ -84,5 +84,8 @@
   .publish-error { flex-direction: column; align-items: flex-start; }
 }
 
-.publish-platform-tabs { display: flex; gap: 10px; max-width: 1240px; margin: 0 auto 20px; }
+.publish-platform-tabs { display: flex; gap: 10px; max-width: 1240px; margin: 0 auto; padding: 24px 36px 0; }
 .zhihu-publish-page .publish-account-icon { font-size: 28px; font-weight: 700; color: #1772f6; background: #edf5ff; }
+.zhihu-publish-page .publish-section-head { display: block; }
+@media (max-width: 1100px) { .publish-platform-tabs { padding: 24px 24px 0; } }
+@media (max-width: 640px) { .publish-platform-tabs { padding: 20px 14px 0; } }

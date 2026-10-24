@@ -77,12 +77,12 @@ export default function ZhihuPublishPage() {
       try {
         const { login: next } = await api.zhihu.loginStatus(login.id)
         if (cancelled) return
-        setLogin(next); setLoginError('')
+        setLoginError('')
         if (next.status === 'connected') {
           const result = await api.zhihu.account()
           if (cancelled) return
-          setAccount(result.account); setLoginOpen(false); toast.success('知乎已连接，登录状态已保存')
-        }
+          setLogin(next); setAccount(result.account); setLoginOpen(false); toast.success('知乎已连接，登录状态已保存')
+        } else setLogin(next)
       } catch (cause) {
         if (!cancelled) {
           setLoginError(getErrorMessage(cause))

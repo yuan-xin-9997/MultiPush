@@ -42,3 +42,7 @@
 - [Playwright Authentication](https://playwright.dev/docs/auth)：按账号恢复独立 storageState。
 
 这些网页接口和编辑器没有稳定性承诺，知乎改版后可能需要更新适配。自动化测试使用隔离数据库和合成凭据，不会向真实知乎账号发布文章，覆盖用户隔离、会话加密与重启恢复、原生格式、内容丢失拦截、图片上传、发布结果确认及超时去重。真实验收需扫码连接后用包含图片、图注、嵌套列表、链接、代码与表格的内容新建草稿并检查知乎实际显示，再由用户发起正式发布。
+
+页面交互回归可先运行 `npm run build:web`，再运行 `node scripts/smoke-zhihu-publish.mjs`；该脚本使用独立本地 API fixture，检查扫码状态、草稿/发布按钮、确认弹窗、错误与不确定状态，以及桌面和手机宽度布局，不访问真实知乎账号。
+
+Jenkins 在构建完成后、停止生产服务前运行 `npm run test:publish-ui`，同时验证微信公众号和知乎页面。页面回归失败时不会进入部署阶段；CI 主机需具备现有发布功能所需的 Chrome/Chromium。
