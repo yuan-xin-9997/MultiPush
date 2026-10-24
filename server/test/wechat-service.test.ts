@@ -15,6 +15,8 @@ import { decryptWechatSession, encryptWechatSession, loadWechatKey, WechatServic
 import type { WechatBrowserDriver, WechatLoginAttempt, WechatStorageState } from '../src/wechat-browser'
 import * as remoteImages from '../src/wechat-image'
 import { load } from 'cheerio'
+import { chromium, type Browser } from 'playwright-core'
+import { PlaywrightWechatDriver } from '../src/wechat-browser'
 
 const directories: string[] = []
 const databases: Database[] = []
@@ -84,6 +86,7 @@ async function finished(service: WechatService, userId: string, id: string): Pro
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   for (const server of servers.splice(0)) {
     server.closeAllConnections()
     await new Promise<void>((resolve) => server.close(() => resolve()))
@@ -172,6 +175,40 @@ describe('WeChat session security', () => {
 })
 
 describe('WeChat article submission', () => {
+  it('runs legacy content through the real service and driver before submitting a new WeChat draft', async () => {
+    const { database, config, alice, seedAccount, image, article } = setup()
+    seedAccount()
+    const cover = image(alice.id, 'cover.png')
+    const render = article('<p><img src="https://example.com/body.png" style="margin:20px auto;margin-bottom:0"></p><p><br></p><p style="margin:0 0 16px;margin-top:8px"><em>图 1：说明</em></p><ul>\n<li><a href="https://github.com/org/repo">项目源码</a></li>\n<li><p><br></p></li>\n<li>另一项</li>\n</ul>')
+    vi.spyOn(remoteImages, 'downloadWechatImage').mockResolvedValue({ name: 'body.png', mimeType: 'image/png', buffer: Buffer.from('downloaded-image') })
+    const editor = '<script>var data={t:"123",user_name:"gh_test",ticket:"test-ticket",nick_name:"测试公众号"};\nwx.cgiData.can_use_hyperlink = 0;\n</script>'
+    let uploaded = 0
+    const upload = vi.fn(async () => ({ json: async () => ({ ret: 0, content: { media_id: String(++uploaded), cdn_url: `https://mmbiz.qpic.cn/image/${uploaded}` } }) }))
+    const create = vi.fn(async (_url: string, _options: { form: Record<string, string> }) => ({ json: async () => ({ base_resp: { ret: 0 }, appMsgId: '345' }) }))
+    const page = { goto: vi.fn(), content: async () => editor, url: () => 'https://mp.weixin.qq.com/?token=123', request: { post: upload } }
+    const context = { newPage: async () => page, setDefaultTimeout: vi.fn(), storageState: async () => session, close: vi.fn(async () => {}), request: { get: async () => ({ text: async () => editor }), post: create } }
+    vi.stubEnv('WECHAT_BROWSER_PATH', process.execPath)
+    vi.spyOn(chromium, 'launch').mockResolvedValue({ newContext: async () => context, on: vi.fn(), close: async () => {} } as unknown as Browser)
+    const service = new WechatService(database, config, new PlaywrightWechatDriver())
+    services.push(service)
+    const publication = await service.publish(alice.id, { renderId: render.id, mode: 'draft', coverMediaId: cover.id, sourceUrl: 'https://github.com/org/repo' })
+    expect(await finished(service, alice.id, publication.id)).toMatchObject({ status: 'draft', remoteId: '345', message: expect.stringContaining('1 个正文外链已保留为可复制地址') })
+    expect(upload).toHaveBeenCalledTimes(2)
+    expect(create).toHaveBeenCalledTimes(1)
+    const [url, options] = create.mock.calls[0]
+    expect(new URL(url).searchParams.get('sub')).toBe('create')
+    expect(options.form.sourceurl0).toBe('https://github.com/org/repo')
+    const $ = load(options.form.content0)
+    expect($('img').attr()).toMatchObject({ src: 'https://mmbiz.qpic.cn/image/2', 'data-src': 'https://mmbiz.qpic.cn/image/2', 'data-imgfileid': '2', 'data-type': 'png' })
+    expect($('img').css('margin')).toBe('20px auto 0 auto')
+    expect($('img').parent().next().text()).toBe('图 1：说明')
+    expect($('img').parent().next().css('margin')).toBe('8px 0 16px 0')
+    expect($('li').length).toBe(2)
+    expect($('li').first().text()).toBe('项目源码（https://github.com/org/repo）')
+    expect($('ul').contents().toArray().every(n => n.type === 'tag' && n.name === 'li')).toBe(true)
+    expect($('a[href="https://github.com/org/repo"]').length).toBe(0)
+  })
+
   it('passes the read-original address to the driver and includes it in submission identity', async () => {
     const { service, driver, alice, seedAccount, image, article } = setup()
     seedAccount()
