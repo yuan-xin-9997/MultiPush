@@ -326,6 +326,39 @@ export interface WechatPublication {
   updatedAt: string
 }
 
+export interface ZhihuAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface ZhihuLogin {
+  id: string
+  status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'
+  qrCode: string | null
+  message: string
+  expiresAt: string
+}
+
+export interface ZhihuPublishInput {
+  renderId: string
+  mode: 'draft' | 'publish'
+  coverMediaId?: string
+}
+
+export interface ZhihuPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'published' | 'failed' | 'uncertain'
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ApiHealth {
   status: 'ok'
   service: string

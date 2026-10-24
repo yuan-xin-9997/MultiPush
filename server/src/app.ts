@@ -16,6 +16,9 @@ import { errorHandler } from './errors'
 import { WechatService } from './wechat'
 import { PlaywrightWechatDriver, type WechatBrowserDriver } from './wechat-browser'
 import { createWechatRouter } from './routes/wechat'
+import { ZhihuService } from './zhihu'
+import { PlaywrightZhihuDriver, type ZhihuDriver } from './zhihu-browser'
+import { createZhihuRouter } from './routes/zhihu'
 
 function securityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction): void {
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -69,10 +72,12 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
+  const zhihu = new ZhihuService(database, config, zhihuDriver ?? new PlaywrightZhihuDriver())
+  app.locals.zhihu = zhihu
   app.disable('x-powered-by')
   app.use(securityHeaders)
 
@@ -91,6 +96,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/media', requireAuth, createMediaRouter(database, config))
   app.use('/api/renders', requireAuth, createRendersRouter(database, config))
   app.use('/api/wechat', requireAuth, createWechatRouter(wechat))
+  app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))
   app.use('/api', createMetaRouter(config, requireAuth))
   app.use('/api', apiNotFound)
 

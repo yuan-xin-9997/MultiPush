@@ -24,6 +24,10 @@ import type {
   WechatLogin,
   WechatPublication,
   WechatPublishInput,
+  ZhihuAccount,
+  ZhihuLogin,
+  ZhihuPublication,
+  ZhihuPublishInput,
 } from '@shared/types'
 
 const TOKEN_KEY = 'multipush_token'
@@ -208,6 +212,15 @@ export const api = {
     listPublications: () => request<{ publications: WechatPublication[] }>('/api/wechat/publications', { cache: 'no-store' }),
     publish: (input: WechatPublishInput) => request<{ publication: WechatPublication }>('/api/wechat/publications', { method: 'POST', body: JSON.stringify(input) }),
     getPublication: (id: string) => request<{ publication: WechatPublication }>(`/api/wechat/publications/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+  },
+
+  zhihu: {
+    account: () => request<{ account: ZhihuAccount }>('/api/zhihu/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: ZhihuLogin }>('/api/zhihu/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: ZhihuLogin }>(`/api/zhihu/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/zhihu/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: ZhihuPublication[] }>('/api/zhihu/publications', { cache: 'no-store' }),
+    publish: (input: ZhihuPublishInput) => request<{ publication: ZhihuPublication }>('/api/zhihu/publications', { method: 'POST', body: JSON.stringify(input) }),
   },
 
   renders: {

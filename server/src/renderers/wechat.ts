@@ -2,6 +2,8 @@ import { load, type CheerioAPI } from 'cheerio'
 import { getPlatformInfo } from '../../../shared/types'
 import type { PlatformRender } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
+import { normalizeArticleLists as normalizeWechatLists } from './article-normalization'
+export { normalizeArticleLists as normalizeWechatLists } from './article-normalization'
 import {
   ARTICLE_WRAPPER_STYLE,
   buildHtmlDocument,
@@ -14,18 +16,6 @@ import {
 } from './common'
 
 const WECHAT_THEME = '#07c160'
-
-export function normalizeWechatLists($: CheerioAPI): void {
-  for (const node of $('ul,ol').toArray().reverse()) {
-    const list = $(node)
-    // WeChat turns whitespace text between list items into empty bullet items.
-    list.contents().filter((_, child) => child.type === 'comment' || child.type === 'text' && !$(child).text().trim()).remove()
-    list.children('li').each((_, child) => {
-      const item = $(child)
-      if (!item.text().replace(/\u200b/g, '').trim() && !item.find('img,video,audio,iframe,svg,table,hr').length) item.remove()
-    })
-  }
-}
 
 function setWechatMargins(element: ReturnType<CheerioAPI>, overrides: { top?: string; bottom?: string }): void {
   const [top = '0', right = top, bottom = top, left = right] = (element.css('margin') || '0').trim().split(/\s+/)

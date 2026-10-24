@@ -17,6 +17,7 @@ import type {
   RichTextJson,
   User,
   WechatPublication,
+  ZhihuPublication,
 } from '../../shared/types'
 import { PLATFORM_ORDER } from '../../shared/types'
 import { DEFAULT_BOOK_COLOR } from './config'
@@ -170,6 +171,8 @@ export interface WechatAccountSession {
   checkedAt: string
 }
 
+export interface ZhihuAccountSession extends WechatAccountSession { accountId: string }
+
 export interface CreateWechatPublicationValues {
   renderId: string
   title: string
@@ -303,12 +306,38 @@ export class Database {
         UNIQUE (user_id, idempotency_key)
       );
       CREATE INDEX IF NOT EXISTS idx_wechat_publications_user_created ON wechat_publications(user_id, created_at DESC);
-      PRAGMA user_version = 3;
+      CREATE TABLE IF NOT EXISTS zhihu_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_session TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS zhihu_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('draft', 'publish')),
+        status TEXT NOT NULL CHECK (status IN ('running', 'draft', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_zhihu_publications_user_created ON zhihu_publications(user_id, created_at DESC);
+      PRAGMA user_version = 4;
     `)
     // Never resend an operation that may already have reached WeChat before a restart.
     this.run(`UPDATE wechat_publications SET status = 'uncertain', message = ?, updated_at = ?
       WHERE status IN ('running', 'awaiting_confirmation')`,
     ['服务已重启，无法确认上次操作结果。请先到微信公众号后台核实，避免重复发表。', nowIso()])
+    this.run(`UPDATE zhihu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
+      ['服务已重启，请先核对知乎草稿与已发布文章，系统不会自动重复发布。', nowIso()])
   }
 
   private all(sql: string, params: SqlValue[] = []): Row[] {
@@ -908,6 +937,56 @@ export class Database {
       values.url === undefined ? current.url : values.url,
       values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
     return this.getWechatPublication(userId, id)
+  }
+
+  getZhihuAccount(userId: string): ZhihuAccountSession | null {
+    const row = this.get('SELECT * FROM zhihu_accounts WHERE user_id = ?', [userId])
+    return row ? { encryptedSession: text(row.encrypted_session), accountId: text(row.account_id), name: nullableText(row.name), status: row.status === 'expired' ? 'expired' : 'connected', checkedAt: text(row.checked_at) } : null
+  }
+
+  saveZhihuAccount(userId: string, values: ZhihuAccountSession): void {
+    this.run(`INSERT INTO zhihu_accounts (user_id, encrypted_session, account_id, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET encrypted_session = excluded.encrypted_session,
+      account_id = excluded.account_id, name = excluded.name, status = excluded.status, checked_at = excluded.checked_at`,
+      [userId, values.encryptedSession, values.accountId, values.name, values.status, values.checkedAt])
+  }
+
+  deleteZhihuAccount(userId: string): void { this.run('DELETE FROM zhihu_accounts WHERE user_id = ?', [userId]) }
+
+  private mapZhihuPublication(row: Row): ZhihuPublication {
+    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as ZhihuPublication['mode'], status: row.status as ZhihuPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at) }
+  }
+
+  createZhihuPublication(userId: string, values: CreateWechatPublicationValues): ZhihuPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO zhihu_publications (id, user_id, render_id, title, mode, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?) ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+      [randomUUID(), userId, values.renderId, values.title, values.mode, '正在准备知乎文章', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findZhihuPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create Zhihu publication')
+    return publication
+  }
+
+  getZhihuPublication(userId: string, id: string): ZhihuPublication | null {
+    const row = this.get('SELECT * FROM zhihu_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapZhihuPublication(row) : null
+  }
+
+  findZhihuPublication(userId: string, key: string): ZhihuPublication | null {
+    const row = this.get('SELECT * FROM zhihu_publications WHERE user_id = ? AND idempotency_key = ?', [userId, key])
+    return row ? this.mapZhihuPublication(row) : null
+  }
+
+  listZhihuPublications(userId: string): ZhihuPublication[] {
+    return this.all('SELECT * FROM zhihu_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapZhihuPublication(row))
+  }
+
+  updateZhihuPublication(userId: string, id: string, values: Partial<Pick<ZhihuPublication, 'status' | 'message' | 'url' | 'remoteId'>>): ZhihuPublication | null {
+    const current = this.getZhihuPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE zhihu_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getZhihuPublication(userId, id)
   }
 }
 

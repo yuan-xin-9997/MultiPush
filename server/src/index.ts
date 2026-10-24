@@ -38,6 +38,8 @@ function shutdown(signal: string): void {
     if (error) console.error('[multipush] server close error:', error)
     try { await app.locals.wechat.close() }
     catch { console.error('[multipush] failed to close the WeChat browser') }
+    try { await app.locals.zhihu.close() }
+    catch { console.error('[multipush] failed to close the Zhihu browser') }
     try {
       database.close()
     } catch (dbError) {

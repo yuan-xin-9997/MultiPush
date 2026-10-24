@@ -83,3 +83,6 @@
   .publish-confirm-qr { flex-direction: column; }
   .publish-error { flex-direction: column; align-items: flex-start; }
 }
+
+.publish-platform-tabs { display: flex; gap: 10px; max-width: 1240px; margin: 0 auto 20px; }
+.zhihu-publish-page .publish-account-icon { font-size: 28px; font-weight: 700; color: #1772f6; background: #edf5ff; }

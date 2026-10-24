@@ -1,6 +1,7 @@
 import { getPlatformInfo } from '../../../shared/types'
 import type { PlatformRender } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
+import { prepareZhihuContent } from '../zhihu-content'
 import {
   ARTICLE_WRAPPER_STYLE,
   buildHtmlDocument,
@@ -42,6 +43,7 @@ const ZHIHU_STYLES: Record<string, string> = {
   th: 'border:1px solid #dfe5ef;background-color:#f5f8fe;padding:10px 12px;text-align:left;font-weight:600;vertical-align:top;',
   td: 'border:1px solid #e5e9f0;padding:10px 12px;text-align:left;vertical-align:top;',
   img: 'display:block;max-width:100%;height:auto;border-radius:8px;margin:22px auto;',
+  'figure img': 'display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;',
   video: 'display:block;width:100%;border-radius:8px;margin:22px 0;background:#000;',
   figure: 'margin:22px 0;',
   figcaption: 'margin-top:8px;text-align:center;color:#8a94a6;font-size:13px;line-height:1.6;',
@@ -67,7 +69,7 @@ export async function renderZhihu(input: RenderInput, context?: RendererContext)
   const title = truncateToChars(prepared.rawTitle, info.limits.titleMax ?? 100)
   const warnings = buildPlatformWarnings(prepared)
 
-  const article = buildStyledArticle(prepared.html, {
+  const article = buildStyledArticle(prepareZhihuContent(prepared.html), {
     styles: ZHIHU_STYLES,
     wrapperStyle: `${ARTICLE_WRAPPER_STYLE}font-size:16px;line-height:1.85;`,
     tableWrapStyle: 'width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:22px 0;border-radius:8px;',

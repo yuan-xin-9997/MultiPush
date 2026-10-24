@@ -1,5 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { load } from 'cheerio'
@@ -11,6 +10,7 @@ import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { downloadWechatImage } from './wechat-image'
 import { normalizeWechatCaptions, normalizeWechatLists } from './renderers/wechat'
 import type { WechatBrowserDriver, WechatLoginAttempt, WechatStorageState } from './wechat-browser'
+import { loadPublisherKey, encryptPublisherSession, decryptPublisherSession } from './publisher-session'
 
 const LOGIN_TTL = 5 * 60_000
 const CHECK_TTL = 5 * 60_000
@@ -18,28 +18,15 @@ const now = () => new Date().toISOString()
 
 // A separate key preserves platform sessions when the application's JWT secret rotates.
 export function loadWechatKey(dataDir: string): Buffer {
-  const file = path.join(dataDir, '.wechat-session-key')
-  try { writeFileSync(file, randomBytes(32), { flag: 'wx', mode: 0o600 }) }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
-  const key = readFileSync(file)
-  if (key.length !== 32) throw new Error('Invalid WeChat session encryption key')
-  return key
+  return loadPublisherKey(dataDir, 'wechat')
 }
 
 export function encryptWechatSession(state: WechatStorageState, key: Buffer, userId: string): string {
-  const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', key, iv)
-  cipher.setAAD(Buffer.from(userId))
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(state), 'utf8'), cipher.final()])
-  return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64')
+  return encryptPublisherSession(state, key, userId)
 }
 
 export function decryptWechatSession(value: string, key: Buffer, userId: string): WechatStorageState {
-  const buffer = Buffer.from(value, 'base64')
-  const decipher = createDecipheriv('aes-256-gcm', key, buffer.subarray(0, 12))
-  decipher.setAAD(Buffer.from(userId))
-  decipher.setAuthTag(buffer.subarray(12, 28))
-  return JSON.parse(Buffer.concat([decipher.update(buffer.subarray(28)), decipher.final()]).toString('utf8')) as WechatStorageState
+  return decryptPublisherSession(value, key, userId)
 }
 
 type LoginEntry = { userId: string; value: WechatLogin; attempt: WechatLoginAttempt; timer: ReturnType<typeof setTimeout>; polling?: Promise<WechatLogin> }

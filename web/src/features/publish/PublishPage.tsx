@@ -9,6 +9,7 @@ import { formatDateTime } from '@/lib/utils'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
 import './publish.css'
+import ZhihuPublishPage from './ZhihuPublishPage'
 
 const STATUS_LABELS: Record<WechatPublication['status'], string> = {
   running: '处理中', draft: '已保存草稿', awaiting_confirmation: '等待微信确认', published: '已发表', failed: '失败', uncertain: '结果待核实',
@@ -18,7 +19,7 @@ function isProcessing(item: WechatPublication) {
   return item.status === 'running' || item.status === 'awaiting_confirmation'
 }
 
-export default function PublishPage() {
+function WechatPublishPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedId = searchParams.get('renderId') || ''
@@ -272,11 +273,17 @@ export default function PublishPage() {
         {!publications.length ? <div className="publish-empty"><Send size={23} /><p>还没有发布记录</p></div> : <div className="publish-history-list">{publications.map((item) => <article className="publish-history-item" key={item.id}><div className="publish-history-summary"><div><h3>{item.title}</h3><small>{item.mode === 'draft' ? '保存草稿' : '正式发表'} · {formatDateTime(item.createdAt)}</small></div><span className={`publish-status ${item.status === 'published' || item.status === 'draft' ? 'is-success' : item.status === 'failed' ? 'is-error' : item.status === 'uncertain' ? 'is-warning' : ''}`}>{isProcessing(item) ? <LoaderCircle size={13} className="spin" /> : null}{STATUS_LABELS[item.status]}</span></div><p className={item.status === 'failed' ? 'publish-failure-message' : ''}>{item.message}</p>{item.status === 'awaiting_confirmation' && item.qrCode ? <div className="publish-confirm-qr"><img src={item.qrCode} alt="请使用公众号管理员微信扫描此二维码确认发表" /><span>请使用公众号管理员微信扫码，并在手机上确认。验证完成后会继续处理，无需重复提交。</span></div> : null}{item.status === 'uncertain' ? <p className="publish-warning">请核对公众号后台的草稿箱与发表记录，确认结果后再操作。系统不会自动重试发表。</p> : null}{item.url && /^https:\/\/mp\.weixin\.qq\.com\//.test(item.url) ? <a href={item.url} target="_blank" rel="noreferrer" className="btn btn-sm">{item.status === 'published' ? '查看文章' : '打开公众号后台'}<ExternalLink size={13} /></a> : null}</article>)}</div>}
       </section>
 
-      <p className="publish-bottom-note"><ShieldCheck size={14} />通过微信官方页面扫码，不需要提供公众号密码。其他平台仍可在渲染工作台预览、下载后发布。</p>
+      <p className="publish-bottom-note"><ShieldCheck size={14} />通过微信官方页面扫码，不需要提供公众号密码。知乎可在发布中心切换平台后连接并发布。</p>
 
       <Modal open={loginOpen} onClose={() => setLoginOpen(false)} title="连接微信公众号" subtitle="使用公众号管理员微信扫一扫，并在手机上选择公众号" size="compact"><div className="publish-login" aria-live="polite">{loginBusy ? <><LoaderCircle size={30} className="spin" /><p>正在获取微信登录二维码…</p></> : login ? <>{login.qrCode && ['waiting', 'scanned'].includes(login.status) ? <img className="publish-login-qr" src={login.qrCode} alt="微信公众号登录二维码，请使用管理员微信扫码" /> : <QrCode size={35} />}<p>{login.message}</p>{['waiting', 'scanned'].includes(login.status) ? <small>二维码有效期至 {formatDateTime(login.expiresAt)}，请在手机上完成确认。</small> : <button type="button" className="btn btn-primary" onClick={() => void startLogin()}><RefreshCw size={15} />重新获取二维码</button>}</> : null}{loginError ? <p className="publish-failure-message" role="alert">{loginError}</p> : null}{!loginBusy && !login ? <button type="button" className="btn btn-primary" onClick={() => void startLogin()}>重试连接</button> : null}<small>关闭窗口后可继续在本页查看登录状态。</small></div></Modal>
       <ConfirmDialog open={confirmation === 'publish'} title="正式发表到微信公众号？" description={<><strong>{article?.title}</strong><p>将发表至「{account?.name || '已连接公众号'}」，内容可能对外公开。若微信要求安全验证，请使用管理员微信扫码确认。</p></>} confirmLabel="确认正式发表" tone="primary" loading={submitting} onConfirm={() => publish('publish')} onClose={() => setConfirmation(null)} />
       <ConfirmDialog open={confirmation === 'disconnect'} title="断开公众号连接？" description="将删除本系统保存的微信登录状态。下次发布需要重新扫码，已保存的草稿和已发表文章不会受影响。" confirmLabel="断开连接" loading={submitting} onConfirm={disconnect} onClose={() => setConfirmation(null)} />
     </div>
   )
+}
+
+export default function PublishPage() {
+  const [params, setParams] = useSearchParams()
+  const platform = params.get('platform') === 'zhihu' ? 'zhihu' : 'wechat'
+  return <><nav className="publish-platform-tabs" aria-label="选择发布平台">{(['wechat', 'zhihu'] as const).map(value => <button key={value} type="button" className={`btn ${platform === value ? 'btn-primary' : ''}`} aria-current={platform === value ? 'page' : undefined} onClick={() => { const next = new URLSearchParams(params); next.set('platform', value); setParams(next) }}>{value === 'wechat' ? '微信公众号' : '知乎'}</button>)}</nav>{platform === 'zhihu' ? <ZhihuPublishPage /> : <WechatPublishPage />}</>
 }

@@ -212,10 +212,10 @@ async function sessionInfo(page: Page) {
   throw expired()
 }
 
-function executablePath(): string | undefined {
-  const configured = process.env.WECHAT_BROWSER_PATH || process.env.CHROME_BIN
+export function publisherExecutablePath(platform: 'wechat' | 'zhihu' = 'wechat'): string | undefined {
+  const configured = (platform === 'zhihu' ? process.env.ZHIHU_BROWSER_PATH : '') || process.env.WECHAT_BROWSER_PATH || process.env.CHROME_BIN
   if (configured) {
-    if (!existsSync(configured)) throw new ApiError(503, 'wechat_browser_unavailable', 'WECHAT_BROWSER_PATH / CHROME_BIN 指定的浏览器不存在，请设置为 Chrome 或 Chromium 可执行文件路径')
+    if (!existsSync(configured)) throw new ApiError(503, `${platform}_browser_unavailable`, '配置的浏览器不存在，请设置有效的 Chrome 或 Chromium 可执行文件路径')
     return configured
   }
   const candidates = [
@@ -270,7 +270,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
 
   private async context(state?: WechatStorageState): Promise<BrowserContext> {
     if (!this.browser) {
-      const path = executablePath()
+      const path = publisherExecutablePath()
       if (!path) throw new ApiError(503, 'wechat_browser_unavailable', '服务器未安装 Chrome / Chromium。请安装浏览器并设置 WECHAT_BROWSER_PATH，或执行 npx playwright-core install chromium')
       this.browser = chromium.launch({
         executablePath: path,
