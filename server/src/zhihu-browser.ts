@@ -105,7 +105,7 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
         const text = await page.locator('body').innerText()
         if (/二维码已失效|二维码已过期/.test(text)) return { status: 'expired', qrCode: null, message: '二维码已失效，请重新获取' }
         const qr = page.locator(QR).first()
-        if (await qr.isVisible().catch(() => false)) qrCode = `data:image/png;base64,${(await qr.screenshot({ type: 'png' })).toString('base64')}`
+        if (await qr.isVisible().catch(() => false)) qrCode = `data:image/png;base64,${(await qr.screenshot({ type: 'png', animations: 'disabled', timeout: 5000 })).toString('base64')}`
         const scanned = /扫码成功|已扫码|在手机上确认/.test(text)
         return { status: scanned ? 'scanned' : 'waiting', qrCode, message: scanned ? '请在知乎 App 中确认登录' : '请使用知乎 App 扫描二维码登录' }
       },
@@ -199,6 +199,6 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
   async close(): Promise<void> {
     const browser = this.browser
     this.browser = null
-    if (browser) await (await browser).close().catch(() => {})
+    if (browser) await browser.then(value => value.close()).catch(() => {})
   }
 }

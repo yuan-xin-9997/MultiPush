@@ -14,7 +14,7 @@ import type { ZhihuArticle, ZhihuDriver, ZhihuIdentity, ZhihuLoginAttempt } from
 
 const TTL = 5 * 60_000
 const now = () => new Date().toISOString()
-type LoginEntry = { userId: string; value: ZhihuLogin; attempt: ZhihuLoginAttempt; timer: ReturnType<typeof setTimeout>; polling?: Promise<ZhihuLogin> }
+type LoginEntry = { userId: string; value: ZhihuLogin; attempt?: ZhihuLoginAttempt; timer: ReturnType<typeof setTimeout>; preparing?: Promise<void>; polling?: Promise<ZhihuLogin> }
 
 export class ZhihuService {
   private readonly key: Buffer
@@ -75,29 +75,45 @@ export class ZhihuService {
 
   async startLogin(userId: string): Promise<ZhihuLogin> {
     this.idle(userId)
-    this.active.add(userId)
-    try {
-      for (const [id, entry] of this.logins) {
-        if (entry.userId === userId) { clearTimeout(entry.timer); this.logins.delete(id); await entry.attempt.close().catch(() => {}) }
+    const pending = [...this.logins.values()].find(entry => entry.userId === userId && entry.preparing)
+    if (pending) return pending.value
+    for (const [id, entry] of this.logins) {
+      if (entry.userId === userId) { clearTimeout(entry.timer); this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }
+    }
+    if (this.logins.size >= 8) throw new ApiError(503, 'zhihu_busy', '当前登录请求较多，请稍后重试')
+    const id = randomUUID()
+    const value: ZhihuLogin = { id, status: 'waiting', qrCode: null, message: '正在准备知乎官方登录二维码，请稍候', expiresAt: new Date(Date.now() + TTL).toISOString() }
+    const timer = setTimeout(() => { this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }, TTL)
+    timer.unref()
+    const entry: LoginEntry = { userId, value, timer }
+    this.logins.set(id, entry)
+    // Browser startup and Zhihu page loading must never hold a public HTTP request open.
+    entry.preparing = (async () => {
+      try {
+        const attempt = await this.driver.beginLogin()
+        if (this.closed || this.logins.get(id) !== entry) { await attempt.close().catch(() => {}); return }
+        entry.attempt = attempt
+        this.refreshLogin(userId, id, entry)
+      } catch (error) {
+        if (this.logins.get(id) === entry) entry.value = { ...entry.value, status: 'failed', qrCode: null, message: error instanceof ApiError ? error.message : '获取知乎登录二维码失败，请重新连接' }
       }
-      if (this.logins.size >= 8) throw new ApiError(503, 'zhihu_busy', '当前登录请求较多，请稍后重试')
-      const attempt = await this.driver.beginLogin(), id = randomUUID()
-      const value: ZhihuLogin = { id, status: 'waiting', qrCode: null, message: '请使用知乎 App 扫码登录', expiresAt: new Date(Date.now() + TTL).toISOString() }
-      const timer = setTimeout(() => { this.logins.delete(id); void attempt.close().catch(() => {}) }, TTL)
-      timer.unref()
-      this.logins.set(id, { userId, value, attempt, timer })
-      return await this.pollLogin(userId, id)
-    } finally { this.active.delete(userId) }
+    })().finally(() => { entry.preparing = undefined })
+    return value
   }
 
   async pollLogin(userId: string, id: string): Promise<ZhihuLogin> {
     const entry = this.logins.get(id)
     if (!entry || entry.userId !== userId) throw notFound('知乎登录请求不存在或已过期，请重新连接')
-    if (!['waiting', 'scanned'].includes(entry.value.status)) return entry.value
-    if (entry.polling) return entry.polling
+    this.refreshLogin(userId, id, entry)
+    return entry.value
+  }
+
+  private refreshLogin(userId: string, id: string, entry: LoginEntry): void {
+    if (this.closed || !entry.attempt || entry.polling || !['waiting', 'scanned'].includes(entry.value.status)) return
+    const attempt = entry.attempt
     entry.polling = (async () => {
       try {
-        const result = await entry.attempt.poll()
+        const result = await attempt.poll()
         if (this.logins.get(id) !== entry) throw notFound('知乎登录已取消')
         if (result.status === 'connected') {
           if (!result.state || !result.identity) throw new ApiError(502, 'zhihu_login_failed', '知乎没有返回有效登录会话，请重试')
@@ -107,10 +123,9 @@ export class ZhihuService {
       } catch (error) {
         entry.value = { ...entry.value, status: 'failed', qrCode: null, message: error instanceof ApiError ? error.message : '读取知乎登录状态失败，请重新连接' }
       }
-      if (!['waiting', 'scanned'].includes(entry.value.status)) await entry.attempt.close().catch(() => {})
+      if (!['waiting', 'scanned'].includes(entry.value.status)) await attempt.close().catch(() => {})
       return entry.value
     })().finally(() => { entry.polling = undefined })
-    return entry.polling
   }
 
   async disconnect(userId: string): Promise<void> {
@@ -118,7 +133,7 @@ export class ZhihuService {
     this.active.add(userId)
     try {
       for (const [id, entry] of this.logins) {
-        if (entry.userId === userId) { this.logins.delete(id); clearTimeout(entry.timer); await entry.attempt.close().catch(() => {}) }
+        if (entry.userId === userId) { this.logins.delete(id); clearTimeout(entry.timer); await entry.attempt?.close().catch(() => {}) }
       }
       this.database.deleteZhihuAccount(userId)
     } finally { this.active.delete(userId) }
@@ -221,9 +236,10 @@ export class ZhihuService {
 
   async close(): Promise<void> {
     this.closed = true
-    for (const entry of this.logins.values()) { clearTimeout(entry.timer); await entry.attempt.close().catch(() => {}) }
+    const pending = [...this.logins.values()].flatMap(entry => [entry.preparing, entry.polling].filter(value => value !== undefined))
+    for (const entry of this.logins.values()) { clearTimeout(entry.timer); await entry.attempt?.close().catch(() => {}) }
     this.logins.clear()
     await this.driver.close()
-    await Promise.allSettled([...this.jobs.values(), ...this.checks.values()])
+    await Promise.allSettled([...pending, ...this.jobs.values(), ...this.checks.values()])
   }
 }

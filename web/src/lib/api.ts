@@ -88,10 +88,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     if (response.status === 401 && memoryToken) handleUnauthorized()
     if (typeof body === 'string' && body) {
-      throw new ApiError(response.status, { error: 'request_failed', message: body })
+      throw new ApiError(response.status, { error: 'gateway_error', message: `服务连接暂时异常（HTTP ${response.status}），请稍后重试。` })
     }
     throw new ApiError(response.status, body as Partial<ApiErrorBody> | null)
   }
+
+  if (typeof body === 'string' || body === null) throw new ApiError(502, { error: 'invalid_response', message: '服务返回了无法识别的响应，请稍后重试。' })
 
   return body as T
 }

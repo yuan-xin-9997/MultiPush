@@ -8,7 +8,7 @@
 
 密钥位于 `DATA_DIR/.zhihu-session-key`，与微信公众号的密钥、会话及应用 JWT 密钥分别保存。备份 SQLite 和数据目录时须包含此密钥。重启后可恢复登录；知乎主动令会话失效时，提示重新扫码，不会退出 MultiPush。断开连接删除系统内的会话，不删除知乎草稿和文章。状态查询最多缓存五分钟，实际提交前再次检查登录状态。二维码仅保留五分钟，过期会关闭浏览器 context。
 
-服务器沿用现有 Playwright Chromium 运行库。可设置 `ZHIHU_BROWSER_PATH`，也会使用现有 `WECHAT_BROWSER_PATH` / `CHROME_BIN` 及系统 Chrome/Chromium 路径。无需额外 AppID 或知乎密码。登录或发布遇到知乎安全验证时显示原因；不自动破解验证码或重放发布请求。
+服务器沿用现有 Playwright Chromium 运行库。可设置 `ZHIHU_BROWSER_PATH`，也会使用现有 `WECHAT_BROWSER_PATH` / `CHROME_BIN` 及系统 Chrome/Chromium 路径。无需额外 AppID 或知乎密码。登录初始化立即返回 `202` 和登录请求 ID，浏览器启动、二维码获取及扫码检查在后台执行，轮询接口只读取当前状态，避免慢网页阻塞公网请求。代理网关返回 HTML 错误页时，前端显示简洁的状态提示，并提供重新连接入口；轮询期间的暂时网络错误会继续查询已有登录请求。登录或发布遇到知乎安全验证时显示原因；不自动破解验证码或重放发布请求。
 
 ## 正文与核验
 

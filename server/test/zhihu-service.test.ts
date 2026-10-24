@@ -82,7 +82,7 @@ describe('Zhihu account lifecycle and publishing', () => {
     expect(database.getZhihuAccount(alice.id)).toBeNull()
     await expect(service.pollLogin(bob.id, login.id)).rejects.toMatchObject({ status: 404 })
     attempt.poll.mockResolvedValue({ status: 'connected', qrCode: null, message: '完成', state: session, identity })
-    expect(await service.pollLogin(alice.id, login.id)).toMatchObject({ status: 'connected', qrCode: null })
+    await vi.waitFor(async () => { expect(await service.pollLogin(alice.id, login.id)).toMatchObject({ status: 'connected', qrCode: null }) })
     expect(JSON.stringify(await service.account(alice.id))).not.toContain('secret-zhihu-cookie')
     expect(await service.account(bob.id)).toMatchObject({ status: 'disconnected' })
     await service.disconnect(alice.id)
@@ -95,6 +95,49 @@ describe('Zhihu account lifecycle and publishing', () => {
     driver.checkSession.mockRejectedValue(new ApiError(409, 'zhihu_session_expired', '请重新登录知乎'))
     await expect(service.publish(alice.id, { renderId: render.id, mode: 'draft' })).rejects.toMatchObject({ status: 409 })
     expect(await service.account(alice.id)).toMatchObject({ status: 'expired' })
+  })
+
+  it('returns immediately while QR preparation and browser polling run in the background', async () => {
+    const { service, driver, attempt, alice } = setup()
+    let open!: (value: ZhihuLoginAttempt) => void
+    let scan!: (value: Awaited<ReturnType<ZhihuLoginAttempt['poll']>>) => void
+    driver.beginLogin.mockReturnValueOnce(new Promise(resolve => { open = resolve }))
+    attempt.poll.mockReturnValueOnce(new Promise(resolve => { scan = resolve }))
+    try {
+      const login = await service.startLogin(alice.id)
+      expect(login).toMatchObject({ status: 'waiting', qrCode: null })
+      expect((await service.startLogin(alice.id)).id).toBe(login.id)
+      expect(driver.beginLogin).toHaveBeenCalledTimes(1)
+      open(attempt)
+      await vi.waitFor(() => expect(attempt.poll).toHaveBeenCalledTimes(1))
+      expect(await service.pollLogin(alice.id, login.id)).toMatchObject({ status: 'waiting', qrCode: null })
+      scan({ status: 'waiting', qrCode: 'data:image/png;base64,dGVzdA==', message: '请扫码' })
+      await vi.waitFor(async () => { expect((await service.pollLogin(alice.id, login.id)).qrCode).toBe('data:image/png;base64,dGVzdA==') })
+    } finally { open(attempt); scan({ status: 'expired', qrCode: null, message: '测试结束' }) }
+  })
+
+  it('closes a late login attempt after cancellation without restoring credentials', async () => {
+    const { service, database, driver, attempt, alice } = setup()
+    let open!: (value: ZhihuLoginAttempt) => void
+    driver.beginLogin.mockReturnValueOnce(new Promise(resolve => { open = resolve }))
+    try {
+      const login = await service.startLogin(alice.id)
+      await service.disconnect(alice.id)
+      open(attempt)
+      await vi.waitFor(() => expect(attempt.close).toHaveBeenCalled())
+      expect(attempt.poll).not.toHaveBeenCalled()
+      expect(database.getZhihuAccount(alice.id)).toBeNull()
+      await expect(service.pollLogin(alice.id, login.id)).rejects.toMatchObject({ status: 404 })
+    } finally { open(attempt) }
+  })
+
+  it('reports background initialization errors without exposing raw browser errors', async () => {
+    const { service, driver, alice } = setup()
+    driver.beginLogin.mockRejectedValueOnce(new Error('secret-cookie in browser failure'))
+    const login = await service.startLogin(alice.id)
+    await vi.waitFor(async () => {
+      expect(await service.pollLogin(alice.id, login.id)).toMatchObject({ status: 'failed', qrCode: null, message: expect.not.stringContaining('secret-cookie') })
+    })
   })
 
   it('prepares saved adjustments, native captions and lists, owner images and deduplicated external images', async () => {
