@@ -1,3 +1,4 @@
+import { load, type CheerioAPI } from 'cheerio'
 import { getPlatformInfo } from '../../../shared/types'
 import type { PlatformRender } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
@@ -13,6 +14,18 @@ import {
 } from './common'
 
 const WECHAT_THEME = '#07c160'
+
+export function normalizeWechatLists($: CheerioAPI): void {
+  for (const node of $('ul,ol').toArray().reverse()) {
+    const list = $(node)
+    // WeChat turns whitespace text between list items into empty bullet items.
+    list.contents().filter((_, child) => child.type === 'comment' || child.type === 'text' && !$(child).text().trim()).remove()
+    list.children('li').each((_, child) => {
+      const item = $(child)
+      if (!item.text().replace(/\u200b/g, '').trim() && !item.find('img,video,audio,iframe,svg,table,hr').length) item.remove()
+    })
+  }
+}
 
 const WECHAT_STYLES: Record<string, string> = {
   p: 'font-size:16px;line-height:1.8;color:#333;margin:0 0 16px;letter-spacing:0.5px;word-break:break-word;',
@@ -87,6 +100,9 @@ export async function renderWechat(input: RenderInput, context?: RendererContext
     includeToc: prepared.options.includeToc === true,
     toc: WECHAT_TOC,
   })
+  const $ = load(article.html, null, false)
+  normalizeWechatLists($)
+  article.html = $.html()
 
   const document = buildHtmlDocument({
     title,

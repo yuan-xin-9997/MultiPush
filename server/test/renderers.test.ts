@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { load } from 'cheerio'
 import type { ContentDetail, RenderOptions } from '../../shared/types'
 import { renderPlatforms } from '../src/renderers'
 import { paginateForCards } from '../src/renderers/xiaohongshu'
@@ -65,6 +66,19 @@ describe('renderPlatforms', () => {
     expect(result.downloads[0].content).toContain('<!DOCTYPE html>')
     expect(result.downloads[0].content).toContain('一次创作，多平台发布')
     expect(result.videos).toEqual([])
+  })
+
+  it('keeps WeChat lists compact without changing nesting, inline spaces, images, or code whitespace', async () => {
+    const [result] = await renderPlatforms(input(['wechat'], { contentHtml: '<ul>\n<li><p><strong>第一项</strong> <em>说明</em></p><ol start="3">\n<li>嵌套一</li>\n<li>嵌套二</li>\n</ol></li>\n<li><p><br></p></li>\n<li><img src="/uploads/cover.png"></li>\n</ul><pre><code>  first\n    second</code></pre>' }))
+    const $ = load(result.html)
+    expect($('ul > li').length).toBe(2)
+    expect($('ol > li').length).toBe(2)
+    expect($('ol').attr('start')).toBe('3')
+    expect($('li img').length).toBe(1)
+    expect($('li p').first().text()).toBe('第一项 说明')
+    expect($('code').text()).toBe('  first\n    second')
+    for (const list of $('ul,ol').toArray()) expect($(list).contents().toArray().every(node => node.type === 'tag' && node.name === 'li')).toBe(true)
+    expect(result.downloads[0].content).toContain(result.html)
   })
 
   it('renders Xiaohongshu cards, caption and hashtags', async () => {
