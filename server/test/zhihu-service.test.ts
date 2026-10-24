@@ -181,6 +181,19 @@ describe('Zhihu account lifecycle and publishing', () => {
     expect(driver.publish).toHaveBeenCalledTimes(1)
   })
 
+  it('reuses a failed pre-publication draft when the user explicitly retries', async () => {
+    const { service, driver, alice, seed, article } = setup()
+    seed(); const render = article(), input = { renderId: render.id, mode: 'publish' as const }
+    driver.publish.mockImplementationOnce(async (_state, _article, _mode, progress) => { progress({ remoteId: '123', url: 'https://zhuanlan.zhihu.com/p/123/edit' }); throw new ApiError(502, 'zhihu_rejected', '核对草稿失败') })
+    const first = await service.publish(alice.id, input)
+    expect(await finished(service, alice.id, first.id)).toMatchObject({ status: 'failed', remoteId: '123' })
+    expect(driver.publish).toHaveBeenCalledTimes(1)
+    const retry = await service.publish(alice.id, input)
+    expect(retry.id).toBe(first.id)
+    expect(await finished(service, alice.id, retry.id)).toMatchObject({ status: 'published' })
+    expect(driver.publish.mock.calls[1][4]).toBe('123')
+  })
+
   it('marks interrupted jobs uncertain after restart without replaying them', () => {
     const { database, directory, alice } = setup(true)
     const publication = database.createZhihuPublication(alice.id, { renderId: 'render-id', title: '标题', mode: 'publish', idempotencyKey: 'key' })

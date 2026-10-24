@@ -199,10 +199,10 @@ export class ZhihuService {
       if (article.cover) hash.update(article.cover.buffer)
       for (const [src, image] of article.images) hash.update(src).update(image.buffer)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findZhihuPublication(userId, idempotencyKey)
-      if (previous && (previous.status !== 'failed' || previous.remoteId)) return previous
+      if (previous && previous.status !== 'failed') return previous
       const publication = previous ?? this.database.createZhihuPublication(userId, { renderId: input.renderId, title: article.title, mode: input.mode, idempotencyKey })
       this.database.updateZhihuPublication(userId, publication.id, { status: 'running', message: '正在准备知乎正文及图片' })
-      const task = this.run(userId, publication.id, checked, article, input.mode)
+      const task = this.run(userId, publication.id, checked, article, input.mode, previous?.remoteId || undefined)
       this.jobs.set(publication.id, task)
       handedOff = true
       void task.finally(() => { this.jobs.delete(publication.id); this.active.delete(userId) }).catch(() => {})
@@ -218,13 +218,13 @@ export class ZhihuService {
     if (account && error instanceof ApiError && error.code === 'zhihu_session_expired') this.database.saveZhihuAccount(userId, { ...account, status: 'expired', checkedAt: now() })
   }
 
-  private async run(userId: string, id: string, checked: Awaited<ReturnType<ZhihuDriver['checkSession']>>, article: ZhihuArticle & { external: string[] }, mode: 'draft' | 'publish'): Promise<void> {
+  private async run(userId: string, id: string, checked: Awaited<ReturnType<ZhihuDriver['checkSession']>>, article: ZhihuArticle & { external: string[] }, mode: 'draft' | 'publish', resumeDraftId?: string): Promise<void> {
     try {
-      for (const [index, src] of article.external.entries()) {
+      for (const [index, src] of (resumeDraftId ? [] : article.external).entries()) {
         this.database.updateZhihuPublication(userId, id, { message: `正在读取正文图片 ${index + 1}/${article.external.length}，随后上传到知乎` })
         article.images.set(src, await downloadPublisherImage(src, 'zhihu'))
       }
-      const result = await this.driver.publish(checked.state, article, mode, progress => { this.database.updateZhihuPublication(userId, id, progress) })
+      const result = await this.driver.publish(checked.state, article, mode, progress => { this.database.updateZhihuPublication(userId, id, progress) }, resumeDraftId)
       this.save(userId, result.state, checked.identity)
       this.database.updateZhihuPublication(userId, id, result)
     } catch (error) {

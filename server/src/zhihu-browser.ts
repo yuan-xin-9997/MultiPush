@@ -5,7 +5,7 @@ import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
 import { ApiError } from './errors'
-import { prepareZhihuContent, verifyZhihuContent, zhihuImageUrl } from './zhihu-content'
+import { prepareZhihuContent, zhihuEditorContent, verifyZhihuContent, zhihuImageUrl } from './zhihu-content'
 
 export interface ZhihuIdentity { accountId: string; name: string }
 export interface ZhihuArticle { title: string; html: string; images: Map<string, PublisherImage>; cover?: PublisherImage }
@@ -16,7 +16,7 @@ export interface ZhihuLoginAttempt {
 export interface ZhihuDriver {
   beginLogin(): Promise<ZhihuLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: ZhihuIdentity }>
-  publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: (value: Partial<Pick<ZhihuPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
+  publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: (value: Partial<Pick<ZhihuPublication, 'message' | 'remoteId' | 'url'>>) => void, resumeDraftId?: string): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   close(): Promise<void>
 }
 
@@ -121,40 +121,53 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     } finally { await context.close().catch(() => {}) }
   }
 
-  async publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: Parameters<ZhihuDriver['publish']>[3]) {
+  async publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: Parameters<ZhihuDriver['publish']>[3], resumeDraftId?: string) {
+    if (resumeDraftId && !/^\d+$/.test(resumeDraftId)) throw new ApiError(400, 'zhihu_draft_invalid', '知乎草稿编号无效')
     const context = await this.context(state)
-    let remoteId = '', writeRequested = false, publishSubmitted = false
+    let remoteId = resumeDraftId || '', writeRequested = false, publishSubmitted = false
     try {
       await this.identity(context)
       const cookies = await context.cookies([HOME, COLUMN])
       const headers = { 'x-requested-with': 'fetch', 'x-xsrftoken': cookies.find(cookie => cookie.name === '_xsrf')?.value || '', Referer: `${COLUMN}write`, Origin: COLUMN.slice(0, -1) }
+      const read = async (id: string, kind: 'draft' | 'published') => zhihuResponse(await context.request.get(`${COLUMN}api/articles/${id}${kind === 'draft' ? '/draft' : ''}`, { headers, timeout: 30_000 }), kind === 'draft' ? '核对知乎草稿' : '核对知乎文章')
       const upload = async (image: PublisherImage): Promise<string> => {
         const data = await zhihuResponse(await context.request.post(`${COLUMN}api/uploaded_images`, { headers, multipart: { picture: image, source: 'article' }, timeout: 30_000 }), '上传知乎图片')
         const src = zhihuImageUrl(data.src)
         if (!src) throw new ApiError(502, 'zhihu_image_upload', '知乎图片上传未返回有效的知乎素材地址，已停止发布')
         return src
       }
-      progress({ message: '正在上传知乎正文图片与封面' })
       const $ = load(article.html, null, false)
-      for (const [src, image] of article.images) {
-        const uploaded = await upload(image)
-        $('img').filter((_, node) => $(node).attr('src') === src).attr('src', uploaded).removeAttr('srcset')
+      let cover: string | undefined
+      if (resumeDraftId) {
+        progress({ message: '正在恢复已有知乎草稿', remoteId, url: `${COLUMN}p/${remoteId}/edit` })
+        const existing = await read(remoteId, 'draft')
+        if (existing.state !== 'draft' || existing.title !== article.title || typeof existing.content !== 'string') throw new ApiError(409, 'zhihu_draft_changed', '已有知乎草稿状态或标题已变更，已停止重试，请到知乎核对')
+        verifyZhihuContent(prepareZhihuContent(article.html), existing.content)
+        const saved = load(existing.content, null, false), urls = saved('img').toArray().map(n => saved(n).attr('src') || saved(n).attr('data-original-src'))
+        $('img').each((index, node) => { $(node).attr('src', urls[index]!) })
+      } else {
+        progress({ message: '正在上传知乎正文图片与封面' })
+        for (const [src, image] of article.images) {
+          const uploaded = await upload(image)
+          $('img').filter((_, node) => $(node).attr('src') === src).attr('src', uploaded).removeAttr('srcset')
+        }
+        cover = article.cover ? await upload(article.cover) : undefined
       }
-      const cover = article.cover ? await upload(article.cover) : undefined
-      const content = prepareZhihuContent($.html())
+      const content = zhihuEditorContent($.html())
       const ready = load(content, null, false)
       if (ready('img').toArray().some(n => !zhihuImageUrl(ready(n).attr('src')))) throw new ApiError(400, 'zhihu_external_image', '正文仍含未上传到知乎的图片，已停止发布')
-      progress({ message: '正在创建知乎草稿' })
-      writeRequested = true
-      const created = await zhihuResponse(await context.request.post(`${COLUMN}api/articles/drafts`, { headers, data: { title: article.title, content: '', delta_time: 0, can_reward: false }, timeout: 30_000 }), '创建知乎草稿')
-      remoteId = String(created.id || '')
-      if (!/^\d+$/.test(remoteId)) throw new ApiError(502, 'zhihu_draft_unverified', '知乎未返回有效草稿编号，请检查草稿箱，避免重复创建')
+      if (!resumeDraftId) {
+        progress({ message: '正在创建知乎草稿' })
+        writeRequested = true
+        const created = await zhihuResponse(await context.request.post(`${COLUMN}api/articles/drafts`, { headers, data: { title: article.title, content: '', delta_time: 0, can_reward: false }, timeout: 30_000 }), '创建知乎草稿')
+        remoteId = String(created.id || '')
+        if (!/^\d+$/.test(remoteId)) throw new ApiError(502, 'zhihu_draft_unverified', '知乎未返回有效草稿编号，请检查草稿箱，避免重复创建')
+      }
       const url = `${COLUMN}p/${remoteId}/edit`
       progress({ message: '正在保存并核对知乎正文', remoteId, url })
       await zhihuResponse(await context.request.patch(`${COLUMN}api/articles/${remoteId}/draft`, { headers, data: { title: article.title, ...(cover ? { title_image: cover } : {}), delta_time: 0, can_reward: false }, timeout: 30_000 }), '保存知乎标题')
       await zhihuResponse(await context.request.patch(`${COLUMN}api/articles/${remoteId}/draft`, { headers, data: { content, table_of_contents: false, delta_time: 0, can_reward: false }, timeout: 30_000 }), '保存知乎正文')
-      const read = async (id: string) => zhihuResponse(await context.request.get(`${COLUMN}api/articles/${id}`, { headers, timeout: 30_000 }), '核对知乎文章')
-      const stored = await read(remoteId)
+      const stored = await read(remoteId, 'draft')
       if (stored.title !== article.title || typeof stored.content !== 'string') throw new ApiError(502, 'zhihu_content_mismatch', '知乎保存后的标题或正文无法核对，已停止发布')
       verifyZhihuContent(content, stored.content)
       if (mode === 'draft') return { state: await context.storageState(), status: 'draft' as const, remoteId, url, message: '已保存知乎草稿，并核对图片、列表、图注与链接' }
@@ -182,7 +195,7 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
       }
       if (rejected) throw new ApiError(502, 'zhihu_publish_rejected', '知乎未确认发布成功，请打开草稿检查账号权限及发布设置')
       if (!publishedId) throw new ApiError(502, 'zhihu_publish_unverified', '知乎发布结果未能确认，请核对知乎后台，避免重复发布')
-      const published = await read(publishedId)
+      const published = await read(publishedId, 'published')
       if (String(published.id) !== publishedId || published.title !== article.title || !['published', 'PUBLISHED'].includes(String(published.state)) && published.is_published !== true) throw new ApiError(502, 'zhihu_publish_unverified', '知乎尚未确认文章公开状态，请到知乎后台核实')
       verifyZhihuContent(content, String(published.content || ''))
       return { state: await context.storageState(), status: 'published' as const, remoteId: publishedId, url: `${COLUMN}p/${publishedId}`, message: '已发布到知乎，并核对文章内容与发布状态' }

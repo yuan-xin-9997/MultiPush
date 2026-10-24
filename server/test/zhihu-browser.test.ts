@@ -3,6 +3,7 @@ import { chromium, type Browser, type APIResponse } from 'playwright-core'
 import { load } from 'cheerio'
 import { PlaywrightZhihuDriver, parseZhihuPublishedId, zhihuResponse, type ZhihuArticle } from '../src/zhihu-browser'
 import { ApiError } from '../src/errors'
+import { zhihuEditorContent } from '../src/zhihu-content'
 
 const state = { cookies: [], origins: [] }
 const drivers: PlaywrightZhihuDriver[] = []
@@ -10,16 +11,21 @@ const response = (data: unknown, status = 200) => ({ status: () => status, ok: (
 
 afterEach(async () => { for (const driver of drivers.splice(0)) await driver.close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
-function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publishTimeout?: boolean } = {}) {
-  let saved: Record<string, unknown> = { id: '123', state: 'draft' }, publishListener: (value: unknown) => void = () => {}
+function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publishTimeout?: boolean; draftId?: string; existing?: boolean } = {}) {
+  const draftId = options.draftId || '123'
+  let saved: Record<string, unknown> = { id: draftId, state: 'draft' }, publishListener: (value: unknown) => void = () => {}
   const upload = vi.fn(async () => response({ src: 'https://pic4.zhimg.com/uploaded.png' }))
   const post = vi.fn(async (url: string) => {
     if (url.endsWith('/uploaded_images')) return upload()
     if (options.createTimeout) throw Error('timeout with secret-cookie')
-    return response({ id: '123' })
+    return response({ id: draftId })
   })
   const patch = vi.fn(async (_url: string, value: { data: Record<string, unknown> }) => { saved = { ...saved, ...value.data }; return response({}) })
-  const get = vi.fn(async (url: string) => url.endsWith('/me') ? response({ id: 'account', name: '作者' }) : response({ ...saved, ...(options.mismatch ? { content: '<p>丢失的内容</p>' } : {}) }))
+  const get = vi.fn(async (url: string) => {
+    if (url.endsWith('/me')) return response({ id: 'account', name: '作者' })
+    if (url === `https://zhuanlan.zhihu.com/api/articles/${draftId}/draft` || saved.state === 'published' && url === 'https://zhuanlan.zhihu.com/api/articles/456') return response({ ...saved, ...(options.mismatch ? { content: '<p>丢失的内容</p>' } : {}) })
+    return response({ error: { code: 4041 } }, 404)
+  })
   const click = vi.fn(async () => {
     if (options.publishTimeout) throw Error('timeout with secret-cookie')
     saved = { ...saved, id: '456', state: 'published' }
@@ -31,6 +37,7 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
   vi.spyOn(chromium, 'launch').mockResolvedValue({ newContext: async () => context, on: vi.fn(), close: async () => {} } as unknown as Browser)
   const driver = new PlaywrightZhihuDriver(); drivers.push(driver)
   const article: ZhihuArticle = { title: '测试文章', html: '<h2>标题</h2><p><img src="https://external.test/image.png"></p><p><br></p><p><em>图 1：说明</em></p><ul>\n<li><a href="https://github.com/org/repo">项目源码</a></li>\n<li><br></li>\n<li>第二项</li>\n</ul><pre><code class="language-js">  hello\n    world</code></pre>', images: new Map([['https://external.test/image.png', { name: 'body.png', mimeType: 'image/png', buffer: Buffer.from('image') }]]) }
+  if (options.existing) saved = { ...saved, title: article.title, content: zhihuEditorContent(article.html.replace('https://external.test/image.png', 'https://pic4.zhimg.com/uploaded.png')) }
   return { driver, article, post, patch, get, page, click, context }
 }
 
@@ -43,11 +50,13 @@ describe('Zhihu browser publishing', () => {
     expect(post.mock.calls[0][0]).toBe('https://zhuanlan.zhihu.com/api/uploaded_images')
     const content = String(patch.mock.calls[1][1].data.content), $ = load(content)
     expect($('img').attr('src')).toBe('https://pic4.zhimg.com/uploaded.png')
-    expect($('figure > figcaption em').text()).toBe('图 1：说明')
+    expect($('img').attr('data-caption')).toBe('图 1：说明')
+    expect($('figure,figcaption').length).toBe(0)
     expect($('li').length).toBe(2)
     expect($('a').attr('href')).toBe('https://github.com/org/repo')
     expect($('pre').text()).toBe('  hello\n    world')
-    expect(get.mock.calls.map(call => call[0])).toContain('https://zhuanlan.zhihu.com/api/articles/123')
+    expect(get.mock.calls.map(call => call[0])).toContain('https://zhuanlan.zhihu.com/api/articles/123/draft')
+    expect(get.mock.calls.map(call => call[0])).not.toContain('https://zhuanlan.zhihu.com/api/articles/123')
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({ remoteId: '123' }))
   })
 
@@ -55,6 +64,21 @@ describe('Zhihu browser publishing', () => {
     const { driver, article, click } = fixture({ mismatch: true })
     await expect(driver.publish(state, article, 'publish', vi.fn())).rejects.toMatchObject({ code: 'zhihu_content_mismatch' })
     expect(click).not.toHaveBeenCalled()
+  })
+
+  it('resumes the original 19-digit draft without creating a duplicate or uploading images again', async () => {
+    const id = '2097403941332037715'
+    const { driver, article, post, get } = fixture({ draftId: id, existing: true })
+    expect(await driver.publish(state, article, 'draft', vi.fn(), id)).toMatchObject({ status: 'draft', remoteId: id })
+    expect(post).not.toHaveBeenCalled()
+    expect(get.mock.calls.map(call => call[0])).toContain(`https://zhuanlan.zhihu.com/api/articles/${id}/draft`)
+  })
+
+  it('does not overwrite a resumed draft whose content changed outside the system', async () => {
+    const { driver, article, patch, post } = fixture({ existing: true, mismatch: true })
+    await expect(driver.publish(state, article, 'publish', vi.fn(), '123')).rejects.toMatchObject({ code: 'zhihu_content_mismatch' })
+    expect(patch).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalled()
   })
 
   it('requires explicit platform publication identity and reads back the published article', async () => {

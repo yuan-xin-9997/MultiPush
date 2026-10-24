@@ -27,6 +27,8 @@ export function prepareZhihuContent(html: string): string {
       figure = image.closest('figure')
     }
     figure.attr({ 'data-draft-node': 'block', 'data-draft-type': 'image' })
+    const nativeCaption = image.attr('data-caption')?.trim()
+    if (nativeCaption && !figure.find('figcaption').length) figure.append($('<figcaption>').text(nativeCaption))
     if (figure.find('figcaption').length) return
     let caption = figure.next()
     const spacers = []
@@ -63,6 +65,28 @@ export function prepareZhihuContent(html: string): string {
   return $.html()
 }
 
+/** The draft API stores image captions in data-caption, not figure/figcaption tags. */
+export function zhihuEditorContent(html: string): string {
+  const $ = load(prepareZhihuContent(html), null, false)
+  $('figure').each((_, node) => {
+    const figure = $(node), image = figure.find('img')
+    if (image.length !== 1) return
+    image.attr('data-caption', figure.find('figcaption').text().trim()).attr('data-size', 'normal')
+    figure.find('figcaption').remove()
+    let spacer = figure.next()
+    while (spacer.is('p,br') && !spacer.text().replace(/\u200b/g, '').trim() && !spacer.find('img,table,hr,video,audio').length) {
+      const next = spacer.next(); spacer.remove(); spacer = next
+    }
+    figure.replaceWith(figure.contents())
+  })
+  for (const node of $('div,section').toArray().reverse()) {
+    const element = $(node)
+    if (element.children('p,h1,h2,h3,h4,h5,h6,ul,ol,blockquote,pre,table,img,hr').length) element.replaceWith(element.contents())
+    else node.name = 'p'
+  }
+  return $.html()
+}
+
 function linkTarget(value: string): string {
   try {
     const url = new URL(value)
@@ -72,7 +96,8 @@ function linkTarget(value: string): string {
 
 /** Read back the platform's stored HTML; an accepted request alone is not verification. */
 export function verifyZhihuContent(expected: string, stored: string): void {
-  const before = load(expected, null, false), after = load(stored, null, false)
+  const before = load(prepareZhihuContent(expected), null, false), after = load(prepareZhihuContent(stored), null, false)
+  const rawStored = load(stored, null, false)
   const text = ($: ReturnType<typeof load>) => $.text().replace(/[\s\u200b]+/g, '')
   const urls = ($: ReturnType<typeof load>) => $('a[href]').toArray().map(n => linkTarget($(n).attr('href')!)).filter(u => !u.startsWith('#'))
   const links = urls(after)
@@ -80,7 +105,7 @@ export function verifyZhihuContent(expected: string, stored: string): void {
   const captions = ($: ReturnType<typeof load>) => $('figcaption').toArray().map(n => $(n).text().trim())
   const code = ($: ReturnType<typeof load>) => $('pre').toArray().map(n => $(n).text())
   const structure = ($: ReturnType<typeof load>) => $('h1,h2,h3,h4,h5,h6,ul,ol').toArray().map(n => ({ tag: n.type === 'tag' ? n.name : '', heading: $(n).is('h1,h2,h3,h4,h5,h6') ? $(n).text() : '', start: $(n).attr('start') || '', depth: $(n).parents('li').length }))
-  const emptyItems = after('li').toArray().some(n => !after(n).text().replace(/\u200b/g, '').trim() && !after(n).find('img').length)
+  const emptyItems = rawStored('li').toArray().some(n => !rawStored(n).text().replace(/\u200b/g, '').trim() && !rawStored(n).find('img').length)
   if (text(before) !== text(after) || before('img').length !== images.length
     || images.some(n => !zhihuImageUrl(after(n).attr('src') || after(n).attr('data-original-src')))
     || before('li').length !== after('li').length || emptyItems
