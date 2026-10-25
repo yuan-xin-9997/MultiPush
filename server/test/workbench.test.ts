@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createCardId, fitCardBody, getCaptionBody, parsePreferences, publishChecks } from '../../shared/render-workbench'
+import { createCardId, fitCardBody, selectXhsPublishCards, getCaptionBody, parsePreferences, publishChecks } from '../../shared/render-workbench'
 import { renderPlatforms } from '../src/renderers'
 import { adjustPlatformRender } from '../src/render-adjustment'
 import { platformAdjustmentSchema } from '../src/validation'
@@ -28,6 +28,24 @@ describe('render workbench', () => {
     expect(pages.every((paragraphs) => paragraphs.reduce((n, paragraph) => n + Array.from(paragraph).length + 1, 0) <= 8)).toBe(true)
     expect(pages.length).toBeGreaterThan(2)
     expect(() => fitCardBody(['a'], () => false)).toThrow('可用空间不足')
+  })
+
+  it('selects at most 18 ordered excerpt cards without changing originals, retaining the opening and ending', () => {
+    const cards = Array.from({ length: 22 }, (_, index) => ({ id: `card-${index}`, type: 'content' as const, index: index + 1, total: 22, title: `标题 ${index}`, body: [`原文 ${index}🙂`], images: [`image-${index}.png`], footer: '作者' }))
+    const before = JSON.stringify(cards)
+    const selected = selectXhsPublishCards(cards)
+    expect(selected).toHaveLength(18)
+    expect(selected[0].id).toBe(cards[0].id)
+    expect(selected.at(-1)!.id).toBe(cards.at(-1)!.id)
+    expect(new Set(selected.map(card => card.id)).size).toBe(18)
+    expect(selected.map(card => cards.findIndex(source => source.id === card.id))).toEqual(selected.map(card => cards.findIndex(source => source.id === card.id)).sort((a, b) => a - b))
+    expect(selected.every((card, i) => card.index === i + 1 && card.total === 18)).toBe(true)
+    expect(selected.every(card => card.body === cards.find(source => source.id === card.id)!.body && card.images === cards.find(source => source.id === card.id)!.images)).toBe(true)
+    expect(JSON.stringify(cards)).toBe(before)
+    for (const size of [0, 1, 18]) expect(selectXhsPublishCards(cards.slice(0, size))).toEqual(cards.slice(0, size))
+    const many = selectXhsPublishCards(Array.from({ length: 1000 }, (_, i) => ({ ...cards[0], id: String(i) })))
+    expect(many).toHaveLength(18)
+    expect(many.at(-1)!.id).toBe('999')
   })
 
   it('validates stored account preferences and removes invalid platforms', () => {

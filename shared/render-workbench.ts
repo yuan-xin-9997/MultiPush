@@ -17,6 +17,13 @@ export function renumberCards(cards: XhsCard[]): XhsCard[] {
   return cards.map((card, index) => ({ ...card, index: index + 1, total: cards.length }))
 }
 
+/** Select ordered excerpts across the whole note, keeping its opening and ending. */
+export function selectXhsPublishCards(cards: XhsCard[]): XhsCard[] {
+  const limit = 18
+  if (cards.length <= limit) return cards
+  return renumberCards(Array.from({ length: limit }, (_, index) => cards[Math.round(index * (cards.length - 1) / (limit - 1))]))
+}
+
 /** Measure candidate paragraphs in the actual card, including paragraph spacing. */
 export function fitCardBody(body: string[], fits: (body: string[]) => boolean): string[][] {
   const pages: string[][] = []
