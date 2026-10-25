@@ -29,7 +29,7 @@ const server = app.listen(0, '127.0.0.1')
 await new Promise(resolve => server.once('listening', resolve))
 let browser
 try {
-  const executablePath = process.env.CHROME_BIN || ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/chromium'].find(existsSync)
+  const executablePath = process.env.CHROME_BIN || ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/chromium', '/usr/bin/google-chrome'].find(existsSync)
   browser = await chromium.launch({ executablePath, headless: true })
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } })
   const errors = []; page.on('pageerror', error => errors.push(error.message))
