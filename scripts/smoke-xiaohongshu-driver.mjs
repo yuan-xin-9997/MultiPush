@@ -9,7 +9,7 @@ const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, '
 mkdirSync(output, { recursive: true })
 const modulePath = path.join(output, 'driver.cjs')
 await build({ entryPoints: [path.join(root, 'server/src/xiaohongshu-browser.ts')], outfile: modulePath, bundle: true, platform: 'node', format: 'cjs', external: ['playwright-core'], logLevel: 'silent' })
-const { PlaywrightXhsDriver } = createRequire(import.meta.url)(modulePath)
+const { PlaywrightXhsDriver, xhsEditorText } = createRequire(import.meta.url)(modulePath)
 const executablePath = process.env.XHS_BROWSER_PATH || process.env.CHROME_BIN || ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/chromium', '/usr/bin/google-chrome'].find(existsSync)
 const browser = await chromium.launch({ executablePath, headless: true })
 try {
@@ -29,7 +29,7 @@ try {
         <input type="file" id="video" accept=".mp4,.mov">
         <div id="image-input"></div><div class="img-preview-area"></div>
         <div class="d-input"><input placeholder="填写标题会有更多赞哦"></div>
-        <div role="textbox" class="tiptap" contenteditable="true"></div>
+        <div role="textbox" class="tiptap" style="white-space:pre-wrap" contenteditable="true"></div>
         <div class="publish-page-publish-btn"><button class="bg-red">发布</button></div>
       </section>
       <script>
@@ -41,6 +41,12 @@ try {
           document.querySelector('#image-input').append(input);
         }
         document.querySelector('#real-tab').onclick=()=>{window.clickedTab=true;document.querySelector('#form').style.display='block';nextInput()};
+        const editor=document.querySelector('.tiptap'); let insertedText='';
+        editor.addEventListener('beforeinput',e=>{insertedText=e.data || ''});
+        editor.addEventListener('input',()=>{
+          const lines=insertedText.split('\\n');
+          editor.replaceChildren(...lines.map(text=>{const p=document.createElement('p');if(text)p.textContent=text;else{const br=document.createElement('br');br.className='ProseMirror-trailingBreak';p.append(br)}return p}));
+        });
         document.querySelector('button.bg-red').onclick=()=>fetch('/api/sns/web/v1/note',{method:'POST',body:'fixture'});
       </script></body></html>` })
     return route.abort()
@@ -53,14 +59,16 @@ try {
   const close = context.close.bind(context)
   context.close = async () => {
     const page = context.pages()[0]
-    snapshot = await page.evaluate(() => ({ names: window.uploaded, selected: window.clickedTab, title: document.querySelector('.d-input input').value, body: document.querySelector('.tiptap').innerText }))
+    snapshot = await page.evaluate(() => ({ names: window.uploaded, selected: window.clickedTab, title: document.querySelector('.d-input input').value, html: document.querySelector('.tiptap').innerHTML }))
     await close()
   }
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7XkAAAAASUVORK5CYII=', 'base64')
-  const result = await driver.publish({ cookies: [], origins: [] }, { title: '标题测试', body: '正文测试', images: new Map([['0', { name: 'first.png', mimeType: 'image/png', buffer: png }], ['1', { name: 'second.png', mimeType: 'image/png', buffer: png }]]) }, value => steps.push(value.message))
+  const caption = '第一段🙂。\n\n第二段保留完整内容。\n下一行。\n\n#话题'
+  const result = await driver.publish({ cookies: [], origins: [] }, { title: '标题测试', body: caption, images: new Map([['0', { name: 'first.png', mimeType: 'image/png', buffer: png }], ['1', { name: 'second.png', mimeType: 'image/png', buffer: png }]]) }, value => steps.push(value.message))
   assert.equal(result.status, 'published')
   assert.equal(submitted, 1)
-  assert.deepEqual(snapshot, { names: ['first.png', 'second.png'], selected: true, title: '标题测试', body: '正文测试' })
+  assert.deepEqual({ ...snapshot, html: undefined }, { names: ['first.png', 'second.png'], selected: true, title: '标题测试', html: undefined })
+  assert.equal(xhsEditorText(snapshot.html), caption)
   assert.ok(steps.includes('正在上传图片 2/2'))
   console.log('Xiaohongshu driver smoke passed: rendered tab, replacement image inputs, ordered uploads, editor readback and explicit submission confirmation (all mocked)')
 } finally { await browser.close() }

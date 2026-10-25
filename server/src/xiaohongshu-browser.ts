@@ -1,3 +1,4 @@
+import { load } from 'cheerio'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
 import type { XhsPublication } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
@@ -38,6 +39,23 @@ export function xhsPublishedResult(value: unknown): { remoteId: string; url: str
   const id = data.data?.note_id ?? data.data?.id
   if (typeof id !== 'string' || !/^[a-f0-9]{24}$/.test(id)) return null
   return { remoteId: id, url: `https://www.xiaohongshu.com/explore/${id}` }
+}
+
+/** Recover editor paragraphs without innerText's browser-dependent block spacing. */
+export function xhsEditorText(html: string): string {
+  const $ = load(html, null, false)
+  $('br.ProseMirror-trailingBreak').remove()
+  $('br').replaceWith('\n')
+  const nodes = $.root().contents().toArray()
+  return nodes.map((node, index) => {
+    const text = $(node).text()
+    const block = node.type === 'tag' && ['p', 'div'].includes(node.name)
+    return text + (block && index < nodes.length - 1 ? '\n' : '')
+  }).join('')
+}
+
+export function normalizeXhsEditorText(text: string): string {
+  return text.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ')
 }
 
 export const XHS_IMAGE_INPUT = 'input[type="file"][accept*="image/"], input[type="file"][accept*=".jpg"], input[type="file"][accept*=".jpeg"], input[type="file"][accept*=".png"], input[type="file"][accept*=".webp"]'
@@ -208,7 +226,7 @@ export class PlaywrightXhsDriver implements XhsDriver {
       await title.fill(article.title)
       step('填写正文')
       await body.fill(article.body)
-      if (await title.inputValue() !== article.title || (await body.innerText()).replace(/\r/g, '') !== article.body.replace(/\r/g, '')) throw new ApiError(409, 'xiaohongshu_content_mismatch', '小红书编辑器内容与预期不同，已停止发布')
+      if (await title.inputValue() !== article.title || normalizeXhsEditorText(xhsEditorText(await body.innerHTML())) !== normalizeXhsEditorText(article.body)) throw new ApiError(409, 'xiaohongshu_content_mismatch', '小红书编辑器内容与预期不同，已停止发布')
       await this.security(page)
       step('检查发布按钮')
       const button = page.locator('xhs-publish-btn:not([is-publish="false"]):visible, .publish-page-publish-btn button.bg-red:visible').first()

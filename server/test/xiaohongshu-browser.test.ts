@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chromium, type Browser } from 'playwright-core'
-import { PlaywrightXhsDriver, xhsUserAgent, clickXhsImageTab } from '../src/xiaohongshu-browser'
+import { PlaywrightXhsDriver, xhsUserAgent, clickXhsImageTab, xhsEditorText, normalizeXhsEditorText } from '../src/xiaohongshu-browser'
 
 const drivers: PlaywrightXhsDriver[] = []
 afterEach(async () => { for (const driver of drivers.splice(0)) await driver.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals() })
@@ -14,6 +14,7 @@ function fixture(options: { security?: boolean; disabled?: boolean; mismatch?: b
     setInputFiles: vi.fn(async () => { if (options.failStage === 'upload') { const error = new Error('secret-cookie'); error.name = 'TimeoutError'; throw error } }),
     fill: async (value: string) => { if (options.failStage === 'body' && selector.includes('tiptap')) throw new Error('secret-cookie'); if (selector.includes('d-input')) title = value; else body = value },
     inputValue: async () => title,
+    innerHTML: async () => options.mismatch ? '<p>不一致</p>' : `<p>${body}</p>`,
     innerText: async () => selector === 'body' ? options.security ? '请完成验证' : '小红书创作中心' : options.mismatch ? '不一致' : body,
     getAttribute: async () => options.disabled ? 'true' : null,
     isDisabled: async () => false,
@@ -183,5 +184,23 @@ describe('Xiaohongshu image tab selection', () => {
   it('stops if no image tab is in the viewport', async () => {
     const tabs = { first: () => ({ waitFor: async () => {} }), filter() { return this }, count: async () => 0 }
     await expect(clickXhsImageTab({ locator: () => tabs, viewportSize: () => ({ width: 1280, height: 1000 }) } as never)).rejects.toMatchObject({ code: 'xiaohongshu_image_tab_missing' })
+  })
+})
+
+
+describe('Xiaohongshu editor structural readback', () => {
+  it('preserves paragraphs, intentional empty lines, emoji, inline markup and hard breaks', () => {
+    const html = '<p>第一段🙂。</p><p><br class="ProseMirror-trailingBreak"></p><p>第二段<strong>重点</strong><br>下一行</p><p>#话题</p>'
+    expect(xhsEditorText(html)).toBe('第一段🙂。\n\n第二段重点\n下一行\n#话题')
+    expect(xhsEditorText('<p><br class="ProseMirror-trailingBreak"></p><p>正文</p><p><br class="ProseMirror-trailingBreak"></p>')).toBe('\n正文\n')
+    expect(xhsEditorText('纯文本 &amp; 标点🙂')).toBe('纯文本 & 标点🙂')
+    expect(xhsEditorText('<div>第一行</div><div>第二行</div>')).toBe('第一行\n第二行')
+  })
+  it('normalizes only browser whitespace variants and still detects missing text and changed word boundaries', () => {
+    expect(normalizeXhsEditorText(xhsEditorText('<p>a&nbsp;b</p><p>c</p>'))).toBe(normalizeXhsEditorText('a b\r\nc'))
+    expect(normalizeXhsEditorText(xhsEditorText('<p>正文</p>'))).not.toBe(normalizeXhsEditorText('正文还有细节'))
+    expect(normalizeXhsEditorText(xhsEditorText('<p>ab</p>'))).not.toBe(normalizeXhsEditorText('a b'))
+    expect(normalizeXhsEditorText(xhsEditorText('<p>第一段</p><p>第二段</p>'))).not.toBe(normalizeXhsEditorText('第一段\n\n第二段'))
+    expect(xhsEditorText('<p>正文</p>多余文字')).not.toBe('正文')
   })
 })
