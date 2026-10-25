@@ -4,21 +4,7 @@
 
 ## 环境信息
 
-Jenkins运行的Linux服务器信息：
-
-IP=192.168.0.111  
-User=yuanxin  
-Password=yuanxin
-
-Jenkins地址信息：
-
-[http://192.168.0.111:8080/login](http://192.168.0.111:8080/login?from=%2F)
-
-或https://jenkins.yuan-xin.top/（如果上面这个地址访问不了，尝试这个）
-
-用户名：admin
-
-密码：admin
+如何访问Jenkins请参阅全局或项目下的事实文件。
 
 ## 需求
 
