@@ -15,7 +15,7 @@
     "start": "npm run start -w server",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "test": "npm run test -w server",
-    "test:publish-ui": "node scripts/smoke-wechat-publish.mjs && node scripts/smoke-zhihu-publish.mjs && node scripts/smoke-xiaohongshu-publish.mjs && node scripts/smoke-xiaohongshu-publish.mjs --long-cards",
+    "test:publish-ui": "node scripts/smoke-douyin-publish.mjs && node scripts/smoke-wechat-publish.mjs && node scripts/smoke-zhihu-publish.mjs && node scripts/smoke-xiaohongshu-publish.mjs && node scripts/smoke-xiaohongshu-publish.mjs --long-cards && node scripts/smoke-xiaohongshu-driver.mjs",
     "smoke": "node scripts/smoke-api.mjs"
   },
   "devDependencies": {

@@ -420,6 +420,54 @@ export interface XhsResolveInput {
   articleUrl?: string
 }
 
+export interface DouyinAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface DouyinLogin {
+  id: string
+  status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'
+  qrCode: string | null
+  message: string
+  expiresAt: string
+}
+
+export interface DouyinPublishInput {
+  renderId: string
+  mode: 'publish'
+  imageMediaIds?: string[]
+  videoMediaId?: string
+}
+
+export interface DouyinPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'published' | 'failed' | 'uncertain'
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+  resolutions?: DouyinResolution[]
+}
+
+export interface DouyinResolution {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
+}
+
+export interface DouyinResolveInput {
+  action: DouyinResolution['action']
+  articleUrl?: string
+}
+
 export interface ApiHealth {
   status: 'ok'
   service: string

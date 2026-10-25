@@ -1,3 +1,6 @@
+import { DouyinService } from './douyin'
+import { PlaywrightDouyinDriver, type DouyinDriver } from './douyin-browser'
+import { createDouyinRouter } from './routes/douyin'
 import { XhsService } from './xiaohongshu'
 import { PlaywrightXhsDriver, type XhsDriver } from './xiaohongshu-browser'
 import { createXhsRouter } from './routes/xiaohongshu'
@@ -75,7 +78,7 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, xhsDriver?: XhsDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
@@ -83,6 +86,8 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.zhihu = zhihu
   const xhs = new XhsService(database, config, xhsDriver ?? new PlaywrightXhsDriver())
   app.locals.xiaohongshu = xhs
+  const douyin = new DouyinService(database, config, douyinDriver ?? new PlaywrightDouyinDriver())
+  app.locals.douyin = douyin
   app.disable('x-powered-by')
   app.use(securityHeaders)
 
@@ -101,6 +106,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/media', requireAuth, createMediaRouter(database, config))
   app.use('/api/renders', requireAuth, createRendersRouter(database, config))
   app.use('/api/wechat', requireAuth, createWechatRouter(wechat))
+  app.use('/api/douyin', requireAuth, createDouyinRouter(douyin))
   app.use('/api/xiaohongshu', requireAuth, createXhsRouter(xhs))
   app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))
   app.use('/api', createMetaRouter(config, requireAuth))

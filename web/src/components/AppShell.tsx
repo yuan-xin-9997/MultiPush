@@ -91,7 +91,7 @@ export default function AppShell() {
             </span>
             <div>
               <p className="app-sidebar-note-title">一次创作，多端适配</p>
-              <p className="app-sidebar-note-text">公众号、知乎与小红书支持扫码连接和发布，抖音可渲染后下载。</p>
+              <p className="app-sidebar-note-text">支持公众号、知乎、小红书与抖音扫码连接和发布。</p>
             </div>
           </div>
 

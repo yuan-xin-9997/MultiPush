@@ -1,3 +1,4 @@
+import DouyinPublishPage from './DouyinPublishPage'
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, CheckCircle2, ExternalLink, FileText, ImagePlus, LoaderCircle, LogOut, MessageCircle, QrCode, RefreshCw, Send, ShieldCheck, Sparkles } from 'lucide-react'
@@ -285,6 +286,6 @@ function WechatPublishPage() {
 
 export default function PublishPage() {
   const [params, setParams] = useSearchParams()
-  const platform = params.get('platform') === 'xiaohongshu' ? 'xiaohongshu' : params.get('platform') === 'zhihu' ? 'zhihu' : 'wechat'
-  return <><nav className="publish-platform-tabs" aria-label="选择发布平台">{(['wechat', 'zhihu', 'xiaohongshu'] as const).map(value => <button key={value} type="button" className={`btn ${platform === value ? 'btn-primary' : ''}`} aria-current={platform === value ? 'page' : undefined} onClick={() => { if (value !== platform) setParams({ platform: value }) }}>{value === 'wechat' ? '微信公众号' : value === 'zhihu' ? '知乎' : '小红书'}</button>)}</nav>{platform === 'xiaohongshu' ? <XhsPublishPage /> : platform === 'zhihu' ? <ZhihuPublishPage /> : <WechatPublishPage />}</>
+  const platform = params.get('platform') === 'douyin' ? 'douyin' : params.get('platform') === 'xiaohongshu' ? 'xiaohongshu' : params.get('platform') === 'zhihu' ? 'zhihu' : 'wechat'
+  return <><nav className="publish-platform-tabs" aria-label="选择发布平台">{(['wechat', 'zhihu', 'xiaohongshu', 'douyin'] as const).map(value => <button key={value} type="button" className={`btn ${platform === value ? 'btn-primary' : ''}`} aria-current={platform === value ? 'page' : undefined} onClick={() => { if (value !== platform) setParams({ platform: value }) }}>{value === 'wechat' ? '微信公众号' : value === 'zhihu' ? '知乎' : value === 'douyin' ? '抖音' : '小红书'}</button>)}</nav>{platform === 'douyin' ? <DouyinPublishPage /> : platform === 'xiaohongshu' ? <XhsPublishPage /> : platform === 'zhihu' ? <ZhihuPublishPage /> : <WechatPublishPage />}</>
 }

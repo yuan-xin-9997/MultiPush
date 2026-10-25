@@ -5,7 +5,7 @@ import type { BrowserContext } from 'playwright-core'
 
 export type PublisherStorageState = Awaited<ReturnType<BrowserContext['storageState']>>
 
-export function loadPublisherKey(dataDir: string, platform: 'wechat' | 'zhihu' | 'xiaohongshu'): Buffer {
+export function loadPublisherKey(dataDir: string, platform: 'wechat' | 'zhihu' | 'xiaohongshu' | 'douyin'): Buffer {
   const file = path.join(dataDir, `.${platform}-session-key`)
   try { writeFileSync(file, randomBytes(32), { flag: 'wx', mode: 0o600 }) }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }

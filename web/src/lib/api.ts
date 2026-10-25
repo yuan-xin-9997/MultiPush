@@ -25,6 +25,7 @@ import type {
   WechatPublication,
   WechatPublishInput,
   XhsAccount,
+  DouyinAccount, DouyinLogin, DouyinPublication, DouyinPublishInput, DouyinResolveInput,
   XhsLogin,
   XhsPublication,
   XhsPublishInput,
@@ -239,6 +240,15 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/xiaohongshu/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: XhsPublication[] }>('/api/xiaohongshu/publications', { cache: 'no-store' }),
     publish: (input: XhsPublishInput) => request<{ publication: XhsPublication }>('/api/xiaohongshu/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
+  douyin: {
+    resolve: (id: string, input: DouyinResolveInput) => request<{ publication: DouyinPublication }>(`/api/douyin/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: DouyinAccount }>('/api/douyin/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: DouyinLogin }>('/api/douyin/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: DouyinLogin }>(`/api/douyin/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/douyin/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: DouyinPublication[] }>('/api/douyin/publications', { cache: 'no-store' }),
+    publish: (input: DouyinPublishInput) => request<{ publication: DouyinPublication }>('/api/douyin/publications', { method: 'POST', body: JSON.stringify(input) }),
   },
 
   renders: {
