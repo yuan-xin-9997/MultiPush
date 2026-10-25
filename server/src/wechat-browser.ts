@@ -212,8 +212,8 @@ async function sessionInfo(page: Page) {
   throw expired()
 }
 
-export function publisherExecutablePath(platform: 'wechat' | 'zhihu' = 'wechat'): string | undefined {
-  const configured = (platform === 'zhihu' ? process.env.ZHIHU_BROWSER_PATH : '') || process.env.WECHAT_BROWSER_PATH || process.env.CHROME_BIN
+export function publisherExecutablePath(platform: 'wechat' | 'zhihu' | 'xiaohongshu' = 'wechat'): string | undefined {
+  const configured = (platform === 'xiaohongshu' ? process.env.XHS_BROWSER_PATH : platform === 'zhihu' ? process.env.ZHIHU_BROWSER_PATH : '') || process.env.WECHAT_BROWSER_PATH || process.env.CHROME_BIN
   if (configured) {
     if (!existsSync(configured)) throw new ApiError(503, `${platform}_browser_unavailable`, '配置的浏览器不存在，请设置有效的 Chrome 或 Chromium 可执行文件路径')
     return configured

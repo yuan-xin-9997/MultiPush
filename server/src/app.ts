@@ -1,3 +1,6 @@
+import { XhsService } from './xiaohongshu'
+import { PlaywrightXhsDriver, type XhsDriver } from './xiaohongshu-browser'
+import { createXhsRouter } from './routes/xiaohongshu'
 import express from 'express'
 import cors from 'cors'
 import path from 'node:path'
@@ -72,12 +75,14 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, xhsDriver?: XhsDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
   const zhihu = new ZhihuService(database, config, zhihuDriver ?? new PlaywrightZhihuDriver())
   app.locals.zhihu = zhihu
+  const xhs = new XhsService(database, config, xhsDriver ?? new PlaywrightXhsDriver())
+  app.locals.xiaohongshu = xhs
   app.disable('x-powered-by')
   app.use(securityHeaders)
 
@@ -96,6 +101,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/media', requireAuth, createMediaRouter(database, config))
   app.use('/api/renders', requireAuth, createRendersRouter(database, config))
   app.use('/api/wechat', requireAuth, createWechatRouter(wechat))
+  app.use('/api/xiaohongshu', requireAuth, createXhsRouter(xhs))
   app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))
   app.use('/api', createMetaRouter(config, requireAuth))
   app.use('/api', apiNotFound)

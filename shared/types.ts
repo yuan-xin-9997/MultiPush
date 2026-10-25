@@ -373,6 +373,53 @@ export interface ZhihuResolveInput {
   articleUrl?: string
 }
 
+export interface XhsAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface XhsLogin {
+  id: string
+  status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'
+  qrCode: string | null
+  message: string
+  expiresAt: string
+}
+
+export interface XhsPublishInput {
+  renderId: string
+  mode: 'publish'
+  imageMediaIds: string[]
+}
+
+export interface XhsPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'published' | 'failed' | 'uncertain'
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+  resolutions?: XhsResolution[]
+}
+
+export interface XhsResolution {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
+}
+
+export interface XhsResolveInput {
+  action: XhsResolution['action']
+  articleUrl?: string
+}
+
 export interface ApiHealth {
   status: 'ok'
   service: string

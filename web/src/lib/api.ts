@@ -24,6 +24,11 @@ import type {
   WechatLogin,
   WechatPublication,
   WechatPublishInput,
+  XhsAccount,
+  XhsLogin,
+  XhsPublication,
+  XhsPublishInput,
+  XhsResolveInput,
   ZhihuAccount,
   ZhihuLogin,
   ZhihuPublication,
@@ -225,6 +230,15 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/zhihu/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: ZhihuPublication[] }>('/api/zhihu/publications', { cache: 'no-store' }),
     publish: (input: ZhihuPublishInput) => request<{ publication: ZhihuPublication }>('/api/zhihu/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
+  xiaohongshu: {
+    resolve: (id: string, input: XhsResolveInput) => request<{ publication: XhsPublication }>(`/api/xiaohongshu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: XhsAccount }>('/api/xiaohongshu/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: XhsLogin }>('/api/xiaohongshu/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: XhsLogin }>(`/api/xiaohongshu/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/xiaohongshu/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: XhsPublication[] }>('/api/xiaohongshu/publications', { cache: 'no-store' }),
+    publish: (input: XhsPublishInput) => request<{ publication: XhsPublication }>('/api/xiaohongshu/publications', { method: 'POST', body: JSON.stringify(input) }),
   },
 
   renders: {

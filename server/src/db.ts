@@ -18,6 +18,8 @@ import type {
   User,
   WechatPublication,
   ZhihuPublication,
+  XhsPublication,
+  XhsResolution,
   ZhihuResolution,
 } from '../../shared/types'
 import { PLATFORM_ORDER } from '../../shared/types'
@@ -341,8 +343,43 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_zhihu_resolutions_publication ON zhihu_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 5;
+      CREATE TABLE IF NOT EXISTS xiaohongshu_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_session TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS xiaohongshu_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('draft', 'publish')),
+        status TEXT NOT NULL CHECK (status IN ('running', 'draft', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_xiaohongshu_publications_user_created ON xiaohongshu_publications(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS xiaohongshu_publication_resolutions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL REFERENCES xiaohongshu_publications(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN ('check', 'not_published', 'published')),
+        message TEXT NOT NULL,
+        article_url TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_xiaohongshu_resolutions_publication ON xiaohongshu_publication_resolutions(publication_id, created_at DESC);
+      PRAGMA user_version = 6;
     `)
+    this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     // Never resend an operation that may already have reached WeChat before a restart.
     this.run(`UPDATE wechat_publications SET status = 'uncertain', message = ?, updated_at = ?
       WHERE status IN ('running', 'awaiting_confirmation')`,
@@ -1007,6 +1044,68 @@ export class Database {
       if (!current || !['uncertain', 'running'].includes(current.status)) return null
       this.run('INSERT INTO zhihu_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
       return this.updateZhihuPublication(userId, id, values)
+    })
+  }  getXhsAccount(userId: string): ZhihuAccountSession | null {
+    const row = this.get('SELECT * FROM xiaohongshu_accounts WHERE user_id = ?', [userId])
+    return row ? { encryptedSession: text(row.encrypted_session), accountId: text(row.account_id), name: nullableText(row.name), status: row.status === 'expired' ? 'expired' : 'connected', checkedAt: text(row.checked_at) } : null
+  }
+
+  saveXhsAccount(userId: string, values: ZhihuAccountSession): void {
+    this.run(`INSERT INTO xiaohongshu_accounts (user_id, encrypted_session, account_id, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET encrypted_session = excluded.encrypted_session,
+      account_id = excluded.account_id, name = excluded.name, status = excluded.status, checked_at = excluded.checked_at`,
+      [userId, values.encryptedSession, values.accountId, values.name, values.status, values.checkedAt])
+  }
+
+  deleteXhsAccount(userId: string): void { this.run('DELETE FROM xiaohongshu_accounts WHERE user_id = ?', [userId]) }
+
+  private mapXhsPublication(row: Row): XhsPublication {
+    const resolutions: XhsResolution[] = this.all('SELECT * FROM xiaohongshu_publication_resolutions WHERE publication_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 10', [text(row.id), text(row.user_id)]).map(r => ({ id: text(r.id), action: r.action as XhsResolution['action'], message: text(r.message), articleUrl: nullableText(r.article_url), createdAt: text(r.created_at) }))
+    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as XhsPublication['mode'], status: row.status as XhsPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at), resolutions }
+  }
+
+  createXhsPublication(userId: string, values: CreateWechatPublicationValues): XhsPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO xiaohongshu_publications (id, user_id, render_id, title, mode, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?) ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+      [randomUUID(), userId, values.renderId, values.title, values.mode, '正在准备小红书文章', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findXhsPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create Xhs publication')
+    return publication
+  }
+
+  getXhsPublication(userId: string, id: string): XhsPublication | null {
+    const row = this.get('SELECT * FROM xiaohongshu_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapXhsPublication(row) : null
+  }
+
+  findXhsPublication(userId: string, key: string): XhsPublication | null {
+    const row = this.get('SELECT * FROM xiaohongshu_publications WHERE user_id = ? AND idempotency_key = ?', [userId, key])
+    return row ? this.mapXhsPublication(row) : null
+  }
+
+  hasUncertainXhsPublication(userId: string): boolean {
+    return !!this.get("SELECT id FROM xiaohongshu_publications WHERE user_id = ? AND status = 'uncertain' LIMIT 1", [userId])
+  }
+
+  listXhsPublications(userId: string): XhsPublication[] {
+    return this.all('SELECT * FROM xiaohongshu_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapXhsPublication(row))
+  }
+
+  updateXhsPublication(userId: string, id: string, values: Partial<Pick<XhsPublication, 'status' | 'message' | 'url' | 'remoteId'>>): XhsPublication | null {
+    const current = this.getXhsPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE xiaohongshu_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getXhsPublication(userId, id)
+  }
+
+  resolveXhsPublication(userId: string, id: string, action: XhsResolution['action'], values: Pick<XhsPublication, 'status' | 'message' | 'url' | 'remoteId'>): XhsPublication | null {
+    return this.transaction(() => {
+      const current = this.getXhsPublication(userId, id)
+      if (!current || !['uncertain', 'running'].includes(current.status)) return null
+      this.run('INSERT INTO xiaohongshu_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
+      return this.updateXhsPublication(userId, id, values)
     })
   }
 }

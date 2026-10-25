@@ -9,6 +9,7 @@ import { formatDateTime } from '@/lib/utils'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
 import './publish.css'
+import XhsPublishPage from './XhsPublishPage'
 import ZhihuPublishPage from './ZhihuPublishPage'
 
 const STATUS_LABELS: Record<WechatPublication['status'], string> = {
@@ -284,6 +285,6 @@ function WechatPublishPage() {
 
 export default function PublishPage() {
   const [params, setParams] = useSearchParams()
-  const platform = params.get('platform') === 'zhihu' ? 'zhihu' : 'wechat'
-  return <><nav className="publish-platform-tabs" aria-label="选择发布平台">{(['wechat', 'zhihu'] as const).map(value => <button key={value} type="button" className={`btn ${platform === value ? 'btn-primary' : ''}`} aria-current={platform === value ? 'page' : undefined} onClick={() => { if (value !== platform) setParams({ platform: value }) }}>{value === 'wechat' ? '微信公众号' : '知乎'}</button>)}</nav>{platform === 'zhihu' ? <ZhihuPublishPage /> : <WechatPublishPage />}</>
+  const platform = params.get('platform') === 'xiaohongshu' ? 'xiaohongshu' : params.get('platform') === 'zhihu' ? 'zhihu' : 'wechat'
+  return <><nav className="publish-platform-tabs" aria-label="选择发布平台">{(['wechat', 'zhihu', 'xiaohongshu'] as const).map(value => <button key={value} type="button" className={`btn ${platform === value ? 'btn-primary' : ''}`} aria-current={platform === value ? 'page' : undefined} onClick={() => { if (value !== platform) setParams({ platform: value }) }}>{value === 'wechat' ? '微信公众号' : value === 'zhihu' ? '知乎' : '小红书'}</button>)}</nav>{platform === 'xiaohongshu' ? <XhsPublishPage /> : platform === 'zhihu' ? <ZhihuPublishPage /> : <WechatPublishPage />}</>
 }
