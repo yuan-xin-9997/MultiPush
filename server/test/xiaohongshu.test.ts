@@ -1,3 +1,4 @@
+import { prepareXhsCaption } from '../../shared/render-workbench'
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -82,6 +83,21 @@ describe('Xiaohongshu publishing', () => {
     expect(driver.publish).toHaveBeenCalledTimes(1)
     expect(driver.publish.mock.calls[0][1].body).toBe('正文\n\n#测试')
   })
+  it('submits the same shortened caption used by the preview, preserving saved prose and cards', async () => {
+    const { service, database, alice, driver, image, article } = setup()
+    const render = article()
+    const saved = { ...render.results[0], captionBody: '正文细节🙂。'.repeat(300), meta: { ...render.results[0].meta, tags: ['发布测试', '小红书'] } }
+    database.saveRenderDraft(alice.id, render.id, saved)
+    const publication = await service.publish(alice.id, { renderId: render.id, mode: 'publish', imageMediaIds: [image().id] })
+    expect((await finish(service, alice.id, publication.id)).status).toBe('published')
+    const submitted = driver.publish.mock.calls[0][1].body
+    expect(submitted).toBe(prepareXhsCaption(saved).text)
+    expect(Array.from(submitted).length).toBeLessThanOrEqual(1000)
+    expect(submitted).toContain('#发布测试 #小红书')
+    expect(database.getRender(alice.id, render.id)!.results[0].captionBody).toBe(saved.captionBody)
+    expect(database.getRender(alice.id, render.id)!.results[0].cards).toEqual(saved.cards)
+  })
+
   it('rejects cross-user renders/images and invalid titles before submission', async () => {
     const { service, database, alice, bob, image, article, driver } = setup()
     const render = article()

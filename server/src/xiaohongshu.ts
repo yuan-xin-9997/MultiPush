@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { getCaptionBody } from '../../shared/render-workbench'
+import { prepareXhsCaption } from '../../shared/render-workbench'
 import type { XhsAccount, XhsLogin, XhsPublishInput, XhsPublication, XhsResolveInput } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
@@ -152,7 +152,7 @@ export class XhsService {
     const content = this.database.getContentDetail(userId, record.contentId)
     if (!content || content.deletedAt) throw new ApiError(400, 'xiaohongshu_content_deleted', '原文已删除，请先恢复')
     if (render.sourceUpdatedAt && render.sourceUpdatedAt !== content.updatedAt) throw new ApiError(409, 'xiaohongshu_render_stale', '原文已修改，请重新生成排版')
-    const title = render.title.trim(), body = [getCaptionBody(render), render.meta.tags.map(tag => `#${tag.replace(/^#/, '')}`).join(' ')].filter(Boolean).join('\n\n')
+    const title = render.title.trim(), body = prepareXhsCaption(render).text
     if (!title || Array.from(title).length > 20) throw new ApiError(400, 'xiaohongshu_title_invalid', '小红书标题需要 1–20 个字')
     if (!body.trim() || Array.from(body).length > 1000) throw new ApiError(400, 'xiaohongshu_body_invalid', '正文和话题合计需要 1–1000 个字')
     if (render.videos.length) throw new ApiError(400, 'xiaohongshu_video_unsupported', '当前支持图文发布，请移除视频后重试')

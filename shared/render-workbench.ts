@@ -13,6 +13,31 @@ export function getCaptionBody(render: PlatformRender): string {
   return lines.join('\n').trim()
 }
 
+/** Prepare exactly the caption shown in the publish preview and sent to Xiaohongshu. */
+export function prepareXhsCaption(render: PlatformRender) {
+  const originalBody = getCaptionBody(render).trim()
+  const originalTags = [...new Set(render.meta.tags.map(tag => tag.trim().replace(/^#+/, '')).filter(Boolean))]
+  const join = (body: string, tags: string[]) => [body, tags.map(tag => `#${tag}`).join(' ')].filter(Boolean).join('\n\n')
+  const originalText = join(originalBody, originalTags)
+  if (Array.from(originalText).length <= 1000) return { body: originalBody, tags: originalTags, text: originalText, shortened: false, omittedTags: 0 }
+
+  // Keep most of the space for prose if an unusually large topic list is supplied.
+  const tags: string[] = []
+  for (const tag of originalTags) {
+    if (Array.from(tags.concat(tag).map(value => `#${value}`).join(' ')).length <= 200) tags.push(tag)
+  }
+  const tagLength = Array.from(tags.map(tag => `#${tag}`).join(' ')).length
+  const budget = 1000 - (tagLength ? tagLength + 2 : 0)
+  let body = originalBody
+  if (Array.from(body).length > budget) {
+    const prefix = Array.from(body).slice(0, budget - 1).join('')
+    const boundaries = [...prefix.matchAll(/[。！？!?；;\n]/gu)]
+    const end = boundaries.at(-1)
+    body = (end && end.index >= prefix.length / 2 ? prefix.slice(0, end.index + 1) : prefix).trimEnd() + '…'
+  }
+  return { body, tags, text: join(body, tags), shortened: true, omittedTags: originalTags.length - tags.length }
+}
+
 export function renumberCards(cards: XhsCard[]): XhsCard[] {
   return cards.map((card, index) => ({ ...card, index: index + 1, total: cards.length }))
 }

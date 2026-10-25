@@ -11,6 +11,8 @@ const qrCode = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HA
 const article = { platform: 'xiaohongshu', title: '小红书发布测试', captionBody: '验证卡片、文案与发布记录。', html: '', videos: [], meta: { tags: ['测试'], summary: '测试', imageCount: 1, wordCount: 12 }, cards: [{ id: 'card-1', type: 'cover', index: 1, total: 1, title: '小红书发布测试', body: ['验证卡片发布'], images: [], footer: 'MultiPush' }], warnings: [] }
 const longCards = process.argv.includes('--long-cards')
 const longBody = Array.from({ length: 26 }, (_, i) => `第 ${i + 1} 段：文件被占用时，先找到对应进程，再决定是否结束。🙂`)
+if (longCards) article.captionBody = '正文细节与使用说明🙂。'.repeat(200)
+const storedCaption = article.captionBody
 if (longCards) article.cards.push({ id: 'long-content', type: 'content', index: 2, total: 2, title: '解除占用的操作步骤', body: longBody, images: ['/uploads/test.png'], footer: 'MultiPush' })
 const render = { id: 'render-1', contentId: 'content-1', contentTitle: article.title, platforms: ['xiaohongshu'], results: [article], options: {}, createdAt: time }
 let loginPolls = 0, connected = false, uploads = 0, submitted = null, publications = []
@@ -69,6 +71,12 @@ try {
   await page.getByRole('button', { name: '正式发布到小红书', exact: true }).waitFor()
   const preparedCount = await page.locator('.xhs-card').count()
   if (longCards) {
+    const caption = await page.getByLabel('待发布正文与话题').innerText()
+    assert.ok(Array.from(caption).length <= 1000, 'preview must include topics within the limit')
+    assert.ok(caption.endsWith('#测试'), 'topics must remain in the actual caption')
+    assert.ok(caption.includes('…'), 'shortened prose must be clearly marked')
+    assert.match(await page.getByLabel('发布文案说明').innerText(), /已自动精简发布文案/)
+    assert.equal(article.captionBody, storedCaption, 'saved caption must remain unchanged')
     assert.ok(preparedCount > 2, 'long content must automatically split into more pages')
     assert.equal((await page.locator('.xhs-content-lines p').allTextContents()).join(''), longBody.join(''), 'every character must survive automatic pagination')
     assert.equal(await page.locator('.xhs-content-photo').count(), 1, 'the source image must appear exactly once')

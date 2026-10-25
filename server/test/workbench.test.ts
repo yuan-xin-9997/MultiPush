@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createCardId, fitCardBody, selectXhsPublishCards, getCaptionBody, parsePreferences, publishChecks } from '../../shared/render-workbench'
+import { createCardId, fitCardBody, prepareXhsCaption, selectXhsPublishCards, getCaptionBody, parsePreferences, publishChecks } from '../../shared/render-workbench'
 import { renderPlatforms } from '../src/renderers'
 import { adjustPlatformRender } from '../src/render-adjustment'
 import { platformAdjustmentSchema } from '../src/validation'
-import type { ContentDetail } from '../../shared/types'
+import type { ContentDetail, PlatformRender } from '../../shared/types'
 
 const source = {
   id: 'source', title: '原文标题', contentHtml: '<h2>段落</h2><p>这是<strong>正文</strong>。</p><img src="/uploads/a.png">',
@@ -28,6 +28,33 @@ describe('render workbench', () => {
     expect(pages.every((paragraphs) => paragraphs.reduce((n, paragraph) => n + Array.from(paragraph).length + 1, 0) <= 8)).toBe(true)
     expect(pages.length).toBeGreaterThan(2)
     expect(() => fitCardBody(['a'], () => false)).toThrow('可用空间不足')
+  })
+
+  it('fits the actual caption including topics, separators and emoji without changing the source', () => {
+    const base = { title: '标题', captionBody: '🙂'.repeat(1000), text: null, meta: { tags: ['测试', '#测试', ' 另一个话题 '] } } as PlatformRender
+    const original = JSON.stringify(base)
+    const result = prepareXhsCaption(base)
+    expect(Array.from(result.text).length).toBeLessThanOrEqual(1000)
+    expect(result.text).toContain('\n\n#测试 #另一个话题')
+    expect(result.body.endsWith('…')).toBe(true)
+    expect(result.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
+    expect(result.shortened).toBe(true)
+    expect(JSON.stringify(base)).toBe(original)
+    const exact = { ...base, captionBody: '字'.repeat(995), meta: { ...base.meta, tags: ['话题'] } }
+    expect(Array.from(prepareXhsCaption(exact).text).length).toBe(1000)
+    expect(prepareXhsCaption(exact).shortened).toBe(false)
+    expect(prepareXhsCaption({ ...base, captionBody: '短正文', meta: { ...base.meta, tags: [] } }).text).toBe('短正文')
+    expect(prepareXhsCaption({ ...base, captionBody: '   ', meta: { ...base.meta, tags: [] } }).text).toBe('')
+  })
+
+  it('ends shortened prose at a sentence boundary and prioritizes it over excessive topics', () => {
+    const base = { title: '标题', captionBody: '甲'.repeat(650) + '。' + '乙'.repeat(600), text: null, meta: { tags: ['测试'] } } as PlatformRender
+    expect(prepareXhsCaption(base).body).toBe('甲'.repeat(650) + '。…')
+    const crowded = { ...base, meta: { ...base.meta, tags: Array.from({ length: 80 }, (_, i) => `话题${i}`) } }
+    const result = prepareXhsCaption(crowded)
+    expect(result.omittedTags).toBeGreaterThan(0)
+    expect(Array.from(result.text).length).toBeLessThanOrEqual(1000)
+    expect(Array.from(result.body).length).toBeGreaterThan(600)
   })
 
   it('selects at most 18 ordered excerpt cards without changing originals, retaining the opening and ending', () => {
