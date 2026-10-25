@@ -42,7 +42,7 @@ export function layoutCards(cards: XhsCard[], nodes: Map<string, HTMLDivElement>
           paragraph.textContent = text
           return paragraph
         }))
-        return lines.clientHeight > 0 && lines.scrollHeight <= lines.clientHeight + 1 && lines.scrollWidth <= lines.clientWidth + 1
+        return lines.clientHeight > 0 && lines.scrollHeight <= lines.clientHeight + 1 && lines.scrollWidth <= lines.clientWidth + 1 && !overflowingText(clone)
       })
       pages.forEach((body, index) => output.push({ ...card, body,
         id: index === 0 ? card.id : `${card.id.slice(0, 60)}-flow-${index}-${createCardId().slice(0, 8)}`,

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'reac
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, CheckCircle2, ExternalLink, FileText, LoaderCircle, LogOut, QrCode, RefreshCw, Send, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
-import type { MediaAsset, RenderListItem, RenderRecord, XhsAccount, XhsLogin, XhsPublication, XhsResolveInput } from '@shared/types'
-import { overflowingText, verifyCardImages } from '../render/card-layout'
+import type { MediaAsset, RenderListItem, RenderRecord, PlatformRender, XhsAccount, XhsLogin, XhsPublication, XhsResolveInput } from '@shared/types'
+import { layoutCards, overflowingText, verifyCardImages } from '../render/card-layout'
 import { toBlob } from 'html-to-image'
 import XhsCardView from '../render/XhsCardView'
 import { getCaptionBody } from '@shared/render-workbench'
@@ -26,6 +26,9 @@ export default function XhsPublishPage() {
   const [recordLoading, setRecordLoading] = useState(false)
   const [images, setImages] = useState<MediaAsset[]>([])
   const cardsRef = useRef<HTMLDivElement>(null)
+  const [layoutReadyFor, setLayoutReadyFor] = useState<PlatformRender | null>(null)
+  const [layoutError, setLayoutError] = useState('')
+  const [originalCardCount, setOriginalCardCount] = useState(0)
   const [publications, setPublications] = useState<XhsPublication[]>([])
   const [login, setLogin] = useState<XhsLogin | null>(null)
   const [loginOpen, setLoginOpen] = useState(false)
@@ -46,7 +49,8 @@ export default function XhsPublishPage() {
   const busy = submitting || uploading || processing || resolveBusy
   const uncertainItems = publications.filter(item => item.status === 'uncertain')
   const uncertain = uncertainItems.length > 0
-  const ready = account?.status === 'connected' && !!article && !busy && !recordLoading && !uncertain
+  const layoutBusy = !!article && !images.length && layoutReadyFor !== article && !layoutError
+  const ready = account?.status === 'connected' && !!article && !busy && !recordLoading && !uncertain && (!!images.length || layoutReadyFor === article && !layoutError)
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -74,12 +78,36 @@ export default function XhsPublishPage() {
         const { render } = await api.renders.get(selectedId)
         if (!render.results.some(result => result.platform === 'xiaohongshu')) throw new Error('这份记录没有小红书排版，请先在渲染工作台生成。')
         if (cancelled) return
+        setOriginalCardCount(render.results.find(result => result.platform === 'xiaohongshu')!.cards.length)
         setRecord(render)
       } catch (cause) { if (!cancelled) setError(getErrorMessage(cause)) }
       finally { if (!cancelled) setRecordLoading(false) }
     })()
     return () => { cancelled = true }
   }, [selectedId])
+  useEffect(() => {
+    if (!article || images.length) return
+    let cancelled = false
+    setLayoutError('')
+    const timer = setTimeout(() => { if (!cancelled) setLayoutError('字体加载超时，请刷新页面后重试') }, 4000)
+    void document.fonts.ready.then(() => {
+      clearTimeout(timer)
+      if (cancelled) return
+      const wrappers = Array.from(cardsRef.current?.children || []) as HTMLDivElement[]
+      if (wrappers.length !== article.cards.length) throw new Error('卡片尚未就绪，请刷新后重试')
+      const nodes = new Map(article.cards.map((card, index) => [card.id, wrappers[index]]))
+      const cards = layoutCards(article.cards, nodes)
+      if (cards.length > 18) throw new Error(`自动分页后共 ${cards.length} 张，超过小红书 18 张上限，请精简内容或分篇发布`)
+      if (JSON.stringify(cards) !== JSON.stringify(article.cards)) {
+        setRecord(current => current ? { ...current, results: current.results.map(result => result === article ? { ...result, cards } : result) } : current)
+        return
+      }
+      const overflow = cards.findIndex(card => overflowingText(nodes.get(card.id)!))
+      if (overflow >= 0) throw new Error(`第 ${overflow + 1} 张的标题或内容无法自动放入卡片，请在渲染工作台缩短标题或调整图片`)
+      setLayoutReadyFor(article)
+    }).catch(cause => { if (!cancelled) setLayoutError(getErrorMessage(cause)) })
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [article, images.length])
   useEffect(() => {
     if (!login || !['waiting', 'scanned'].includes(login.status)) return
     let cancelled = false, timer: ReturnType<typeof setTimeout>
@@ -151,8 +179,10 @@ export default function XhsPublishPage() {
         const nodes = cardsRef.current?.querySelectorAll<HTMLElement>('.xhs-card')
         if (!nodes || nodes.length !== article.cards.length) throw new Error('卡片尚未就绪，请刷新后重试')
         for (const [index, node] of Array.from(nodes).entries()) {
-          await verifyCardImages(article.cards[index].images.map(absoluteUrl))
-          if (overflowingText(node.parentElement!)) throw new Error(`第 ${index + 1} 张卡片文字溢出，请先调整排版`)
+          if (overflowingText(node.parentElement!)) throw new Error(`第 ${index + 1} 张卡片排版已变化，请刷新页面后重试`)
+        }
+        await verifyCardImages(article.cards.flatMap(card => card.images).map(absoluteUrl))
+        for (const [index, node] of Array.from(nodes).entries()) {
           const blob = await toBlob(node, { width: 540, height: 720, pixelRatio: 2 })
           if (!blob) throw new Error(`第 ${index + 1} 张卡片生成失败`)
           assets.push((await api.media.upload(new File([blob], `card-${index + 1}.png`, { type: 'image/png' }))).media)
@@ -202,7 +232,8 @@ export default function XhsPublishPage() {
       {!renders.length && !selectedId && !refreshing ? <div className="publish-empty"><p>先生成一篇小红书排版</p><button type="button" className="btn btn-primary" onClick={() => navigate('/render')}>去渲染内容<ArrowRight size={14} /></button></div> : <label className="publish-field">选择内容<select className="input" value={selectedId} disabled={busy} onChange={event => { setError(''); setParams({ platform: 'xiaohongshu', renderId: event.target.value }) }}><option value="" disabled>选择小红书排版</option>{selectedId && !renders.some(item => item.id === selectedId) ? <option value={selectedId}>指定的排版记录</option> : null}{renders.map(item => <option key={item.id} value={item.id}>{item.contentTitle} · {formatDateTime(item.createdAt)}</option>)}</select></label>}
       {recordLoading ? <p className="publish-muted"><LoaderCircle size={15} className="spin" />正在读取排版…</p> : article ? <>
         <div className="publish-article-title"><FileText size={16} /><strong>{article.title}</strong><button type="button" className="btn btn-sm" onClick={() => navigate(`/render?renderId=${encodeURIComponent(selectedId)}`)}>检查排版<ArrowRight size={13} /></button></div>
-        <div className="publish-cover-field"><label className="publish-field">笔记图片<span className="publish-muted">默认按顺序发布下方卡片；也可上传 1–18 张图片替换，每张不超过 10 MB。</span><input type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp" disabled={busy} onChange={event => void uploadImages(event)} /></label>{images.length ? <><p>将按所选顺序发布 {images.length} 张图片</p><button type="button" className="btn btn-sm" disabled={busy} onClick={() => setImages([])}>恢复使用卡片</button></> : null}</div>
+        <div className="publish-cover-field"><label className="publish-field">笔记图片<span className="publish-muted">默认自动分页并按顺序发布下方卡片；也可上传 1–18 张图片替换，每张不超过 10 MB。</span><input type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp" disabled={busy} onChange={event => void uploadImages(event)} /></label>{images.length ? <><p>将按所选顺序发布 {images.length} 张图片</p><button type="button" className="btn btn-sm" disabled={busy} onClick={() => setImages([])}>恢复使用卡片</button></> : null}</div>
+        {!images.length ? <p className={layoutError ? 'publish-error' : 'publish-muted'} role={layoutError ? 'alert' : 'status'}>{layoutError || (layoutBusy ? '正在按实际文字高度自动分页…' : `已准备 ${article.cards.length} 张卡片${article.cards.length !== originalCardCount ? `（由 ${originalCardCount} 张自动分页）` : ''}，按预览顺序发布`)}</p> : null}
         <p className="publish-warning">遇到安全验证会停止。提交结果不确定时，请先到小红书核实，避免重复发布。</p>
         {uncertain ? <div className="publish-warning"><p>当前账号有 {uncertainItems.length} 个结果待核实的任务。核实后可在这里确认结果并继续操作。</p><button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(uncertainItems[0])}>核实并继续</button></div> : null}
         <div className="publish-submit-actions"><button type="button" className="btn btn-primary" disabled={!ready} onClick={() => setConfirmation('publish')}>{busy ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}正式发布到小红书</button></div>
