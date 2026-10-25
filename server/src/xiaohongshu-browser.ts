@@ -21,8 +21,16 @@ export interface XhsDriver {
 const HOME = 'https://www.xiaohongshu.com/explore'
 const CREATOR = 'https://creator.xiaohongshu.com/publish/publish?source=official'
 const QR = '.login-container .qrcode-img'
-const USER = '.main-container .user .link-wrapper .channel'
+const USER = '.main-container .user.side-bar-component .link-wrapper'
+const LOGIN = '#login-btn, .side-bar-component .login-btn'
 const expired = () => new ApiError(409, 'xiaohongshu_session_expired', '小红书登录已失效，请重新扫码')
+
+// Xiaohongshu rejects the default "HeadlessChrome" user agent with a security
+// restriction page (error 300012) instead of the login QR code.
+export function xhsUserAgent(version: string): string {
+  const major = version.split('.')[0] || '140'
+  return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
+}
 
 export function xhsPublishedResult(value: unknown): { remoteId: string; url: string } | null {
   if (!value || typeof value !== 'object') return null
@@ -43,17 +51,25 @@ export class PlaywrightXhsDriver implements XhsDriver {
         browser.on('disconnected', () => { this.browser = null }); return browser
       }).catch(() => { this.browser = null; throw new ApiError(503, 'xiaohongshu_browser_unavailable', '无法启动小红书浏览器，请检查配置') })
     }
-    const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1280, height: 1000 } })
+    const browser = await this.browser
+    const context = await browser.newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1280, height: 1000 }, userAgent: xhsUserAgent(browser.version()) })
     context.setDefaultTimeout(15_000)
     return context
   }
   private async security(page: Page): Promise<void> {
     const text = await page.locator('body').innerText()
-    if (/安全验证|访问异常|请完成验证|拖动滑块|操作频繁|账号异常/.test(text)) throw new ApiError(409, 'xiaohongshu_security_check', '小红书要求安全验证或限制操作，请在官方客户端处理后重新连接')
+    if (/安全验证|安全限制|访问异常|IP存在风险|请完成验证|拖动滑块|操作频繁|账号异常/.test(text)) throw new ApiError(409, 'xiaohongshu_security_check', '小红书要求安全验证或限制了当前网络，请更换网络环境或稍后重试')
+  }
+  private async loggedIn(page: Page): Promise<boolean> {
+    if (await page.locator(USER).isVisible().catch(() => false)) return true
+    return page.evaluate(() => {
+      const state = (globalThis as unknown as { __INITIAL_STATE__?: { user?: { loggedIn?: boolean } } }).__INITIAL_STATE__
+      return state?.user?.loggedIn === true
+    }).catch(() => false)
   }
   private async identity(page: Page): Promise<XhsIdentity> {
     await this.security(page)
-    if (!await page.locator(USER).isVisible().catch(() => false)) throw expired()
+    if (!await this.loggedIn(page)) throw expired()
     const identity = await page.evaluate(() => {
       const root = (globalThis as unknown as { __INITIAL_STATE__?: { user?: { userInfo?: unknown } } }).__INITIAL_STATE__?.user?.userInfo
       const info = root && typeof root === 'object' && 'value' in root ? root.value : root
@@ -71,18 +87,27 @@ export class PlaywrightXhsDriver implements XhsDriver {
     try {
       await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 })
       await this.security(page)
-      const login = page.getByText('登录', { exact: true }).first()
-      if (!await page.locator(QR).isVisible().catch(() => false) && await login.isVisible().catch(() => false)) await login.click()
-      await page.locator(QR).waitFor({ state: 'visible' })
+      const qr = page.locator(QR)
+      if (!await qr.isVisible().catch(() => false)) {
+        const login = page.locator(LOGIN).first()
+        if (await login.isVisible().catch(() => false)) await login.click()
+      }
+      if (!await qr.isVisible().catch(() => false)) {
+        const scan = page.getByText('扫码', { exact: true }).first()
+        if (await scan.isVisible().catch(() => false)) await scan.click()
+      }
+      await qr.waitFor({ state: 'visible' })
     } catch (error) { await close(); if (error instanceof ApiError) throw error; throw new ApiError(502, 'xiaohongshu_login_failed', '无法获取官方二维码，请检查网络或稍后重试') }
     return { close, poll: async () => {
       if (closed || Date.now() > deadline) return { status: 'expired', qrCode: null, message: '二维码已过期，请重新连接' }
       await this.security(page)
-      if (await page.locator(USER).isVisible().catch(() => false)) return { status: 'connected', qrCode: null, message: '已连接小红书', identity: await this.identity(page), state: await context.storageState() }
+      if (await this.loggedIn(page)) return { status: 'connected', qrCode: null, message: '已连接小红书', identity: await this.identity(page), state: await context.storageState() }
       const text = await page.locator('body').innerText()
       if (/二维码已失效|二维码已过期/.test(text)) return { status: 'expired', qrCode: null, message: '二维码已过期，请重新连接' }
       const qr = page.locator(QR)
-      const qrCode = await qr.isVisible().catch(() => false) ? `data:image/png;base64,${(await qr.screenshot({ type: 'png', timeout: 5000 })).toString('base64')}` : null
+      const qrCode = await qr.isVisible().catch(() => false)
+        ? await qr.screenshot({ type: 'png', timeout: 5000 }).then(buffer => `data:image/png;base64,${buffer.toString('base64')}`).catch(() => null)
+        : null
       const scanned = /扫码成功|已扫码|在手机上确认/.test(text)
       return { status: scanned ? 'scanned' : 'waiting', qrCode, message: scanned ? '请在小红书 App 确认登录' : '请用小红书 App 扫描官方二维码' }
     } }
@@ -92,9 +117,19 @@ export class PlaywrightXhsDriver implements XhsDriver {
     try {
       const page = await context.newPage()
       await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-      await page.locator(`${USER}, ${QR}`).first().waitFor({ state: 'visible' })
+      await this.security(page)
+      await page.waitForFunction(() => {
+        const root = globalThis as unknown as {
+          __INITIAL_STATE__?: { user?: { loggedIn?: boolean } }
+          document?: { querySelector: (selector: string) => unknown }
+        }
+        return root.__INITIAL_STATE__?.user?.loggedIn === true || !!root.document?.querySelector('.login-container .qrcode-img')
+      }, undefined, { timeout: 15_000 })
       const identity = await this.identity(page)
       return { state: await context.storageState(), identity }
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'xiaohongshu_check_failed', '小红书连接检查未完成，请检查网络后重试')
     } finally { await context.close().catch(() => {}) }
   }
   async checkPublication(state: PublisherStorageState, _remoteId: string, _title: string) {
