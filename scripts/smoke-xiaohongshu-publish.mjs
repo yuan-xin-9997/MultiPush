@@ -6,18 +6,25 @@ import express from 'express'
 import { chromium } from 'playwright-core'
 const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'artifacts', 'xiaohongshu-ui-check')
 mkdirSync(output, { recursive: true })
-const time = new Date().toISOString()
+const time = new Date().toISOString(), expiresAt = new Date(Date.now() + 5 * 60_000).toISOString()
+const qrCode = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7XkAAAAASUVORK5CYII='
 const article = { platform: 'xiaohongshu', title: '小红书发布测试', captionBody: '验证卡片、文案与发布记录。', html: '', videos: [], meta: { tags: ['测试'], summary: '测试', imageCount: 1, wordCount: 12 }, cards: [{ id: 'card-1', type: 'cover', index: 1, total: 1, title: '小红书发布测试', body: ['验证卡片发布'], images: [], footer: 'MultiPush' }], warnings: [] }
 const render = { id: 'render-1', contentId: 'content-1', contentTitle: article.title, platforms: ['xiaohongshu'], results: [article], options: {}, createdAt: time }
-let connected = false, uploads = 0, submitted = null, publications = []
+let loginPolls = 0, connected = false, uploads = 0, submitted = null, publications = []
 const app = express()
 app.use(express.json())
 app.get('/api/auth/me', (_req, res) => res.json({ user: { id: 'alice', username: 'alice', email: 'a@example.com', displayName: 'Alice', createdAt: time } }))
 app.get('/api/renders', (_req, res) => res.json({ renders: [render] }))
 app.get('/api/renders/render-1', (_req, res) => res.json({ render }))
 app.get('/api/xiaohongshu/account', (_req, res) => res.json({ account: { status: connected ? 'connected' : 'disconnected', name: connected ? '测试作者' : null, checkedAt: time } }))
-app.post('/api/xiaohongshu/login', (_req, res) => res.status(202).json({ login: { id: 'login-1', status: 'waiting', qrCode: null, message: '请扫码', expiresAt: time } }))
-app.get('/api/xiaohongshu/login/login-1', (_req, res) => { connected = true; res.json({ login: { id: 'login-1', status: 'connected', qrCode: null, message: '已连接', expiresAt: time } }) })
+app.post('/api/xiaohongshu/login', (_req, res) => res.status(202).json({ login: { id: 'login-1', status: 'waiting', qrCode: null, message: '请扫码', expiresAt } }))
+app.get('/api/xiaohongshu/login/login-1', (_req, res) => {
+  loginPolls++
+  if (loginPolls === 1) { res.json({ login: { id: 'login-1', status: 'waiting', qrCode, message: '请扫码', expiresAt } }); return }
+  if (loginPolls < 4) { res.json({ login: { id: 'login-1', status: loginPolls === 2 ? 'waiting' : 'scanned', qrCode: null, message: '二维码已关闭，正在确认登录状态', expiresAt } }); return }
+  connected = true
+  res.json({ login: { id: 'login-1', status: 'connected', qrCode: null, message: '已连接', expiresAt } })
+})
 app.get('/api/xiaohongshu/publications', (_req, res) => res.json({ publications }))
 app.post('/api/media', express.raw({ type: () => true, limit: '10mb' }), (req, res) => {
   assert.ok(req.body.length > 1000, 'PNG should actually be generated and uploaded')
@@ -51,6 +58,9 @@ try {
   await page.getByRole('heading', { name: '把内容发布到小红书' }).waitFor()
   assert.equal(await page.getByRole('button', { name: '正式发布到小红书', exact: true }).isDisabled(), true)
   await page.getByRole('button', { name: '扫码连接小红书', exact: true }).click()
+  await page.getByAltText('小红书官方登录二维码').waitFor()
+  await page.getByText('二维码已关闭，正在确认登录状态', { exact: true }).waitFor()
+  assert.equal(await page.getByText('正在获取小红书官方登录二维码…', { exact: true }).count(), 0)
   await page.getByRole('heading', { name: '测试作者', exact: true }).waitFor()
   await page.getByRole('button', { name: '正式发布到小红书', exact: true }).click()
   await page.getByRole('button', { name: '确认发布到小红书', exact: true }).click()

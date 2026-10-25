@@ -21,7 +21,6 @@ export interface XhsDriver {
 const HOME = 'https://www.xiaohongshu.com/explore'
 const CREATOR = 'https://creator.xiaohongshu.com/publish/publish?source=official'
 const QR = '.login-container .qrcode-img'
-const USER = '.main-container .user.side-bar-component .link-wrapper'
 const LOGIN = '#login-btn, .side-bar-component .login-btn'
 const expired = () => new ApiError(409, 'xiaohongshu_session_expired', '小红书登录已失效，请重新扫码')
 
@@ -60,29 +59,43 @@ export class PlaywrightXhsDriver implements XhsDriver {
     const text = await page.locator('body').innerText()
     if (/安全验证|安全限制|访问异常|IP存在风险|请完成验证|拖动滑块|操作频繁|账号异常/.test(text)) throw new ApiError(409, 'xiaohongshu_security_check', '小红书要求安全验证或限制了当前网络，请更换网络环境或稍后重试')
   }
-  private async loggedIn(page: Page): Promise<boolean> {
-    if (await page.locator(USER).isVisible().catch(() => false)) return true
+  private async currentIdentity(page: Page): Promise<XhsIdentity | null> {
     return page.evaluate(() => {
-      const state = (globalThis as unknown as { __INITIAL_STATE__?: { user?: { loggedIn?: boolean } } }).__INITIAL_STATE__
-      return state?.user?.loggedIn === true
-    }).catch(() => false)
+      const unwrap = (value: unknown): unknown => {
+        if (value && typeof value === 'object') {
+          if ('value' in value) return value.value
+          if ('_value' in value) return value._value
+        }
+        return value
+      }
+      const root = globalThis as unknown as {
+        __INITIAL_STATE__?: { user?: { loggedIn?: unknown; userInfo?: unknown } }
+        document?: { querySelector: (selector: string) => { getAttribute: (name: string) => string | null } | null }
+      }
+      const state = root.__INITIAL_STATE__?.user
+      const user = unwrap(state?.userInfo) as { guest?: boolean; nickname?: string; userId?: string; user_id?: string } | undefined
+      // Read only the current user's sidebar link, never profile links in the feed.
+      const ownLink = root.document?.querySelector('.main-container .user a[href*="/user/profile/"], .side-bar .user a[href*="/user/profile/"], .side-bar-component.user a[href*="/user/profile/"]')
+      const href = ownLink?.getAttribute('href') || ''
+      const profile = href.match(/^(?:https:\/\/www\.xiaohongshu\.com)?\/user\/profile\/([a-f0-9]{24})(?:[/?#]|$)/)
+      const id = user?.userId || user?.user_id
+      if (user?.guest !== true && typeof id === 'string' && /^[a-f0-9]{24}$/.test(id) && (unwrap(state?.loggedIn) === true || user?.guest === false || profile?.[1] === id)) {
+        return { accountId: id, name: user?.nickname || '小红书账号' }
+      }
+      if (profile) return { accountId: profile[1], name: user?.nickname || '小红书账号' }
+      return null
+    })
   }
   private async identity(page: Page): Promise<XhsIdentity> {
     await this.security(page)
-    if (!await this.loggedIn(page)) throw expired()
-    const identity = await page.evaluate(() => {
-      const root = (globalThis as unknown as { __INITIAL_STATE__?: { user?: { userInfo?: unknown } } }).__INITIAL_STATE__?.user?.userInfo
-      const info = root && typeof root === 'object' && 'value' in root ? root.value : root
-      const user = info as { guest?: boolean; nickname?: string; userId?: string; user_id?: string } | undefined
-      return user && !user.guest ? { accountId: user.userId || user.user_id || '', name: user.nickname || '小红书账号' } : null
-    })
-    if (!identity?.accountId) throw expired()
+    const identity = await this.currentIdentity(page)
+    if (!identity) throw expired()
     return identity
   }
   async beginLogin(): Promise<XhsLoginAttempt> {
     const context = await this.context(), page = await context.newPage()
     const deadline = Date.now() + 5 * 60_000
-    let closed = false
+    let closed = false, qrMissingSince: number | null = null, refreshed = false
     const close = async () => { closed = true; await context.close().catch(() => {}) }
     try {
       await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 })
@@ -101,13 +114,28 @@ export class PlaywrightXhsDriver implements XhsDriver {
     return { close, poll: async () => {
       if (closed || Date.now() > deadline) return { status: 'expired', qrCode: null, message: '二维码已过期，请重新连接' }
       await this.security(page)
-      if (await this.loggedIn(page)) return { status: 'connected', qrCode: null, message: '已连接小红书', identity: await this.identity(page), state: await context.storageState() }
+      const identity = await this.currentIdentity(page)
+      if (identity) return { status: 'connected', qrCode: null, message: '已连接小红书', identity, state: await context.storageState() }
       const text = await page.locator('body').innerText()
       if (/二维码已失效|二维码已过期/.test(text)) return { status: 'expired', qrCode: null, message: '二维码已过期，请重新连接' }
       const qr = page.locator(QR)
       const qrCode = await qr.isVisible().catch(() => false)
         ? await qr.screenshot({ type: 'png', timeout: 5000 }).then(buffer => `data:image/png;base64,${buffer.toString('base64')}`).catch(() => null)
         : null
+      if (!qrCode) {
+        qrMissingSince ??= Date.now()
+        // Login updates the SPA but can leave __INITIAL_STATE__ as a guest snapshot.
+        if (!refreshed && Date.now() - qrMissingSince >= 5000) {
+          refreshed = true
+          await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+          await this.security(page)
+          const identity = await this.currentIdentity(page)
+          if (identity) return { status: 'connected', qrCode: null, message: '已连接小红书', identity, state: await context.storageState() }
+        }
+        if (Date.now() - qrMissingSince >= 60_000) return { status: 'failed', qrCode: null, message: '扫码后仍未取得有效登录状态，请确认手机已同意登录，再重新获取二维码' }
+        return { status: 'scanned', qrCode: null, message: '二维码已关闭，正在确认登录状态；如手机仍有确认提示，请同意登录' }
+      }
+      qrMissingSince = null
       const scanned = /扫码成功|已扫码|在手机上确认/.test(text)
       return { status: scanned ? 'scanned' : 'waiting', qrCode, message: scanned ? '请在小红书 App 确认登录' : '请用小红书 App 扫描官方二维码' }
     } }
@@ -120,10 +148,11 @@ export class PlaywrightXhsDriver implements XhsDriver {
       await this.security(page)
       await page.waitForFunction(() => {
         const root = globalThis as unknown as {
-          __INITIAL_STATE__?: { user?: { loggedIn?: boolean } }
+          __INITIAL_STATE__?: { user?: { loggedIn?: boolean | { value?: boolean; _value?: boolean } } }
           document?: { querySelector: (selector: string) => unknown }
         }
-        return root.__INITIAL_STATE__?.user?.loggedIn === true || !!root.document?.querySelector('.login-container .qrcode-img')
+        const flag = root.__INITIAL_STATE__?.user?.loggedIn
+        return flag === true || typeof flag === 'object' && (flag?.value === true || flag?._value === true) || !!root.document?.querySelector('.login-container .qrcode-img, .user a[href*="/user/profile/"]')
       }, undefined, { timeout: 15_000 })
       const identity = await this.identity(page)
       return { state: await context.storageState(), identity }

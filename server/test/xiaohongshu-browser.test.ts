@@ -3,7 +3,7 @@ import { chromium, type Browser } from 'playwright-core'
 import { PlaywrightXhsDriver, xhsUserAgent } from '../src/xiaohongshu-browser'
 
 const drivers: PlaywrightXhsDriver[] = []
-afterEach(async () => { for (const driver of drivers.splice(0)) await driver.close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+afterEach(async () => { for (const driver of drivers.splice(0)) await driver.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals() })
 function fixture(options: { security?: boolean; disabled?: boolean; mismatch?: boolean; timeout?: boolean; response?: unknown } = {}) {
   let title = '', body = ''
   const click = vi.fn(async () => {})
@@ -53,6 +53,10 @@ describe('Xiaohongshu browser submission boundary', () => {
 describe('Xiaohongshu login preparation', () => {
   function loginFixture(options: { security?: boolean; qrVisible?: boolean; loginVisible?: boolean; scanVisible?: boolean } = {}) {
     const clicks: string[] = []
+    let profileHref: string | null = null
+    let snapshot: unknown = { user: { loggedIn: false, userInfo: { guest: true } } }
+    vi.stubGlobal('__INITIAL_STATE__', snapshot)
+    vi.stubGlobal('document', { querySelector: () => profileHref ? { getAttribute: () => profileHref } : null })
     let qrVisible = options.qrVisible ?? true
     const locator = (selector: string): any => ({
       first() { return this },
@@ -66,14 +70,70 @@ describe('Xiaohongshu login preparation', () => {
       goto: async () => {}, url: () => 'https://www.xiaohongshu.com/explore',
       locator,
       getByText: (): any => ({ first() { return this }, isVisible: async () => !!options.scanVisible, click: async () => { clicks.push('scan'); qrVisible = true } }),
-      evaluate: async () => false,
+      evaluate: async (callback: () => unknown) => callback(),
+      waitForFunction: async () => {},
     }
     const newContext = vi.fn(async () => ({ newPage: async () => page, setDefaultTimeout: () => {}, close: vi.fn(async () => {}), storageState: async () => ({ cookies: [], origins: [] }) }))
     vi.stubEnv('XHS_BROWSER_PATH', process.execPath)
     vi.spyOn(chromium, 'launch').mockResolvedValue({ newContext, on: () => {}, close: async () => {}, version: () => '140.0.6533.88' } as unknown as Browser)
     const driver = new PlaywrightXhsDriver(); drivers.push(driver)
-    return { driver, newContext, clicks }
+    return { driver, newContext, clicks,
+      setState: (state: unknown) => { snapshot = state; vi.stubGlobal('__INITIAL_STATE__', snapshot) },
+      setProfile: (href: string | null) => { profileHref = href },
+      hideQr: () => { qrVisible = false },
+      page,
+    }
   }
+  it.each(['value', '_value'])('detects login with a reactive %s flag and userInfo', async key => {
+    const { driver, setState, hideQr } = loginFixture()
+    const attempt = await driver.beginLogin()
+    expect((await attempt.poll()).status).toBe('waiting')
+    hideQr()
+    setState({ user: { loggedIn: { [key]: true }, userInfo: { [key]: { userId: '1234567890abcdef12345678', nickname: '扫码作者' } } } })
+    expect(await attempt.poll()).toMatchObject({ status: 'connected', identity: { accountId: '1234567890abcdef12345678', name: '扫码作者' }, state: { cookies: [], origins: [] } })
+    await attempt.close()
+  })
+  it('uses the current user profile link when the initial state remains a guest', async () => {
+    const { driver, setProfile, hideQr } = loginFixture()
+    const attempt = await driver.beginLogin()
+    hideQr()
+    setProfile('/user/profile/1234567890abcdef12345678')
+    expect(await attempt.poll()).toMatchObject({ status: 'connected', identity: { accountId: '1234567890abcdef12345678' } })
+    await attempt.close()
+  })
+  it('refreshes a stale guest snapshot once after QR disappearance without claiming success from disappearance alone', async () => {
+    let time = Date.now()
+    vi.spyOn(Date, 'now').mockImplementation(() => time)
+    const { driver, hideQr, setState, page } = loginFixture()
+    const attempt = await driver.beginLogin()
+    await attempt.poll()
+    hideQr()
+    expect(await attempt.poll()).toMatchObject({ status: 'scanned', qrCode: null })
+    page.goto = async () => { setState({ user: { loggedIn: true, userInfo: { userId: '1234567890abcdef12345678', nickname: '已登录' } } }) }
+    time += 5001
+    expect(await attempt.poll()).toMatchObject({ status: 'connected', identity: { name: '已登录' } })
+    await attempt.close()
+  })
+  it('ends with an actionable failure when QR disappears but no authenticated identity arrives', async () => {
+    let time = Date.now()
+    vi.spyOn(Date, 'now').mockImplementation(() => time)
+    const { driver, hideQr } = loginFixture()
+    const attempt = await driver.beginLogin()
+    hideQr()
+    expect((await attempt.poll()).status).toBe('scanned')
+    time += 60_001
+    expect(await attempt.poll()).toMatchObject({ status: 'failed', qrCode: null })
+    await attempt.close()
+  })
+  it('does not accept guest state or untrusted profile URLs as authentication', async () => {
+    const { driver, hideQr, setProfile, setState } = loginFixture()
+    const attempt = await driver.beginLogin()
+    hideQr()
+    setState({ user: { loggedIn: false, userInfo: { guest: true, userId: '1234567890abcdef12345678' } } })
+    setProfile('https://evil.example/user/profile/1234567890abcdef12345678')
+    expect((await attempt.poll()).status).toBe('scanned')
+    await attempt.close()
+  })
   it('uses a desktop Chrome identity so Xiaohongshu serves the official QR instead of a security page', async () => {
     const { driver, newContext } = loginFixture()
     const attempt = await driver.beginLogin()
