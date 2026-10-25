@@ -1,23 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chromium, type Browser } from 'playwright-core'
-import { PlaywrightXhsDriver, xhsUserAgent } from '../src/xiaohongshu-browser'
+import { PlaywrightXhsDriver, xhsUserAgent, clickXhsImageTab } from '../src/xiaohongshu-browser'
 
 const drivers: PlaywrightXhsDriver[] = []
 afterEach(async () => { for (const driver of drivers.splice(0)) await driver.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals() })
-function fixture(options: { security?: boolean; disabled?: boolean; mismatch?: boolean; timeout?: boolean; response?: unknown } = {}) {
+function fixture(options: { security?: boolean; disabled?: boolean; mismatch?: boolean; timeout?: boolean; response?: unknown; failStage?: 'upload' | 'body' } = {}) {
   let title = '', body = ''
   const click = vi.fn(async () => {})
   const locator = (selector: string): any => ({
     first() { return this }, nth() { return this }, filter() { return this },
+    count: async () => 1, isVisible: async () => true, boundingBox: async () => ({ x: 10, y: 10, width: 100, height: 40 }),
     waitFor: async () => {}, click: selector.includes('publish-btn') ? click : async () => {},
-    setInputFiles: vi.fn(async () => {}),
-    fill: async (value: string) => { if (selector.includes('d-input')) title = value; else body = value },
+    setInputFiles: vi.fn(async () => { if (options.failStage === 'upload') { const error = new Error('secret-cookie'); error.name = 'TimeoutError'; throw error } }),
+    fill: async (value: string) => { if (options.failStage === 'body' && selector.includes('tiptap')) throw new Error('secret-cookie'); if (selector.includes('d-input')) title = value; else body = value },
     inputValue: async () => title,
     innerText: async () => selector === 'body' ? options.security ? '请完成验证' : '小红书创作中心' : options.mismatch ? '不一致' : body,
     getAttribute: async () => options.disabled ? 'true' : null,
     isDisabled: async () => false,
   })
-  const page = { goto: async () => {}, url: () => 'https://creator.xiaohongshu.com/publish/publish', locator,
+  const page = { viewportSize: () => ({ width: 1280, height: 1000 }), goto: async () => {}, url: () => 'https://creator.xiaohongshu.com/publish/publish', locator,
     waitForResponse: async (predicate: (r: any) => boolean) => {
       const response = { url: () => 'https://edith.xiaohongshu.com/api/sns/web/v1/note', request: () => ({ method: () => 'POST' }), ok: () => true, json: async () => options.response ?? { code: 0, success: true, data: { note_id: '1234567890abcdef12345678' } } }
       expect(predicate(response)).toBe(true)
@@ -32,6 +33,13 @@ function fixture(options: { security?: boolean; disabled?: boolean; mismatch?: b
   return { publish, click, context }
 }
 describe('Xiaohongshu browser submission boundary', () => {
+  it.each([{ failStage: 'upload' as const, expected: '上传图片 1/1超时' }, { failStage: 'body' as const, expected: '填写正文失败' }])('reports the failed preparation step without leaking upstream errors: %s', async options => {
+    const { publish, click } = fixture(options)
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(publish()).rejects.toMatchObject({ code: 'xiaohongshu_prepare_failed', message: expect.stringContaining(options.expected) })
+    expect(click).not.toHaveBeenCalled()
+    expect(warning.mock.calls.flat().join(' ')).not.toContain('secret-cookie')
+  })
   it('confirms explicit platform success and always closes the context', async () => {
     const { publish, click, context } = fixture()
     expect(await publish()).toMatchObject({ status: 'published', remoteId: '1234567890abcdef12345678' })
@@ -157,5 +165,23 @@ describe('Xiaohongshu login preparation', () => {
   it('reports network restrictions instead of a generic QR failure', async () => {
     const { driver } = loginFixture({ security: true })
     await expect(driver.beginLogin()).rejects.toMatchObject({ code: 'xiaohongshu_security_check', status: 409 })
+  })
+})
+
+
+describe('Xiaohongshu image tab selection', () => {
+  it('skips offscreen layout copies and clicks the rendered tab without forcing clicks', async () => {
+    const outside = { boundingBox: async () => ({ x: -9999, y: -9999, width: 96, height: 40 }), isVisible: async () => true, click: vi.fn() }
+    const actual = { boundingBox: async () => ({ x: 385, y: 81, width: 96, height: 40 }), isVisible: async () => true, click: vi.fn(async () => {}) }
+    const tabs = { first: () => ({ waitFor: async () => {} }), filter() { return this }, count: async () => 2, nth: (i: number) => [outside, actual][i] }
+    const locator = vi.fn(() => tabs)
+    await clickXhsImageTab({ locator, viewportSize: () => ({ width: 1280, height: 1000 }) } as never)
+    expect(locator).toHaveBeenCalledWith('div.creator-tab:not([aria-hidden="true"])')
+    expect(outside.click).not.toHaveBeenCalled()
+    expect(actual.click).toHaveBeenCalledWith()
+  })
+  it('stops if no image tab is in the viewport', async () => {
+    const tabs = { first: () => ({ waitFor: async () => {} }), filter() { return this }, count: async () => 0 }
+    await expect(clickXhsImageTab({ locator: () => tabs, viewportSize: () => ({ width: 1280, height: 1000 }) } as never)).rejects.toMatchObject({ code: 'xiaohongshu_image_tab_missing' })
   })
 })

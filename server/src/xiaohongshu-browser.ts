@@ -40,6 +40,25 @@ export function xhsPublishedResult(value: unknown): { remoteId: string; url: str
   return { remoteId: id, url: `https://www.xiaohongshu.com/explore/${id}` }
 }
 
+export const XHS_IMAGE_INPUT = 'input[type="file"][accept*="image/"], input[type="file"][accept*=".jpg"], input[type="file"][accept*=".jpeg"], input[type="file"][accept*=".png"], input[type="file"][accept*=".webp"]'
+
+export async function clickXhsImageTab(page: Page): Promise<void> {
+  const tabs = page.locator('div.creator-tab:not([aria-hidden="true"])').filter({ hasText: '上传图文' })
+  await tabs.first().waitFor({ state: 'attached' })
+  const viewport = page.viewportSize()
+  if (!viewport) throw new ApiError(502, 'xiaohongshu_image_tab_missing', '无法确定创作中心窗口大小，尚未提交，请重新连接')
+  for (let index = 0; index < await tabs.count(); index++) {
+    const tab = tabs.nth(index), box = await tab.boundingBox()
+    // Layout measurement copies can have a size while remaining outside the viewport.
+    if (!box || box.width <= 0 || box.height <= 0 || !await tab.isVisible()) continue
+    const x = box.x + box.width / 2, y = box.y + box.height / 2
+    if (x < 0 || y < 0 || x >= viewport.width || y >= viewport.height) continue
+    await tab.click()
+    return
+  }
+  throw new ApiError(502, 'xiaohongshu_image_tab_missing', '未找到可操作的上传图文入口，尚未提交，请检查小红书创作中心页面')
+}
+
 export class PlaywrightXhsDriver implements XhsDriver {
   private browser: Promise<Browser> | null = null
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
@@ -167,29 +186,36 @@ export class PlaywrightXhsDriver implements XhsDriver {
   }
   async publish(state: PublisherStorageState, article: XhsArticle, progress: (value: Partial<Pick<XhsPublication, 'message'>>) => void) {
     const context = await this.context(state)
-    let submitted = false
+    let submitted = false, stage = '打开创作中心'
+    const step = (message: string) => { stage = message; progress({ message: `正在${message}` }) }
     try {
       const page = await context.newPage()
+      step('打开创作中心')
       await page.goto(CREATOR, { waitUntil: 'domcontentloaded', timeout: 30_000 })
       await this.security(page)
       if (new URL(page.url()).pathname.includes('login')) throw expired()
-      await page.locator('div.creator-tab').filter({ hasText: '上传图文' }).first().click()
-      progress({ message: '正在上传小红书卡片图片' })
+      step('切换到上传图文')
+      await clickXhsImageTab(page)
       for (const [index, image] of [...article.images.values()].entries()) {
         await this.security(page)
-        await page.locator('input[type="file"][accept*="image"], input.upload-input').first().setInputFiles({ name: image.name, mimeType: image.mimeType, buffer: image.buffer })
+        step(`上传图片 ${index + 1}/${article.images.size}`)
+        await page.locator(XHS_IMAGE_INPUT).first().setInputFiles({ name: image.name, mimeType: image.mimeType, buffer: image.buffer })
+        step(`等待图片处理 ${index + 1}/${article.images.size}`)
         await page.locator('.img-preview-area .pr').nth(index).waitFor({ state: 'visible', timeout: 60_000 })
       }
       const title = page.locator('div.d-input input').first(), body = page.locator('.tiptap[contenteditable="true"], [role="textbox"][contenteditable="true"]').first()
+      step('填写标题')
       await title.fill(article.title)
+      step('填写正文')
       await body.fill(article.body)
       if (await title.inputValue() !== article.title || (await body.innerText()).replace(/\r/g, '') !== article.body.replace(/\r/g, '')) throw new ApiError(409, 'xiaohongshu_content_mismatch', '小红书编辑器内容与预期不同，已停止发布')
       await this.security(page)
-      progress({ message: '图片与文案已填写，正在提交小红书审核' })
-      const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).hostname.endsWith('.xiaohongshu.com') && /\/api\/sns\/web\/v\d+\/note(?:\/publish)?$/.test(new URL(r.url()).pathname), { timeout: 20_000 }).catch(() => null)
+      step('检查发布按钮')
       const button = page.locator('xhs-publish-btn:not([is-publish="false"]):visible, .publish-page-publish-btn button.bg-red:visible').first()
       await button.waitFor({ state: 'visible' })
       if (await button.getAttribute('submit-disabled') === 'true' || await button.isDisabled()) throw new ApiError(409, 'xiaohongshu_publish_disabled', '小红书发布按钮不可用，请检查内容与账号权限')
+      step('提交小红书审核')
+      const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).hostname.endsWith('.xiaohongshu.com') && /\/api\/sns\/web\/v\d+\/note(?:\/publish)?$/.test(new URL(r.url()).pathname), { timeout: 20_000 }).catch(() => null)
       submitted = true
       await button.click()
       const upstream = await response
@@ -199,7 +225,9 @@ export class PlaywrightXhsDriver implements XhsDriver {
     } catch (error) {
       if (submitted) throw new ApiError(409, 'xiaohongshu_result_uncertain', '已尝试提交，结果待核实。请检查小红书创作中心后确认结果')
       if (error instanceof ApiError) throw error
-      throw new ApiError(502, 'xiaohongshu_prepare_failed', '小红书页面加载或填写失败，尚未提交，请检查网络和平台页面后重试')
+      const timedOut = error instanceof Error && error.name === 'TimeoutError'
+      console.warn(`[multipush:xiaohongshu] preparation_failed stage=${stage} reason=${timedOut ? 'timeout' : 'operation_failed'}`)
+      throw new ApiError(502, 'xiaohongshu_prepare_failed', `小红书${stage}${timedOut ? '超时' : '失败'}，尚未提交，请检查网络和创作中心页面后重试`)
     } finally { await context.close().catch(() => {}) }
   }
   async close(): Promise<void> { if (this.browser) await (await this.browser).close().catch(() => {}); this.browser = null }
