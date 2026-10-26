@@ -1,8 +1,7 @@
 import { DouyinService } from './douyin'
 import { PlaywrightDouyinDriver, type DouyinDriver } from './douyin-browser'
 import { createDouyinRouter } from './routes/douyin'
-import { XhsService } from './xiaohongshu'
-import { PlaywrightXhsDriver, type XhsDriver } from './xiaohongshu-browser'
+import type { XhsDriver } from './xiaohongshu-browser'
 import { createXhsRouter } from './routes/xiaohongshu'
 import express from 'express'
 import cors from 'cors'
@@ -78,14 +77,13 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
   const zhihu = new ZhihuService(database, config, zhihuDriver ?? new PlaywrightZhihuDriver())
   app.locals.zhihu = zhihu
-  const xhs = new XhsService(database, config, xhsDriver ?? new PlaywrightXhsDriver())
-  app.locals.xiaohongshu = xhs
+  database.clearXhsAccounts()
   const douyin = new DouyinService(database, config, douyinDriver ?? new PlaywrightDouyinDriver())
   app.locals.douyin = douyin
   app.disable('x-powered-by')
@@ -107,7 +105,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/renders', requireAuth, createRendersRouter(database, config))
   app.use('/api/wechat', requireAuth, createWechatRouter(wechat))
   app.use('/api/douyin', requireAuth, createDouyinRouter(douyin))
-  app.use('/api/xiaohongshu', requireAuth, createXhsRouter(xhs))
+  app.use('/api/xiaohongshu', requireAuth, createXhsRouter(database))
   app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))
   app.use('/api', createMetaRouter(config, requireAuth))
   app.use('/api', apiNotFound)

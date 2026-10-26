@@ -1125,6 +1125,8 @@ export class Database {
       [userId, values.encryptedSession, values.accountId, values.name, values.status, values.checkedAt])
   }
 
+  clearXhsAccounts(): void { this.run('DELETE FROM xiaohongshu_accounts') }
+
   deleteXhsAccount(userId: string): void { this.run('DELETE FROM xiaohongshu_accounts WHERE user_id = ?', [userId]) }
 
   private mapXhsPublication(row: Row): XhsPublication {
