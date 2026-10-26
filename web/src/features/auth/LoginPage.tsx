@@ -151,6 +151,7 @@ export default function LoginPage() {
         </button>
       </form>
 
+      <p className="auth-switch"><Link to="/forgot-password">忘记密码？</Link></p>
       <p className="auth-switch">
         还没有账号？<Link to={registerHref}>立即注册</Link>
       </p>

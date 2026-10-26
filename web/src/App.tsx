@@ -1,3 +1,4 @@
+import EmailAccountPage from '@/features/auth/EmailAccountPage'
 import type { ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
@@ -31,6 +32,8 @@ function Protected({ children }: { children: ReactNode }) {
 export default function App() {
   return (
     <Routes>
+      <Route path="/forgot-password" element={<EmailAccountPage mode="reset" />} />
+      <Route path="/bind-email" element={<Protected><EmailAccountPage mode="bind" /></Protected>} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route

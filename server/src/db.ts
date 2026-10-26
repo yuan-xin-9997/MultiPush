@@ -211,6 +211,10 @@ export class Database {
 
   private migrate(): void {
     this.database.exec(`
+      CREATE TABLE IF NOT EXISTS user_auth_versions (user_id TEXT PRIMARY KEY, version INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS email_codes (
+        scope TEXT PRIMARY KEY, digest TEXT NOT NULL, sent_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0
+      );
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         username TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -531,12 +535,39 @@ export class Database {
     return this.findUserById(userId)
   }
 
+  authVersion(userId: string): number {
+    return numberValue(this.get('SELECT version FROM user_auth_versions WHERE user_id = ?', [userId])?.version)
+  }
+
   updateUserPassword(userId: string, passwordHash: string): boolean {
-    return this.run('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', [
-      passwordHash,
-      nowIso(),
-      userId,
-    ]) > 0
+    return this.transaction(() => {
+      const changed = this.run('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', [passwordHash, nowIso(), userId]) > 0
+      if (changed) this.run(`INSERT INTO user_auth_versions (user_id, version) VALUES (?, 1)
+        ON CONFLICT(user_id) DO UPDATE SET version = version + 1`, [userId])
+      return changed
+    })
+  }
+
+  saveEmailCode(scope: string, digest: string, now: number): boolean {
+    this.run('DELETE FROM email_codes WHERE sent_at <= ?', [now - 600000])
+    return this.run(`INSERT INTO email_codes (scope, digest, sent_at, attempts) VALUES (?, ?, ?, 0)
+      ON CONFLICT(scope) DO UPDATE SET digest=excluded.digest, sent_at=excluded.sent_at, attempts=0
+      WHERE email_codes.sent_at <= ?`, [scope, digest, now, now - 60000]) > 0
+  }
+
+  consumeEmailCode(scope: string, digest: string): boolean {
+    this.run('UPDATE email_codes SET attempts = attempts + 1 WHERE scope = ?', [scope])
+    return this.run('DELETE FROM email_codes WHERE scope = ? AND digest = ? AND sent_at > ? AND attempts <= 5',
+      [scope, digest, Date.now() - 600000]) > 0
+  }
+
+  clearEmailCode(scope: string, digest: string): void {
+    this.run('DELETE FROM email_codes WHERE scope = ? AND digest = ?', [scope, digest])
+  }
+
+  bindUserEmail(userId: string, email: string): User | null {
+    this.run("UPDATE users SET email = ?, updated_at = ? WHERE id = ? AND (email IS NULL OR email = '')", [email, nowIso(), userId])
+    return this.findUserById(userId)
   }
 
   // ---------------------------------------------------------------- books

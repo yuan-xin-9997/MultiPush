@@ -118,6 +118,7 @@ export default function AppShell() {
                 </div>
               }
               items={[
+                ...(!user?.email ? [{ key: 'bind-email', label: '绑定邮箱', onSelect: () => navigate('/bind-email') }] : []),
                 {
                   key: 'logout',
                   label: '退出登录',

@@ -12,6 +12,7 @@ import {
   Smile,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import EmailCodeField from './EmailCodeField'
 import { ApiError } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { safeRedirect } from '@/lib/navigation'
@@ -56,6 +57,7 @@ export default function RegisterPage() {
     confirmPassword: '',
     displayName: '',
   })
+  const [code, setCode] = useState('')
   const [errors, setErrors] = useState<RegisterErrors>({})
   const [serverError, setServerError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -92,11 +94,13 @@ export default function RegisterPage() {
 
     setErrors(nextErrors)
     setServerError(null)
+    if (!/^\d{6}$/.test(code)) { setServerError('请输入六位邮箱验证码'); return }
     if (Object.keys(nextErrors).length > 0) return
 
     setSubmitting(true)
     try {
       await register({
+        code,
         username,
         email,
         password: form.password,
@@ -172,7 +176,7 @@ export default function RegisterPage() {
               autoComplete="email"
               placeholder="you@example.com"
               value={form.email}
-              onChange={(event) => updateField('email', event.target.value)}
+              onChange={(event) => { updateField('email', event.target.value); setCode('') }}
               aria-invalid={Boolean(errors.email)}
               aria-describedby={errors.email ? 'register-email-error' : undefined}
             />
@@ -285,6 +289,7 @@ export default function RegisterPage() {
           ) : null}
         </div>
 
+        <EmailCodeField email={form.email} purpose="register" code={code} onChange={setCode} />
         <button type="submit" className="btn btn-primary btn-block auth-submit" disabled={submitting}>
           {submitting ? <LoaderCircle size={17} className="spin" /> : null}
           {submitting ? '正在创建账号…' : '注册并开始创作'}

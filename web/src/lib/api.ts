@@ -148,6 +148,12 @@ export const api = {
   health: () => request<ApiHealth>('/api/health'),
 
   auth: {
+    sendEmailCode: (email: string, purpose: 'register' | 'bind' | 'reset') =>
+      request<{ ok: true }>('/api/auth/email-code', { method: 'POST', body: JSON.stringify({ email, purpose }) }),
+    bindEmail: (email: string, code: string) =>
+      request<{ user: User }>('/api/auth/bind-email', { method: 'POST', body: JSON.stringify({ email, code }) }),
+    resetPassword: (email: string, code: string, newPassword: string) =>
+      request<{ ok: true }>('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, code, newPassword }) }),
     register: (input: RegisterInput) =>
       request<AuthResponse>('/api/auth/register', { method: 'POST', body: JSON.stringify(input) }),
     login: (input: LoginInput) =>

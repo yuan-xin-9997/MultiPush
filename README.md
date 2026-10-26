@@ -120,3 +120,22 @@ Jenkins 任务：`MultiPush`，SCM `git@github.com:yuan-xin-9997/MultiPush.git`�
 - 导出报告会列出缺失卡片和素材；可重试失败项并重新下载，已成功生成的卡片会复用。浏览器验证使用独立数据库和无头 Chrome，产物在 `artifacts/`；可通过 `CHROME_BIN` 指定浏览器路径。
 - 设置 `QA_BASE_URL` 可验证已部署地址；脚本使用专用 QA 账号，并清理自己创建的文档和上传文件。账号清单保存在验证产物的 `qa-resources.json`，供管理员精确清理空 QA 账号。
 - 视频能力：编辑器支持上传并嵌入视频；公众号/知乎以视频播放器呈现，小红书以视频笔记文案 + 原视频下载呈现。
+
+## 邮箱验证与找回密码
+
+新账号必须填写邮箱并输入邮件中的六位验证码后才能完成注册。登录框同时接受用户名和邮箱。历史账号如果邮箱为空，可在登录后的左下角用户菜单选择“绑定邮箱”；已绑定邮箱不能通过该入口更换。登录页的“忘记密码”使用已绑定邮箱验证并设置新密码，重置后原有登录会话失效。
+
+服务端环境变量（在运行环境配置，勿提交真实凭据）：
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_FROM=MultiPush <noreply@example.com>
+SMTP_USER=noreply@example.com
+SMTP_PASSWORD=your-smtp-password
+```
+
+465 端口使用 `SMTP_SECURE=true`；其他端口要求 STARTTLS。未配置 SMTP_HOST 或 SMTP_FROM 时，发送验证码返回服务不可用，不会跳过验证。验证码 10 分钟有效、一次性使用，同一邮箱/用途 60 秒内不能重发，每个验证码最多尝试 5 次；单进程每个来源 IP 每小时最多请求 10 次。反向代理默认按代理 IP 计数；多实例部署时需在入口增加共享发送限流。
+
+`npm run smoke` 使用两个已验证的专用账号，设置 `QA_ACCOUNT_A`、`QA_PASSWORD_A`、`QA_ACCOUNT_B`、`QA_PASSWORD_B`。渲染浏览器验收默认在隔离数据库创建测试账号；验证远端时设置 `QA_ACCOUNT` 和 `QA_PASSWORD`，不绕过正式注册验证。

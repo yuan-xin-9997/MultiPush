@@ -5,11 +5,11 @@ import { getMediaDescriptor } from '../src/upload'
 describe('security input validation', () => {
   it('limits new passwords by UTF-8 bytes for registration and password changes', () => {
     for (const password of ['a'.repeat(72), '汉'.repeat(24)]) {
-      expect(registerSchema.safeParse({ username: 'audit', email: 'audit@example.com', password }).success).toBe(true)
+      expect(registerSchema.safeParse({ code: '123456', username: 'audit', email: 'audit@example.com', password }).success).toBe(true)
       expect(changePasswordSchema.safeParse({ currentPassword: 'old-password', newPassword: password }).success).toBe(true)
     }
     for (const password of ['a'.repeat(73), '汉'.repeat(25)]) {
-      expect(registerSchema.safeParse({ username: 'audit', email: 'audit@example.com', password }).success).toBe(false)
+      expect(registerSchema.safeParse({ code: '123456', username: 'audit', email: 'audit@example.com', password }).success).toBe(false)
       expect(changePasswordSchema.safeParse({ currentPassword: 'old-password', newPassword: password }).success).toBe(false)
     }
     // Existing long-password accounts must still be able to sign in and change passwords.

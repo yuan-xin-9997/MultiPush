@@ -101,6 +101,7 @@ export interface AuthResponse {
 }
 
 export interface RegisterInput {
+  code: string
   username: string
   email: string
   password: string

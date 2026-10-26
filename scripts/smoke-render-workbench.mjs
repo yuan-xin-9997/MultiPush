@@ -1,5 +1,8 @@
-// Defaults to an isolated local database; QA_BASE_URL tests a deployed instance with a throwaway account.
+// Defaults to an isolated local database; QA_BASE_URL tests a deployed instance using QA_ACCOUNT and QA_PASSWORD.
 // Build first: npm run build; then node scripts/smoke-render-workbench.mjs
+import { DatabaseSync } from 'node:sqlite'
+import { hash } from 'bcryptjs'
+import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { mkdirSync, existsSync, writeFileSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -43,9 +46,22 @@ try {
   if (!remoteBase) await until(() => log.includes(`[multipush] listening on ${base}`), 'Isolated QA server could not bind its port')
   await until(async () => (await fetch(`${base}/api/health`)).ok, 'QA server did not start')
   const name = `renderqa_${Date.now().toString(36)}`
-  const registration = await api('auth/register', { username: name, email: `${name}@example.com`, password: 'RenderQA!2026' })
+  let account = process.env.QA_ACCOUNT
+  let password = process.env.QA_PASSWORD
+  if (!remoteBase) {
+    account = name
+    password = 'RenderQA!2026'
+    const database = new DatabaseSync(path.join(directory, 'data', 'multipush.sqlite'))
+    try {
+      const now = new Date().toISOString()
+      database.prepare('INSERT INTO users (id, username, email, password_hash, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(randomUUID(), name, `${name}@example.com`, await hash(password, 12), name, now, now)
+    } finally { database.close() }
+  }
+  if (!account || !password) throw new Error('Set QA_ACCOUNT and QA_PASSWORD to an existing verified QA account for remote checks')
+  const registration = await api('auth/login', { account, password })
   token = registration.token
-  Object.assign(resources, { userId: registration.user.id, username: name, email: `${name}@example.com` })
+  Object.assign(resources, { userId: registration.user.id, username: registration.user.username, email: registration.user.email })
   const imageUrls = []
   for (let i = 0; i < 5; i++) {
     const form = new FormData()

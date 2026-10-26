@@ -6,13 +6,12 @@
  *   node scripts/smoke-api.mjs
  *   MULTIPUSH_BASE_URL=http://192.168.0.111:34080 node scripts/smoke-api.mjs
  *
- * Creates a throwaway QA account and content, renders all three platforms and
+ * Uses two existing verified QA accounts and creates content, renders all three platforms and
  * verifies user isolation. Intended for development / staging verification.
  */
 
 const base = (process.env.MULTIPUSH_BASE_URL || 'http://127.0.0.1:34080').replace(/\/$/, '')
 const stamp = Date.now().toString(36)
-const password = 'MultiPush!2026'
 
 let failures = 0
 function check(condition, label) {
@@ -44,15 +43,11 @@ async function request(path, { method = 'GET', token, body } = {}) {
 }
 
 async function register(label) {
-  const username = `qa_${stamp}_${label}`
-  const result = await request('/api/auth/register', {
-    method: 'POST',
-    body: {
-      username,
-      email: `${username}@example.com`,
-      password,
-      displayName: `QA ${label}`,
-    },
+  const account = process.env[`QA_ACCOUNT_${label.toUpperCase()}`]
+  const accountPassword = process.env[`QA_PASSWORD_${label.toUpperCase()}`]
+  if (!account || !accountPassword) throw new Error('Set QA_ACCOUNT_A, QA_PASSWORD_A, QA_ACCOUNT_B and QA_PASSWORD_B to two verified QA accounts')
+  const result = await request('/api/auth/login', {
+    method: 'POST', body: { account, password: accountPassword },
   })
   if (result.status !== 200 && result.status !== 201) {
     throw new Error(`register(${label}) failed: ${result.status} ${JSON.stringify(result.data)}`)
@@ -67,7 +62,7 @@ async function main() {
 
   const userA = await register('a')
   const userB = await register('b')
-  check(Boolean(userA.token && userB.token), 'two users can register')
+  check(Boolean(userA.token && userB.token), 'two QA users can log in')
 
   const book = await request('/api/books', {
     method: 'POST',

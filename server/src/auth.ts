@@ -22,12 +22,13 @@ export async function verifyPassword(password: string, passwordHash: string): Pr
 }
 
 export interface TokenPayload {
+  version?: number
   userId: string
   username?: string
 }
 
-export function signToken(user: Pick<User, 'id' | 'username'>, secret: string): string {
-  return jwt.sign({ username: user.username }, secret, {
+export function signToken(user: Pick<User, 'id' | 'username'>, secret: string, version = 0): string {
+  return jwt.sign({ username: user.username, version }, secret, {
     algorithm: 'HS256',
     subject: user.id,
     expiresIn: JWT_TTL,
@@ -39,6 +40,7 @@ export function verifyToken(token: string, secret: string): TokenPayload | null 
     const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] })
     if (typeof decoded === 'string' || !decoded.sub) return null
     return {
+      version: typeof decoded.version === 'number' ? decoded.version : 0,
       userId: String(decoded.sub),
       username: typeof decoded.username === 'string' ? decoded.username : undefined,
     }
@@ -66,7 +68,7 @@ export function createRequireAuth(database: Database, secret: string): RequestHa
       return
     }
     const user = database.findUserById(payload.userId)
-    if (!user) {
+    if (!user || payload.version !== database.authVersion(payload.userId)) {
       next(unauthorized('登录已过期，请重新登录'))
       return
     }

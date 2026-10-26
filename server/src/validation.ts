@@ -21,7 +21,13 @@ const passwordSchema = z.string().min(8, '密码至少 8 个字符').max(128, '�
 
 const displayNameSchema = z.string().trim().max(50, '昵称最多 50 个字符')
 
+const codeSchema = z.string().trim().regex(/^\d{6}$/, '请输入六位邮箱验证码')
+export const emailCodeSchema = z.object({ email: emailSchema, purpose: z.enum(['register', 'bind', 'reset']) })
+export const bindEmailSchema = z.object({ email: emailSchema, code: codeSchema })
+export const resetPasswordSchema = bindEmailSchema.extend({ newPassword: passwordSchema })
+
 export const registerSchema = z.object({
+  code: codeSchema,
   username: usernameSchema,
   email: emailSchema,
   password: passwordSchema,

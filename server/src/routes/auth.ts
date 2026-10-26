@@ -1,3 +1,4 @@
+import { EmailVerification } from '../email'
 import { Router } from 'express'
 import type { RequestHandler } from 'express'
 import type { AuthResponse, User } from '../../../shared/types'
@@ -6,6 +7,7 @@ import { hashPassword, signToken, verifyPassword, currentUser } from '../auth'
 import type { Database } from '../db'
 import { ApiError, asyncHandler, notFound, unauthorized } from '../errors'
 import {
+  emailCodeSchema, bindEmailSchema, resetPasswordSchema,
   changePasswordSchema,
   loginSchema,
   parseInput,
@@ -26,12 +28,52 @@ function uniqueConstraintMessage(error: unknown): ApiError | null {
   return new ApiError(409, 'conflict', '数据已存在')
 }
 
-function authResponse(user: User, secret: string): AuthResponse {
-  return { token: signToken(user, secret), user }
+function authResponse(user: User, secret: string, version: number): AuthResponse {
+  return { token: signToken(user, secret, version), user }
 }
 
 export function createAuthRouter(database: Database, config: AppConfig, requireAuth: RequestHandler): Router {
   const router = Router()
+  const verification = new EmailVerification(database, config.jwtSecret)
+  const sendLimits = new Map<string, { count: number; start: number }>()
+  router.post('/email-code', asyncHandler(async (req, res) => {
+    const input = parseInput(emailCodeSchema, req.body)
+    if (input.purpose === 'bind') {
+      await new Promise<void>((resolve, reject) => requireAuth(req, res, (error?: unknown) => error ? reject(error) : resolve()))
+      if (currentUser(req).email) throw new ApiError(409, 'email_bound', '当前账号已绑定邮箱')
+    }
+    const now = Date.now()
+    for (const [key, entry] of sendLimits) if (now - entry.start >= 3600000) sendLimits.delete(key)
+    const key = req.ip || 'unknown'
+    const limit = sendLimits.get(key) || { count: 0, start: now }
+    if (limit.count >= 10) throw new ApiError(429, 'mail_rate_limited', '发送过于频繁，请稍后重试')
+    limit.count++
+    sendLimits.set(key, limit)
+    if (input.purpose !== 'reset' && database.emailTaken(input.email)) throw new ApiError(409, 'email_taken', '该邮箱已被注册')
+    if (input.purpose !== 'reset' || database.emailTaken(input.email)) {
+      await verification.send(input.email, input.purpose, input.purpose === 'bind' ? currentUser(req).id : '')
+    }
+    res.json({ ok: true })
+  }))
+
+  router.post('/bind-email', requireAuth, asyncHandler((req, res) => {
+    const user = currentUser(req)
+    if (user.email) throw new ApiError(409, 'email_bound', '当前账号已绑定邮箱')
+    const input = parseInput(bindEmailSchema, req.body)
+    if (database.emailTaken(input.email)) throw new ApiError(409, 'email_taken', '该邮箱已被注册')
+    verification.verify(input.email, 'bind', input.code, user.id)
+    try { res.json({ user: database.bindUserEmail(user.id, input.email) }) }
+    catch (error) { throw uniqueConstraintMessage(error) || error }
+  }))
+
+  router.post('/reset-password', asyncHandler(async (req, res) => {
+    const input = parseInput(resetPasswordSchema, req.body)
+    verification.verify(input.email, 'reset', input.code)
+    const user = database.findUserByAccount(input.email)
+    if (!user || user.email.toLowerCase() !== input.email) throw new ApiError(400, 'invalid_code', '验证码错误或已失效')
+    database.updateUserPassword(user.id, await hashPassword(input.newPassword))
+    res.json({ ok: true })
+  }))
 
   router.post(
     '/register',
@@ -44,6 +86,7 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
         throw new ApiError(409, 'email_taken', '该邮箱已被注册')
       }
 
+      verification.verify(input.email, 'register', input.code)
       const passwordHash = await hashPassword(input.password)
       const displayName = input.displayName?.trim() || input.username
       let user: User
@@ -59,7 +102,7 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
         if (duplicate) throw duplicate
         throw error
       }
-      res.json(authResponse(user, config.jwtSecret))
+      res.json(authResponse(user, config.jwtSecret, database.authVersion(user.id)))
     }),
   )
 
@@ -71,12 +114,13 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
       if (!user) {
         throw new ApiError(401, 'invalid_credentials', '账号或密码错误')
       }
+      const version = database.authVersion(user.id)
       const valid = await verifyPassword(input.password, user.passwordHash)
-      if (!valid) {
+      if (!valid || version !== database.authVersion(user.id)) {
         throw new ApiError(401, 'invalid_credentials', '账号或密码错误')
       }
       const { passwordHash: _passwordHash, ...publicUser } = user
-      res.json(authResponse(publicUser, config.jwtSecret))
+      res.json(authResponse(publicUser, config.jwtSecret, version))
     }),
   )
 
