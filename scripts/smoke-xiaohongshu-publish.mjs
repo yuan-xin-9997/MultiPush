@@ -27,6 +27,8 @@ try {
   assert.equal(await page.getByRole('button', { name: /扫码|正式发布|刷新状态/ }).count(), 0)
   const exportButton = page.getByRole('button', { name: '去渲染工作台导出' })
   await exportButton.waitFor()
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'manual publishing page must fit mobile widths')
   assert.deepEqual(requests, ['GET /publications'])
   assert.deepEqual(errors, [])
   console.log('Xiaohongshu disabled UI passed: no login, account checks or publishing requests; manual export and local history retained')
