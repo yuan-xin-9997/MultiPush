@@ -311,7 +311,6 @@ function openSetupWindow(reason, errorMessage = '') {
     minWidth: 540,
     minHeight: 620,
     title: '连接 MultiPush',
-    parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
     show: false,
     backgroundColor: '#f7f8fa',
     autoHideMenuBar: true,
