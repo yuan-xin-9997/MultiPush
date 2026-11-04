@@ -1,0 +1,70 @@
+appId: top.yuan-xin.multipush
+productName: MultiPush
+copyright: Copyright © 2026 yuan.xin
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - main.cjs
+  - setup-preload.cjs
+  - setup.js
+  - setup.css
+  - setup.html
+  - loading.html
+  - build/icon.png
+  - package.json
+
+asar: true
+npmRebuild: false
+compression: normal
+electronLanguages:
+  - zh-CN
+  - en-US
+
+win:
+  icon: build/icon.png
+  target:
+    - nsis
+    - portable
+
+nsis:
+  artifactName: MultiPush-Setup-${version}-${arch}.${ext}
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: MultiPush
+  uninstallDisplayName: MultiPush ${version}
+  deleteAppDataOnUninstall: false
+  language: "2052"
+
+portable:
+  artifactName: MultiPush-Portable-${version}-${arch}.${ext}
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  artifactName: MultiPush-${version}-${arch}-mac.${ext}
+
+dmg:
+  artifactName: MultiPush-${version}-${arch}.${ext}
+  title: MultiPush ${version}
+  iconSize: 96
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications

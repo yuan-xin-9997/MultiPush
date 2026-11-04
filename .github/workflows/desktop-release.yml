@@ -1,0 +1,164 @@
+name: Desktop release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "已存在的发布标签，例如 v1.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            artifact: multipush-desktop-windows
+            package: npm run dist:win
+          - name: macOS Universal
+            os: macos-latest
+            artifact: multipush-desktop-macos
+            package: npm run dist:mac
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Cache Electron
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: ${{ runner.os }}-electron-45.2.2
+      - run: npm ci
+      - run: npm run check
+      - run: npm run smoke
+      - name: Package desktop client
+        run: ${{ matrix.package }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.dmg
+            desktop/release/*.zip
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: multipush-desktop-*
+          path: dist
+          merge-multiple: true
+
+      - name: Resolve and verify release tag
+        env:
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $TAG" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          export TAG VERSION
+          node -e "const p=require('./desktop/package.json'); if (p.version !== process.env.VERSION) { console.error('desktop/package.json version ' + p.version + ' does not match tag ' + process.env.TAG); process.exit(1) }"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Create release when missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; assets will be uploaded to it."
+            exit 0
+          fi
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          ## MultiPush 桌面客户端 ${TAG}
+
+          Windows 与 macOS 桌面客户端。默认连接 \`https://publish.yuan-xin.top\`，首次启动可填写其他 MultiPush 服务器地址，并在「连接」菜单中随时切换。
+
+          ### 下载
+
+          - Windows x64：\`MultiPush-Setup-${VERSION}-x64.exe\`（安装版）或 \`MultiPush-Portable-${VERSION}-x64.exe\`（便携版）
+          - macOS Universal（Intel / Apple Silicon）：\`MultiPush-${VERSION}-universal.dmg\` 或 \`MultiPush-${VERSION}-universal-mac.zip\`
+
+          ### 安装说明
+
+          - Windows 安装包暂未使用商业代码签名证书。SmartScreen 提示时选择「更多信息」→「仍要运行」。
+          - macOS 安装包未签名、未公证。打开 DMG 后将 MultiPush 拖入「应用程序」，首次启动请右键点击图标选择「打开」；也可执行：
+            \`xattr -dr com.apple.quarantine /Applications/MultiPush.app\`
+          - 桌面客户端复用现有 MultiPush 服务，不在本地保存内容或发布记录；发布自动化仍由服务器执行。
+
+          ### 校验
+
+          下载 \`SHA256SUMS.txt\` 后可核对安装包：
+
+          \`\`\`bash
+          sha256sum -c SHA256SUMS.txt
+          \`\`\`
+          EOF
+          gh release create "$TAG" \
+            --title "MultiPush 桌面客户端 $TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --verify-tag
+
+      - name: Upload installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          files=$(find dist -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \) | sort)
+          test -n "$files"
+          echo "$files" | while IFS= read -r file; do
+            test -n "$file" || continue
+            gh release upload "$TAG" "$file" --clobber
+          done
+
+      - name: Upload checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          cd dist
+          sha256sum *.exe *.dmg *.zip > SHA256SUMS.txt
+          gh release upload "$TAG" SHA256SUMS.txt --clobber
+          echo "Release assets:"
+          gh release view "$TAG" --json assets --jq '.assets[].name'

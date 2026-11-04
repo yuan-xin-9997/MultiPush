@@ -93,7 +93,18 @@
 
 遇到「结果待核实」时，先在微信后台检查草稿和发表记录，避免重复发表。断开连接会清除本系统保存的公众号会话；若要撤销全部设备的登录，请在微信安全设置中操作。其他平台继续使用下载后手动发布。
 
-## 5. 常见问题
+## 5. 桌面客户端（Windows / macOS）
+
+Windows 和 macOS 用户可以从 [GitHub Releases](https://github.com/yuan-xin-9997/MultiPush/releases/latest) 下载安装包：
+
+- Windows：`MultiPush-Setup-<version>-x64.exe`（安装版）或 `MultiPush-Portable-<version>-x64.exe`（便携版）。
+- macOS：`MultiPush-<version>-universal.dmg`，同时支持 Intel 和 Apple Silicon。
+
+首次启动填写 MultiPush 服务器地址，默认是 `https://publish.yuan-xin.top`；局域网可用 `http://192.168.0.111:34080`。点击「测试连接」确认服务可用后再登录。之后可通过菜单「连接 → 切换服务器…」修改地址。
+
+桌面客户端只封装现有服务，不保存业务数据；内容库、账号、登录状态和发布记录仍在服务器。下载的 ZIP/HTML/图片会保存到系统「下载」目录。安装包目前未签名：Windows SmartScreen 需选择「更多信息 → 仍要运行」，macOS 首次启动需右键应用图标选择「打开」。
+
+## 6. 常见问题
 
 - **图片在小红书卡片中导出失败**：外链图片可能受跨域限制，建议使用编辑器上传的图片（同源）。
 - **复制富文本粘贴后样式丢失**：请使用 Chrome/Edge，并直接粘贴到平台编辑器；部分平台会二次清洗样式。

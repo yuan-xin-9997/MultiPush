@@ -13,3 +13,4 @@ test-results/
 artifacts/
 .vite/
 *.tsbuildinfo
+desktop/release/

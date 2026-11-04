@@ -1,6 +1,6 @@
 {
   "name": "multipush",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "MultiPush - 多平台智能发布系统",
   "workspaces": [
@@ -16,7 +16,13 @@
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "test": "npm run test -w server",
     "test:publish-ui": "node scripts/smoke-douyin-publish.mjs && node scripts/smoke-wechat-publish.mjs && node scripts/smoke-zhihu-publish.mjs && node scripts/smoke-xiaohongshu-publish.mjs",
-    "smoke": "node scripts/smoke-api.mjs"
+    "smoke": "node scripts/smoke-api.mjs",
+    "desktop:install": "npm install --prefix desktop",
+    "desktop:dev": "npm --prefix desktop run dev",
+    "desktop:check": "npm --prefix desktop run check",
+    "desktop:smoke": "npm --prefix desktop run smoke",
+    "desktop:dist:win": "npm --prefix desktop run dist:win",
+    "desktop:dist:mac": "npm --prefix desktop run dist:mac"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

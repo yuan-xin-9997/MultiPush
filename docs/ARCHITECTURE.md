@@ -3,7 +3,7 @@
 ## 总览
 
 ```
-Browser (React SPA)
+Browser / Electron (React SPA)
   ├─ /api/*        JWT REST API
   ├─ /uploads/*    静态媒体（随机文件名，支持 Range）
   └─ 其他路由       web/dist + SPA fallback
@@ -76,6 +76,24 @@ export interface ContentEnhancer {
 - 导入导出：`web/src/lib/content-io.ts` 纯浏览器解析（marked / turndown / JSZip），不经过服务器。
 - 设计系统：`web/src/styles/globals.css` token + 通用组件类；各 feature 独立 CSS。
 - 小红书卡片导出：固定 540×720 CSS 容器，`pixelRatio: 2` 输出 1080×1440。
+
+## 桌面客户端
+
+`desktop/` 是独立的 Electron 包（不在 npm workspaces 中），只封装远程 Web 应用，不复制后端和数据库：
+
+```
+Electron 主进程
+  ├─ main.cjs             窗口、菜单、导航白名单、下载、权限、更新检查
+  ├─ setup.html/js        首次连接/切换服务器向导（本地 file:// 页面）
+  └─ setup-preload.cjs    唯一 IPC 暴露面，校验调用来源为 file://
+        │
+BrowserWindow → https://<server>/  （现有 React SPA + API）
+```
+
+- 业务数据、登录会话和发布自动化仍在服务器；客户端只保存服务器地址与窗口状态。
+- 主窗口 `nodeIntegration=false`、`contextIsolation=true`、`sandbox=true`，远程页面没有 Node/Electron 权限。
+- 跨源导航交给系统浏览器；权限仅开放剪贴板、通知和全屏。
+- 发布由 GitHub Actions 在 Windows / macOS 构建，详见 [桌面客户端说明](DESKTOP.md)。
 
 ## 部署
 

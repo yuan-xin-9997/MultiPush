@@ -21,6 +21,7 @@
 - **小红书发布**：自动登录和自动发布已停用，已清除保存会话；保留卡片与文案导出、历史记录，请在官方 App 或创作中心手动发布。详见 [说明](docs/XIAOHONGSHU_PUBLISHING.md)。
 - **知乎发布**：系统内展示知乎官方二维码，按用户加密保存登录状态；选择知乎排版和可选封面，保存草稿或发布专栏文章。图片自动转存、使用原生图注/列表/表格/代码结构，并回读核对内容，发现差异则保留草稿并停止发布。详见 [知乎发布说明](docs/ZHIHU_PUBLISHING.md)。
 - **抖音发布**：系统内展示官方登录二维码，按用户加密保存会话；选择 MP4 视频或 1–35 张图片发布。包含发布记录、重复提交保护、重启恢复与结果人工核实；遇到安全验证停止操作。详见 [抖音发布说明](docs/DOUYIN_PUBLISHING.md)。
+- **桌面客户端**：Electron 客户端支持 Windows 10+（x64）与 macOS（Intel / Apple Silicon 通用包），首次启动填写服务器地址，之后可从菜单切换；下载文件、外部链接、窗口状态和更新检查按桌面端处理。
 - **部署**：监听 `0.0.0.0:34080`，Jenkins 每 30 分钟轮询 GitHub，自动停服、构建、部署、启动与健康检查。
 
 ## 技术栈
@@ -31,7 +32,8 @@
 | 后端 | Node.js 22、Express 4、TypeScript、`node:sqlite`、JWT、bcryptjs、multer |
 | 渲染 | 服务端规则模板（cheerio / sanitize-html / turndown），无外部 AI 依赖 |
 | 下载 | html-to-image（小红书卡片）、JSZip |
-| 部署 | esbuild 单文件后端、Jenkins Pipeline、systemd |
+| 桌面端 | Electron 45、electron-builder、Playwright Electron 冒烟测试 |
+| 部署 | esbuild 单文件后端、Jenkins Pipeline、systemd、GitHub Actions 桌面构建 |
 
 ## 本地开发
 
@@ -45,6 +47,20 @@ npm run dev
 - 前端：http://127.0.0.1:5173
 - 后端：http://127.0.0.1:34080
 - 首次打开注册一个账号即可。
+
+### 桌面客户端
+
+Windows 和 macOS 安装包发布在 [GitHub Releases](https://github.com/yuan-xin-9997/MultiPush/releases/latest)。桌面客户端默认连接 `https://publish.yuan-xin.top`，首次启动可改为局域网地址；业务数据仍保存在服务器，客户端不另建数据库。
+
+```bash
+npm run desktop:install       # 安装 Electron / electron-builder
+npm run desktop:dev           # 本地启动桌面客户端
+npm run desktop:smoke         # 本地 fixture + Playwright 冒烟
+npm run desktop:dist:win      # Windows NSIS + 便携版
+npm run desktop:dist:mac      # macOS universal DMG + ZIP（需在 macOS 构建）
+```
+
+详见 [桌面客户端说明](docs/DESKTOP.md)。安装包目前未使用商业代码签名证书，Windows SmartScreen 与 macOS Gatekeeper 会要求手动确认。
 
 生产模式本地验证：
 
@@ -88,6 +104,8 @@ npm start
 shared/types.ts        前后端共享类型
 server/src/            API、数据库、鉴权、渲染器
 web/src/               前端应用
+desktop/               Electron 桌面客户端（Windows / macOS）
+.github/workflows/     桌面端检查与 Release 构建
 JenkinsConfig/         Jenkinsfile、部署脚本、systemd unit、健康检查
 docs/                  产品规格、协作契约、部署文档
 ```
@@ -100,6 +118,8 @@ npm run typecheck   # 前后端类型检查
 npm run test        # 后端单元测试
 npm run build       # 构建前端与后端单文件
 npm start           # 启动生产构建
+npm run desktop:smoke # 桌面客户端 Playwright 冒烟
+npm run desktop:dist:win # Windows 安装包与便携版
 node scripts/smoke-render-workbench.mjs # 构建后运行隔离的 Chrome 浏览器验证
 node scripts/smoke-wechat-publish.mjs  # 构建后运行公众号发布页模拟交互验证
 ```

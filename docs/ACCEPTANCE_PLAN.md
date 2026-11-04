@@ -70,3 +70,12 @@
 - [ ] 部署保留 `/opt/MultiPush/.data` 与 `.env`。
 - [ ] 服务异常可重启；`journalctl -u multipush` 日志可读。
 - [ ] 生产访问 http://192.168.0.111:34080 完成一次注册、编辑、渲染、下载全流程。
+
+## H. 桌面客户端（Windows / macOS）
+
+- [ ] `npm run desktop:check` 与 `npm run desktop:smoke` 在两个平台通过。
+- [ ] Windows 安装版/便携版可启动，首次显示连接向导，连接生产域名后能登录。
+- [ ] macOS universal DMG 可拖入「应用程序」，首次右键打开可启动并连接生产域名。
+- [ ] 切换服务器、重新连接、外部链接、下载通知和窗口状态恢复正常。
+- [ ] 推送 `v*` 标签后 GitHub Release 自动包含 Windows 与 macOS 安装包及 `SHA256SUMS.txt`。
+- [ ] 安装包未签名提示已在 README/DESKTOP.md 中说明。
