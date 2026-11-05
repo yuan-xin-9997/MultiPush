@@ -7,6 +7,7 @@ import { hashPassword, signToken, verifyPassword, currentUser } from '../auth'
 import type { Database } from '../db'
 import { ApiError, asyncHandler, notFound, unauthorized } from '../errors'
 import {
+  desktopRegisterSchema,
   emailCodeSchema, bindEmailSchema, resetPasswordSchema,
   changePasswordSchema,
   loginSchema,
@@ -37,6 +38,7 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
   const verification = new EmailVerification(database, config.jwtSecret)
   const sendLimits = new Map<string, { count: number; start: number }>()
   router.post('/email-code', asyncHandler(async (req, res) => {
+    if (config.desktopMode) throw new ApiError(400, 'desktop_local_account', '本地版无需邮箱验证码')
     const input = parseInput(emailCodeSchema, req.body)
     if (input.purpose === 'bind') {
       await new Promise<void>((resolve, reject) => requireAuth(req, res, (error?: unknown) => error ? reject(error) : resolve()))
@@ -57,6 +59,7 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
   }))
 
   router.post('/bind-email', requireAuth, asyncHandler((req, res) => {
+    if (config.desktopMode) throw new ApiError(400, 'desktop_local_account', '本地版注册时已填写邮箱，无需绑定')
     const user = currentUser(req)
     if (user.email) throw new ApiError(409, 'email_bound', '当前账号已绑定邮箱')
     const input = parseInput(bindEmailSchema, req.body)
@@ -67,6 +70,7 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
   }))
 
   router.post('/reset-password', asyncHandler(async (req, res) => {
+    if (config.desktopMode) throw new ApiError(400, 'desktop_local_account', '本地版不支持邮箱找回密码，请登录后修改密码')
     const input = parseInput(resetPasswordSchema, req.body)
     verification.verify(input.email, 'reset', input.code)
     const user = database.findUserByAccount(input.email)
@@ -78,7 +82,7 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
   router.post(
     '/register',
     asyncHandler(async (req, res) => {
-      const input = parseInput(registerSchema, req.body)
+      const input = parseInput(config.desktopMode ? desktopRegisterSchema : registerSchema, req.body)
       if (database.usernameTaken(input.username)) {
         throw new ApiError(409, 'username_taken', '该用户名已被使用')
       }
@@ -86,7 +90,7 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
         throw new ApiError(409, 'email_taken', '该邮箱已被注册')
       }
 
-      verification.verify(input.email, 'register', input.code)
+      if (!config.desktopMode) verification.verify(input.email, 'register', input.code ?? '')
       const passwordHash = await hashPassword(input.password)
       const displayName = input.displayName?.trim() || input.username
       let user: User

@@ -8,15 +8,18 @@ directories:
 
 files:
   - main.cjs
-  - setup-preload.cjs
-  - setup.js
-  - setup.css
-  - setup.html
   - loading.html
   - build/icon.png
+  - server/index.cjs
   - package.json
 
+extraResources:
+  - from: web-dist
+    to: web
+
 asar: true
+asarUnpack:
+  - node_modules/playwright-core/**
 npmRebuild: false
 compression: normal
 electronLanguages:

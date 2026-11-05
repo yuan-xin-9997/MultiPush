@@ -77,22 +77,26 @@ export interface ContentEnhancer {
 - 设计系统：`web/src/styles/globals.css` token + 通用组件类；各 feature 独立 CSS。
 - 小红书卡片导出：固定 540×720 CSS 容器，`pixelRatio: 2` 输出 1080×1440。
 
-## 桌面客户端
+## 本地桌面版
 
-`desktop/` 是独立的 Electron 包（不在 npm workspaces 中），只封装远程 Web 应用，不复制后端和数据库：
+`desktop/` 是独立的 Electron 包（不在 npm workspaces 中）。它把现有前端、Express 后端和 SQLite 一起装进安装包，完全在本机运行：
 
 ```
 Electron 主进程
-  ├─ main.cjs             窗口、菜单、导航白名单、下载、权限、更新检查
-  ├─ setup.html/js        首次连接/切换服务器向导（本地 file:// 页面）
-  └─ setup-preload.cjs    唯一 IPC 暴露面，校验调用来源为 file://
+  ├─ main.cjs             本地服务生命周期、窗口、菜单、下载、权限、更新检查
+  ├─ server/index.cjs     esbuild 打包的 startMultiPushServer（依赖 playwright-core）
+  └─ web-dist/            构建后的 React SPA（extraResources）
         │
-BrowserWindow → https://<server>/  （现有 React SPA + API）
+BrowserWindow → http://127.0.0.1:<port>
+        │
+Express + node:sqlite → <userData>/data/multipush.sqlite + uploads/
 ```
 
-- 业务数据、登录会话和发布自动化仍在服务器；客户端只保存服务器地址与窗口状态。
-- 主窗口 `nodeIntegration=false`、`contextIsolation=true`、`sandbox=true`，远程页面没有 Node/Electron 权限。
-- 跨源导航交给系统浏览器；权限仅开放剪贴板、通知和全屏。
+- 后端由 `server/src/server.ts` 的 `startMultiPushServer()` 启动；`server/src/index.ts` 仍是 CLI/Jenkins 入口，两者复用同一套路由、渲染和发布逻辑。
+- 桌面模式 `desktopMode=true`：只监听 `127.0.0.1`，校验 Host / Origin / `Sec-Fetch-Site`；注册不需要邮箱验证码，避免依赖 SMTP。
+- 主窗口 `nodeIntegration=false`、`contextIsolation=true`、`sandbox=true`；本地页面仍是普通 Web 安全模型。
+- 素材、账号、会话和发布记录全部保存在 `userData/data`，升级/卸载不自动删除。
+- 自动发布复用本机 Chrome / Edge；没有浏览器时只影响自动发布，不影响编辑、渲染和导出。
 - 发布由 GitHub Actions 在 Windows / macOS 构建，详见 [桌面客户端说明](DESKTOP.md)。
 
 ## 部署

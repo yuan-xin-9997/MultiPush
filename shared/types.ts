@@ -473,6 +473,7 @@ export interface ApiHealth {
   status: 'ok'
   service: string
   version: string
+  desktopMode?: boolean
   uptime: number
   time: string
 }

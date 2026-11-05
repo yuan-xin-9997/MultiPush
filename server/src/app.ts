@@ -37,6 +37,36 @@ function apiNotFound(_req: express.Request, res: express.Response): void {
   res.status(404).json({ error: 'not_found', message: '接口不存在' })
 }
 
+/**
+ * The desktop build listens on loopback only. Reject unexpected Host/Origin
+ * combinations so a browser page on another origin cannot drive the local
+ * service through DNS rebinding.
+ */
+function desktopLoopbackGuard(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const host = req.headers.host
+  if (!host || !/^(127\.0\.0\.1|localhost)(:\d{1,5})?$/i.test(host)) {
+    res.status(403).json({ error: 'invalid_host', message: '本地服务只接受 127.0.0.1 或 localhost 访问' })
+    return
+  }
+  if (req.headers['sec-fetch-site'] === 'cross-site') {
+    res.status(403).json({ error: 'cross_site_request', message: '不允许跨站访问本地服务' })
+    return
+  }
+  const origin = req.headers.origin
+  if (origin) {
+    try {
+      if (new URL(origin).host !== host) {
+        res.status(403).json({ error: 'invalid_origin', message: '不允许的请求来源' })
+        return
+      }
+    } catch {
+      res.status(403).json({ error: 'invalid_origin', message: '不允许的请求来源' })
+      return
+    }
+  }
+  next()
+}
+
 function mountWebApp(app: express.Express, webDist: string): void {
   if (!existsSync(path.join(webDist, 'index.html'))) {
     console.warn(`[multipush] web dist not found at ${webDist}; API-only mode`)
@@ -88,6 +118,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.douyin = douyin
   app.disable('x-powered-by')
   app.use(securityHeaders)
+  if (config.desktopMode) app.use(desktopLoopbackGuard)
 
   if (!config.isProduction) {
     app.use(cors({ origin: true }))

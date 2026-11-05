@@ -34,6 +34,11 @@ export const registerSchema = z.object({
   displayName: displayNameSchema.optional(),
 })
 
+/** Local desktop accounts are not backed by SMTP, so no verification code is required. */
+export const desktopRegisterSchema = registerSchema.extend({
+  code: z.string().max(16).optional(),
+})
+
 export const loginSchema = z.object({
   account: z.string().trim().min(1, '请输入用户名或邮箱').max(254, '账号过长'),
   password: z.string().min(1, '请输入密码').max(128, '密码过长'),

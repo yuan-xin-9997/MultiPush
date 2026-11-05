@@ -12,6 +12,7 @@ import {
   Smile,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useServerInfo } from '@/contexts/ServerContext'
 import EmailCodeField from './EmailCodeField'
 import { ApiError } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
@@ -45,6 +46,7 @@ function fieldErrorFromApi(error: unknown): RegisterErrors {
 
 export default function RegisterPage() {
   const { register } = useAuth()
+  const { desktopMode } = useServerInfo()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const redirect = searchParams.get('redirect')
@@ -94,13 +96,13 @@ export default function RegisterPage() {
 
     setErrors(nextErrors)
     setServerError(null)
-    if (!/^\d{6}$/.test(code)) { setServerError('请输入六位邮箱验证码'); return }
+    if (!desktopMode && !/^\d{6}$/.test(code)) { setServerError('请输入六位邮箱验证码'); return }
     if (Object.keys(nextErrors).length > 0) return
 
     setSubmitting(true)
     try {
       await register({
-        code,
+        code: desktopMode ? '' : code,
         username,
         email,
         password: form.password,
@@ -164,7 +166,7 @@ export default function RegisterPage() {
 
         <div className="field">
           <label className="label" htmlFor="register-email">
-            邮箱
+            邮箱 {desktopMode ? <span className="optional">本地账号标识，不发送邮件</span> : null}
           </label>
           <div className="auth-input-wrap">
             <Mail size={16} />
@@ -289,7 +291,13 @@ export default function RegisterPage() {
           ) : null}
         </div>
 
-        <EmailCodeField email={form.email} purpose="register" code={code} onChange={setCode} />
+        {desktopMode ? (
+          <p className="hint">
+            本地版无需邮箱验证码，账号数据只保存在这台电脑。请记住邮箱和密码，登录时可使用用户名或邮箱。
+          </p>
+        ) : (
+          <EmailCodeField email={form.email} purpose="register" code={code} onChange={setCode} />
+        )}
         <button type="submit" className="btn btn-primary btn-block auth-submit" disabled={submitting}>
           {submitting ? <LoaderCircle size={17} className="spin" /> : null}
           {submitting ? '正在创建账号…' : '注册并开始创作'}

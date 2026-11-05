@@ -4,8 +4,8 @@ const {
   app,
   BrowserWindow,
   Menu,
+  clipboard,
   dialog,
-  ipcMain,
   net,
   Notification,
   screen,
@@ -15,11 +15,12 @@ const {
 const fs = require('node:fs')
 const path = require('node:path')
 
-const DEFAULT_SERVER = 'https://publish.yuan-xin.top'
 const APP_ID = 'top.yuan-xin.multipush'
 const GITHUB_REPO = 'yuan-xin-9997/MultiPush'
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`
 const SETTINGS_FILE = 'desktop-settings.json'
+const PREFERRED_PORT = 34180
+const FALLBACK_PORTS = [34181, 34182, 34183]
 const isMac = process.platform === 'darwin'
 
 app.setName('MultiPush')
@@ -29,24 +30,23 @@ if (process.env.MULTIPUSH_USER_DATA) {
 }
 
 let mainWindow = null
-let setupWindow = null
-let settings = null
-let connectionUrl = null
-let connectionReady = false
-let failureShownFor = null
+let service = null
+let starting = false
 let quitting = false
+let appUrl = null
+let settings = null
 let saveBoundsTimer = null
+let failureDialogOpen = false
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    const target = setupWindow || mainWindow
-    if (!target || target.isDestroyed()) return
-    if (target.isMinimized()) target.restore()
-    target.show()
-    target.focus()
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
   })
 
   app.whenReady().then(start).catch(handleFatalError)
@@ -57,45 +57,65 @@ if (!hasSingleInstanceLock) {
       return
     }
     createMainWindow()
-    if (settings.serverUrl) void loadApp(settings.serverUrl)
+    if (appUrl) {
+      void mainWindow.loadURL(appUrl).catch((error) => showLocalFailure(error))
+    } else {
+      void startLocalService().catch((error) => showLocalFailure(error))
+    }
   })
 
   app.on('window-all-closed', () => {
     if (!isMac) app.quit()
   })
 
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
+    saveWindowState()
+    if (quitting || !service) {
+      quitting = true
+      return
+    }
+    event.preventDefault()
     quitting = true
-    saveWindowBounds()
+    log('正在关闭本地服务…')
+    const forceTimer = setTimeout(() => {
+      log('本地服务关闭超时，强制退出')
+      app.exit(0)
+    }, 12_000)
+    forceTimer.unref()
+    service.close()
+      .catch((error) => log(`关闭本地服务失败：${error instanceof Error ? error.message : error}`))
+      .finally(() => {
+        clearTimeout(forceTimer)
+        service = null
+        app.quit()
+      })
   })
 }
 
 function handleFatalError(error) {
-  const message = error instanceof Error ? error.message : String(error)
-  dialog.showErrorBox('MultiPush 启动失败', message)
+  const message = error instanceof Error ? error.stack || error.message : String(error)
+  log(`启动失败：${message}`)
+  dialog.showErrorBox('MultiPush 启动失败', `${message}\n\n数据目录：${dataDirectory()}\n日志：${logFile()}`)
   app.quit()
 }
 
 async function start() {
   settings = readSettings()
+  cleanupLog()
   app.setAboutPanelOptions({
     applicationName: 'MultiPush',
     applicationVersion: app.getVersion(),
     version: app.getVersion(),
     copyright: 'Copyright © 2026 yuan.xin',
-    credits: '多平台智能发布系统桌面客户端',
+    credits: '多平台智能发布系统 · 本地桌面版',
   })
-  registerIpc()
   configureSession()
   createMenu()
   createMainWindow()
-
-  const forceSetup = process.argv.includes('--setup')
-  const smoke = process.env.MULTIPUSH_SMOKE === '1'
-  if (!smoke && !forceSetup && settings.configured) {
-    void loadApp(settings.serverUrl)
-  } else {
-    openSetupWindow('first-run')
+  try {
+    await startLocalService()
+  } catch (error) {
+    showLocalFailure(error)
   }
 }
 
@@ -103,29 +123,14 @@ function settingsFile() {
   return path.join(app.getPath('userData'), SETTINGS_FILE)
 }
 
-function fallbackServer() {
-  const fromEnv = process.env.MULTIPUSH_SERVER
-  if (fromEnv) {
-    try {
-      return normalizeServer(fromEnv)
-    } catch {
-      // Ignore an invalid development override and use the public service.
-    }
-  }
-  return DEFAULT_SERVER
-}
-
 function readSettings() {
-  const fallback = { serverUrl: fallbackServer(), window: null, configured: false }
+  const fallback = { window: null, port: null }
   try {
     const parsed = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'))
-    const serverUrl = typeof parsed.serverUrl === 'string'
-      ? normalizeServer(parsed.serverUrl)
-      : fallback.serverUrl
+    const port = Number.parseInt(String(parsed.port ?? ''), 10)
     return {
-      serverUrl,
       window: sanitizeBounds(parsed.window),
-      configured: true,
+      port: Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : null,
     }
   } catch {
     return fallback
@@ -137,38 +142,40 @@ function writeSettings() {
   try {
     const file = settingsFile()
     fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(
-      file,
-      `${JSON.stringify({
-        serverUrl: settings.serverUrl,
-        window: settings.window,
-      }, null, 2)}\n`,
-      { encoding: 'utf8', mode: 0o600 },
-    )
+    fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
   } catch (error) {
-    console.error('[multipush] 无法保存桌面设置:', error)
+    log(`无法保存桌面设置：${error instanceof Error ? error.message : error}`)
   }
 }
 
-function normalizeServer(value) {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error('请输入服务器地址')
-  }
-  let url
+function dataDirectory() {
+  return path.join(app.getPath('userData'), 'data')
+}
+
+function logFile() {
+  return path.join(app.getPath('userData'), 'logs', 'multipush.log')
+}
+
+function log(message) {
+  const line = `[${new Date().toISOString()}] ${message}`
   try {
-    url = new URL(value.trim())
+    fs.mkdirSync(path.dirname(logFile()), { recursive: true })
+    fs.appendFileSync(logFile(), `${line}\n`, 'utf8')
   } catch {
-    throw new Error('地址格式不正确，例如 https://publish.yuan-xin.top')
+    // Logging must never prevent the app from starting.
   }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('仅支持 HTTP 或 HTTPS 地址')
+  if (!app.isPackaged) console.log(`[multipush] ${message}`)
+}
+
+function cleanupLog() {
+  try {
+    const file = logFile()
+    if (fs.statSync(file).size > 5 * 1024 * 1024) {
+      fs.renameSync(file, `${file}.old`)
+    }
+  } catch {
+    // The log does not exist yet.
   }
-  if (url.username || url.password) {
-    throw new Error('地址中不能包含用户名或密码')
-  }
-  let pathname = url.pathname.replace(/\/+$/, '')
-  pathname = pathname.replace(/\/api\/health$/i, '')
-  return `${url.origin}${pathname}`
 }
 
 function sanitizeBounds(value) {
@@ -222,7 +229,7 @@ function createMainWindow() {
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAppUrl(url)) {
-      mainWindow.loadURL(url).catch(() => {})
+      void mainWindow.loadURL(url).catch((error) => showLocalFailure(error))
     } else {
       openExternal(url)
     }
@@ -230,7 +237,7 @@ function createMainWindow() {
   })
 
   const guardNavigation = (event, url) => {
-    if (isAppUrl(url) || isHttpsUpgrade(url)) return
+    if (isAppUrl(url)) return
     event.preventDefault()
     openExternal(url)
   }
@@ -238,39 +245,33 @@ function createMainWindow() {
   mainWindow.webContents.on('will-redirect', guardNavigation)
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
 
-  mainWindow.webContents.on('did-navigate', (_event, loadedUrl) => {
-    upgradeConnectionUrl(loadedUrl)
-  })
-
   mainWindow.webContents.on('did-finish-load', () => {
-    const loaded = mainWindow.webContents.getURL()
-    if (!loaded.startsWith('http://') && !loaded.startsWith('https://')) return
-    upgradeConnectionUrl(loaded)
-    connectionReady = true
-    failureShownFor = null
-    if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close()
     if (!mainWindow.isVisible()) mainWindow.show()
   })
 
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return
     if (!validatedURL.startsWith('http://') && !validatedURL.startsWith('https://')) return
-    connectionReady = false
-    showConnectionFailure(`无法连接到 ${connectionUrl || validatedURL}（${errorDescription || `错误 ${errorCode}`}）`)
+    showLocalFailure(new Error(`${errorDescription || `错误 ${errorCode}`}（${validatedURL}）`))
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    log(`渲染进程退出：${details.reason}`)
+    showLocalFailure(new Error(`界面进程异常退出：${details.reason}`))
   })
 
   mainWindow.on('resize', scheduleSaveBounds)
   mainWindow.on('move', scheduleSaveBounds)
   mainWindow.on('maximize', scheduleSaveBounds)
   mainWindow.on('unmaximize', scheduleSaveBounds)
-  mainWindow.on('close', saveWindowBounds)
+  mainWindow.on('close', saveWindowState)
   mainWindow.on('closed', () => {
     mainWindow = null
   })
 
-  mainWindow.loadFile(path.join(__dirname, 'loading.html')).catch(() => {})
+  void mainWindow.loadFile(path.join(__dirname, 'loading.html')).catch(() => {})
   mainWindow.once('ready-to-show', () => {
-    if (!setupWindow && !mainWindow?.isVisible()) mainWindow.show()
+    if (mainWindow && !mainWindow.isVisible()) mainWindow.show()
   })
   if (settings?.window?.maximized) mainWindow.maximize()
   return mainWindow
@@ -278,10 +279,10 @@ function createMainWindow() {
 
 function scheduleSaveBounds() {
   clearTimeout(saveBoundsTimer)
-  saveBoundsTimer = setTimeout(saveWindowBounds, 500)
+  saveBoundsTimer = setTimeout(saveWindowState, 500)
 }
 
-function saveWindowBounds() {
+function saveWindowState() {
   clearTimeout(saveBoundsTimer)
   if (!settings || !mainWindow || mainWindow.isDestroyed()) return
   const bounds = mainWindow.getNormalBounds()
@@ -295,138 +296,113 @@ function saveWindowBounds() {
   writeSettings()
 }
 
-function openSetupWindow(reason, errorMessage = '') {
-  settings = settings || readSettings()
-  if (setupWindow && !setupWindow.isDestroyed()) {
-    setupWindow.show()
-    setupWindow.focus()
-    void setupWindow.loadFile(path.join(__dirname, 'setup.html'), {
-      query: setupQuery(reason, errorMessage),
-    })
-    return setupWindow
-  }
-  setupWindow = new BrowserWindow({
-    width: 640,
-    height: 720,
-    minWidth: 540,
-    minHeight: 620,
-    title: '连接 MultiPush',
-    show: false,
-    backgroundColor: '#f7f8fa',
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'setup-preload.cjs'),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      spellcheck: false,
-    },
-  })
-  setupWindow.setMenuBarVisibility(false)
-  setupWindow.webContents.setWindowOpenHandler(({ url }) => {
-    openExternal(url)
-    return { action: 'deny' }
-  })
-  setupWindow.webContents.on('will-navigate', (event) => event.preventDefault())
-  setupWindow.once('ready-to-show', () => {
-    if (setupWindow && !setupWindow.isDestroyed()) setupWindow.show()
-  })
-  setupWindow.on('closed', () => {
-    setupWindow = null
-    if (!connectionReady && !quitting) app.quit()
-  })
-  void setupWindow.loadFile(path.join(__dirname, 'setup.html'), {
-    query: setupQuery(reason, errorMessage),
-  })
-  return setupWindow
+function startPorts() {
+  const ports = [settings?.port, PREFERRED_PORT, ...FALLBACK_PORTS, 0]
+    .filter((port) => Number.isInteger(port) && port >= 0 && port <= 65535)
+  return [...new Set(ports)]
 }
 
-function setupQuery(reason, errorMessage) {
-  return {
-    reason: reason || 'change',
-    error: errorMessage || '',
-    current: settings?.serverUrl || fallbackServer(),
-    version: app.getVersion(),
-  }
-}
-
-function upgradeConnectionUrl(loadedUrl) {
-  if (!connectionUrl) return
-  if (!loadedUrl.startsWith('https://')) return
-  if (sameServer(loadedUrl, connectionUrl)) return
+async function startLocalService() {
+  if (starting || service) return
+  starting = true
   try {
-    const base = new URL(connectionUrl)
-    const loaded = new URL(loadedUrl)
-    if (base.protocol !== 'http:' || base.hostname !== loaded.hostname || loaded.protocol !== 'https:') return
-    const next = normalizeServer(`${loaded.origin}${base.pathname}`)
-    connectionUrl = next
-    if (settings) settings.serverUrl = next
-    writeSettings()
-  } catch {
-    // Keep the configured URL when the redirect cannot be normalized.
+    const serverEntry = path.join(__dirname, 'server', 'index.cjs')
+    if (!fs.existsSync(serverEntry)) {
+      throw new Error('缺少本地服务文件 desktop/server/index.cjs，请重新安装客户端。')
+    }
+    const webDist = app.isPackaged
+      ? path.join(process.resourcesPath, 'web')
+      : path.join(__dirname, 'web-dist')
+    if (!fs.existsSync(path.join(webDist, 'index.html'))) {
+      throw new Error(`缺少前端构建产物 ${webDist}，请重新安装客户端。`)
+    }
+    const { startMultiPushServer } = require(serverEntry)
+    if (typeof startMultiPushServer !== 'function') {
+      throw new Error('本地服务入口无效，请重新安装客户端。')
+    }
+
+    let lastError = null
+    for (const port of startPorts()) {
+      try {
+        service = await startMultiPushServer({
+          host: '127.0.0.1',
+          port,
+          nodeEnv: 'production',
+          dataDir: dataDirectory(),
+          webDist,
+          desktopMode: true,
+        })
+        break
+      } catch (error) {
+        lastError = error
+        if (error && error.code === 'EADDRINUSE' && port !== 0) {
+          log(`本地端口 ${port} 已被占用，尝试下一个端口`)
+          continue
+        }
+        throw error
+      }
+    }
+    if (!service) throw lastError || new Error('无法启动本地服务')
+    appUrl = service.url
+    const actualPort = Number.parseInt(new URL(appUrl).port, 10)
+    if (Number.isInteger(actualPort)) {
+      settings.port = actualPort
+      writeSettings()
+    }
+    log(`本地服务已启动：${appUrl}`)
+    log(`数据目录：${dataDirectory()}`)
+
+    if (!mainWindow || mainWindow.isDestroyed()) createMainWindow()
+    await mainWindow.loadURL(appUrl)
+    if (!mainWindow.isVisible()) mainWindow.show()
+  } finally {
+    starting = false
   }
 }
 
-function showConnectionFailure(message) {
-  const key = connectionUrl || ''
-  if (failureShownFor === key) return
-  failureShownFor = key
-  openSetupWindow('unreachable', message)
-}
-
-async function loadApp(serverUrl) {
-  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow()
-  connectionUrl = serverUrl
-  connectionReady = false
-  failureShownFor = null
-  if (!mainWindow.isVisible()) mainWindow.show()
+async function restartLocalService() {
+  if (starting || failureDialogOpen) return
   try {
-    await mainWindow.loadURL(`${serverUrl}/`)
-    connectionReady = true
-    if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close()
-    return true
+    if (service) {
+      const old = service
+      service = null
+      await old.close()
+    }
+    appUrl = null
+    await startLocalService()
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (/ERR_ABORTED|aborted/i.test(message)) return false
-    showConnectionFailure(`无法打开 ${serverUrl}：${message}`)
-    return false
+    showLocalFailure(error)
   }
 }
 
-function reloadApp() {
-  if (!connectionUrl) {
-    openSetupWindow('change')
-    return
-  }
-  void loadApp(connectionUrl)
+function showLocalFailure(error) {
+  const message = error instanceof Error ? error.message : String(error)
+  log(`本地服务异常：${message}`)
+  if (failureDialogOpen) return
+  failureDialogOpen = true
+  void dialog.showMessageBox({
+    type: 'error',
+    title: 'MultiPush 本地服务异常',
+    message: '无法连接本地服务',
+    detail: `${message}\n\n数据目录：${dataDirectory()}\n日志：${logFile()}`,
+    buttons: ['重启本地服务', '退出'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  }).then(async (result) => {
+    failureDialogOpen = false
+    if (result.response === 0) await restartLocalService()
+    else {
+      quitting = true
+      app.quit()
+    }
+  })
 }
 
 function isAppUrl(target) {
-  if (!connectionUrl) return false
-  return sameServer(target, connectionUrl)
-}
-
-function sameServer(target, base) {
+  if (!appUrl) return false
   try {
-    const targetUrl = new URL(target)
-    const baseUrl = new URL(base)
-    if (targetUrl.origin !== baseUrl.origin) return false
-    const basePath = baseUrl.pathname.replace(/\/+$/, '')
-    if (!basePath || basePath === '/') return true
-    return targetUrl.pathname === basePath || targetUrl.pathname.startsWith(`${basePath}/`)
-  } catch {
-    return false
-  }
-}
-
-function isHttpsUpgrade(target) {
-  if (!connectionUrl) return false
-  try {
-    const targetUrl = new URL(target)
-    const baseUrl = new URL(connectionUrl)
-    return baseUrl.protocol === 'http:'
-      && targetUrl.protocol === 'https:'
-      && targetUrl.hostname === baseUrl.hostname
+    return new URL(target).origin === new URL(appUrl).origin
   } catch {
     return false
   }
@@ -527,25 +503,43 @@ function createMenu() {
   }
 
   template.push({
-    label: '连接',
+    label: '本地服务',
     submenu: [
       {
-        label: '切换服务器…',
-        accelerator: 'CmdOrCtrl+Shift+O',
-        click: () => openSetupWindow('change'),
+        label: '重启本地服务',
+        click: () => void restartLocalService(),
       },
       {
-        label: '重新连接',
-        accelerator: 'CmdOrCtrl+Shift+R',
-        click: () => reloadApp(),
+        label: '在浏览器中打开',
+        enabled: Boolean(appUrl),
+        click: () => {
+          if (appUrl) void shell.openExternal(appUrl)
+        },
+      },
+      {
+        label: '复制本地地址',
+        enabled: Boolean(appUrl),
+        click: () => {
+          if (appUrl) clipboard.writeText(appUrl)
+        },
       },
       { type: 'separator' },
       {
-        label: '在浏览器中打开',
+        label: '打开数据目录',
         click: () => {
-          if (connectionUrl) void shell.openExternal(connectionUrl)
+          fs.mkdirSync(dataDirectory(), { recursive: true })
+          void shell.openPath(dataDirectory())
         },
       },
+      {
+        label: '打开日志文件',
+        click: () => {
+          fs.mkdirSync(path.dirname(logFile()), { recursive: true })
+          if (!fs.existsSync(logFile())) fs.writeFileSync(logFile(), '', 'utf8')
+          void shell.openPath(logFile())
+        },
+      },
+      { type: 'separator' },
       {
         label: '检查更新…',
         click: () => void checkForUpdates(true),
@@ -621,15 +615,16 @@ function createMenu() {
 function showAbout() {
   const detail = [
     `版本 ${app.getVersion()}`,
-    `服务器 ${settings?.serverUrl || '未连接'}`,
+    `本地地址 ${appUrl || '未启动'}`,
+    `数据目录 ${dataDirectory()}`,
     `Electron ${process.versions.electron} · Chromium ${process.versions.chrome}`,
     '',
-    '一次创作，智能渲染，适配微信公众号、小红书、知乎、抖音。',
+    '完全本地运行：内容、账号和发布记录保存在这台电脑。',
   ].join('\n')
   void showMessageBox({
     type: 'info',
     title: '关于 MultiPush',
-    message: 'MultiPush 桌面客户端',
+    message: 'MultiPush 本地桌面版',
     detail,
     buttons: ['确定'],
     noLink: true,
@@ -640,105 +635,6 @@ function showMessageBox(options) {
   return mainWindow && !mainWindow.isDestroyed()
     ? dialog.showMessageBox(mainWindow, options)
     : dialog.showMessageBox(options)
-}
-
-function registerIpc() {
-  ipcMain.handle('desktop:get-state', (event) => {
-    assertSetupSender(event)
-    return {
-      current: settings?.serverUrl || fallbackServer(),
-      defaultServer: fallbackServer(),
-      version: app.getVersion(),
-      platform: process.platform,
-      electron: process.versions.electron,
-    }
-  })
-
-  ipcMain.handle('desktop:test-server', async (event, value) => {
-    assertSetupSender(event)
-    try {
-      const url = normalizeServer(value)
-      const result = await probeServer(url)
-      return { ok: true, url, version: result.version }
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('desktop:connect', async (event, value) => {
-    assertSetupSender(event)
-    try {
-      const url = normalizeServer(value)
-      const result = await probeServer(url)
-      settings.serverUrl = url
-      writeSettings()
-      connectionUrl = url
-      void loadApp(url)
-      return { ok: true, url, version: result.version }
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('desktop:open-setup', (event) => {
-    assertSetupSender(event)
-    openSetupWindow('change')
-    return true
-  })
-
-  ipcMain.handle('desktop:open-external', (event, value) => {
-    assertSetupSender(event)
-    openExternal(value)
-    return true
-  })
-
-  ipcMain.handle('desktop:quit', (event) => {
-    assertSetupSender(event)
-    quitting = true
-    app.quit()
-    return true
-  })
-}
-
-function assertSetupSender(event) {
-  const frameUrl = event.senderFrame?.url || ''
-  if (!frameUrl.startsWith('file://')) {
-    throw new Error('不允许的调用来源')
-  }
-}
-
-async function probeServer(serverUrl) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 10_000)
-  try {
-    const response = await net.fetch(`${serverUrl}/api/health`, {
-      method: 'GET',
-      cache: 'no-store',
-      redirect: 'follow',
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': `MultiPushDesktop/${app.getVersion()}`,
-      },
-    })
-    if (!response.ok) throw new Error(`服务器返回 HTTP ${response.status}`)
-    const body = await response.json().catch(() => null)
-    if (!body || body.service !== 'multipush' || body.status !== 'ok') {
-      throw new Error('该地址不是可用的 MultiPush 服务')
-    }
-    return { version: typeof body.version === 'string' ? body.version : '' }
-  } catch (error) {
-    if (error && error.name === 'AbortError') {
-      throw new Error('连接超时，请检查服务器地址和网络')
-    }
-    const message = error instanceof Error ? error.message : String(error)
-    if (/Failed to fetch|ERR_|ENOTFOUND|ECONN|EAI_AGAIN|net::|CERT_/i.test(message)) {
-      throw new Error('无法连接到服务器，请检查地址、网络或 HTTPS 证书')
-    }
-    throw error
-  } finally {
-    clearTimeout(timeout)
-  }
 }
 
 async function checkForUpdates(interactive) {
@@ -808,3 +704,10 @@ function compareVersions(left, right) {
   }
   return 0
 }
+
+process.on('uncaughtException', (error) => {
+  log(`未捕获异常：${error.stack || error.message}`)
+})
+process.on('unhandledRejection', (reason) => {
+  log(`未处理的 Promise 拒绝：${reason instanceof Error ? reason.stack || reason.message : String(reason)}`)
+})

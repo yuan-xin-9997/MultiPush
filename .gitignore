@@ -14,3 +14,5 @@ artifacts/
 .vite/
 *.tsbuildinfo
 desktop/release/
+desktop/server/
+desktop/web-dist/

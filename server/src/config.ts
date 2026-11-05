@@ -14,6 +14,7 @@ export interface AppConfig {
   webDist: string
   jwtSecret: string
   publicBaseUrl: string | null
+  desktopMode: boolean
   version: string
 }
 
@@ -25,6 +26,7 @@ export interface ConfigOverrides {
   webDist?: string
   jwtSecret?: string
   publicBaseUrl?: string | null
+  desktopMode?: boolean
 }
 
 const DEFAULT_PORT = 34080
@@ -141,6 +143,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
   const explicitSecret = overrides.jwtSecret?.trim()
   const publicBaseUrl =
     overrides.publicBaseUrl === undefined ? normalizeBaseUrl(trimmedEnv('PUBLIC_BASE_URL')) : normalizeBaseUrl(overrides.publicBaseUrl)
+  const desktopMode = overrides.desktopMode ?? (trimmedEnv('MULTIPUSH_DESKTOP') === '1')
 
   return {
     host: overrides.host ?? trimmedEnv('HOST') ?? DEFAULT_HOST,
@@ -153,6 +156,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
     webDist: resolveWebDist(cwd, overrides.webDist),
     jwtSecret: explicitSecret && explicitSecret.length > 0 ? explicitSecret : getOrCreateJwtSecret(dataDir),
     publicBaseUrl,
+    desktopMode,
     version: typeof packageJson.version === 'string' ? packageJson.version : '1.0.0',
   }
 }

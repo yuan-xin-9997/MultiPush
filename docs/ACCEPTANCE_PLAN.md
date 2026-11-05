@@ -71,11 +71,13 @@
 - [ ] 服务异常可重启；`journalctl -u multipush` 日志可读。
 - [ ] 生产访问 http://192.168.0.111:34080 完成一次注册、编辑、渲染、下载全流程。
 
-## H. 桌面客户端（Windows / macOS）
+## H. 本地桌面版（Windows / macOS）
 
-- [ ] `npm run desktop:check` 与 `npm run desktop:smoke` 在两个平台通过。
-- [ ] Windows 安装版/便携版可启动，首次显示连接向导，连接生产域名后能登录。
-- [ ] macOS universal DMG 可拖入「应用程序」，首次右键打开可启动并连接生产域名。
-- [ ] 切换服务器、重新连接、外部链接、下载通知和窗口状态恢复正常。
+- [ ] `npm run desktop:smoke` 在两个平台通过：本地服务启动、注册无验证码、SQLite 创建、重启后登录保持。
+- [ ] Windows 安装版/便携版可启动，不填写服务器地址即可注册并进入内容库。
+- [ ] macOS universal DMG 可拖入「应用程序」，首次右键打开可启动并注册。
+- [ ] 数据目录可通过菜单打开；升级/重启后内容、账号、素材和渲染记录仍在。
+- [ ] 外部链接、下载通知、窗口状态、本地服务重启和更新检查正常。
+- [ ] 未安装 Chrome/Edge 时编辑/渲染/导出正常，自动发布给出明确提示。
 - [ ] 推送 `v*` 标签后 GitHub Release 自动包含 Windows 与 macOS 安装包及 `SHA256SUMS.txt`。
 - [ ] 安装包未签名提示已在 README/DESKTOP.md 中说明。

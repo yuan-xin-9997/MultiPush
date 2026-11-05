@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, CircleAlert, Eye, EyeOff, LoaderCircle, LockKeyhole, UserRound } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useServerInfo } from '@/contexts/ServerContext'
 import { ApiError } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { safeRedirect } from '@/lib/navigation'
@@ -26,6 +27,7 @@ function fieldErrorFromApi(error: unknown): LoginErrors {
 
 export default function LoginPage() {
   const { login } = useAuth()
+  const { desktopMode } = useServerInfo()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const redirect = searchParams.get('redirect')
@@ -151,12 +153,16 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <p className="auth-switch"><Link to="/forgot-password">忘记密码？</Link></p>
+      {!desktopMode ? <p className="auth-switch"><Link to="/forgot-password">忘记密码？</Link></p> : null}
       <p className="auth-switch">
         还没有账号？<Link to={registerHref}>立即注册</Link>
       </p>
 
-      <p className="auth-form-footnote">一次创作，渲染适配微信公众号、小红书、知乎与抖音。</p>
+      <p className="auth-form-footnote">
+        {desktopMode
+          ? '本地版：数据保存在这台电脑，不需要连接远程服务器。'
+          : '一次创作，渲染适配微信公众号、小红书、知乎与抖音。'}
+      </p>
     </AuthLayout>
   )
 }

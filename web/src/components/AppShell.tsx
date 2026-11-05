@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LibraryBig, LogOut, Menu, Send, Sparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/contexts/AuthContext'
+import { useServerInfo } from '@/contexts/ServerContext'
 import { cn } from '@/lib/utils'
 import Avatar from './Avatar'
 import Dropdown from './Dropdown'
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
 
 export default function AppShell() {
   const { user, logout } = useAuth()
+  const { desktopMode } = useServerInfo()
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -118,7 +120,7 @@ export default function AppShell() {
                 </div>
               }
               items={[
-                ...(!user?.email ? [{ key: 'bind-email', label: '绑定邮箱', onSelect: () => navigate('/bind-email') }] : []),
+                ...(!desktopMode && !user?.email ? [{ key: 'bind-email', label: '绑定邮箱', onSelect: () => navigate('/bind-email') }] : []),
                 {
                   key: 'logout',
                   label: '退出登录',

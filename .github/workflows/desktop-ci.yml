@@ -4,10 +4,18 @@ on:
   push:
     paths:
       - "desktop/**"
+      - "server/**"
+      - "web/**"
+      - "shared/**"
+      - "scripts/build-desktop.mjs"
       - ".github/workflows/desktop-ci.yml"
   pull_request:
     paths:
       - "desktop/**"
+      - "server/**"
+      - "web/**"
+      - "shared/**"
+      - "scripts/build-desktop.mjs"
       - ".github/workflows/desktop-ci.yml"
   workflow_dispatch:
 
@@ -18,23 +26,22 @@ jobs:
   check:
     name: Desktop smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os:
           - windows-latest
           - macos-latest
-    defaults:
-      run:
-        working-directory: desktop
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Cache Electron
         uses: actions/cache@v4
         with:
@@ -47,5 +54,6 @@ jobs:
             ~/AppData/Local/electron-builder/Cache
           key: ${{ runner.os }}-electron-45.2.2
       - run: npm ci
-      - run: npm run check
-      - run: npm run smoke
+      - run: npm ci --prefix desktop
+      - run: npm run desktop:check
+      - run: npm run desktop:smoke

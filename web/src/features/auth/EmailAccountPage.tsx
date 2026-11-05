@@ -3,11 +3,13 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { useAuth } from '@/contexts/AuthContext'
+import { useServerInfo } from '@/contexts/ServerContext'
 import AuthLayout from './AuthLayout'
 import EmailCodeField from './EmailCodeField'
 
 export default function EmailAccountPage({ mode }: { mode: 'bind' | 'reset' }) {
   const { setUser, user, logout } = useAuth()
+  const { desktopMode } = useServerInfo()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -34,6 +36,15 @@ export default function EmailAccountPage({ mode }: { mode: 'bind' | 'reset' }) {
       }
     } catch (error) { setError(getErrorMessage(error, '操作失败，请重试')) }
     finally { setBusy(false) }
+  }
+  if (desktopMode) {
+    return <AuthLayout>
+      <div className="auth-form-head">
+        <h1>{mode === 'bind' ? '本地账号' : '找回密码'}</h1>
+        <p>本地版不使用邮箱验证码，账号数据只保存在这台电脑。本地版不提供邮箱找回密码，请使用注册时设置的密码直接登录。</p>
+      </div>
+      <p className="auth-switch"><Link to="/login">返回登录</Link></p>
+    </AuthLayout>
   }
   return <AuthLayout>
     <div className="auth-form-head"><h1>{mode === 'bind' ? '绑定邮箱' : '找回密码'}</h1><p>{mode === 'bind' ? '验证邮箱后，可用于登录和找回密码。' : '验证已绑定的邮箱，设置新的登录密码。'}</p></div>

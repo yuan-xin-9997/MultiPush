@@ -93,16 +93,23 @@
 
 遇到「结果待核实」时，先在微信后台检查草稿和发表记录，避免重复发表。断开连接会清除本系统保存的公众号会话；若要撤销全部设备的登录，请在微信安全设置中操作。其他平台继续使用下载后手动发布。
 
-## 5. 桌面客户端（Windows / macOS）
+## 5. 本地桌面版（Windows / macOS）
 
 Windows 和 macOS 用户可以从 [GitHub Releases](https://github.com/yuan-xin-9997/MultiPush/releases/latest) 下载安装包：
 
 - Windows：`MultiPush-Setup-<version>-x64.exe`（安装版）或 `MultiPush-Portable-<version>-x64.exe`（便携版）。
 - macOS：`MultiPush-<version>-universal.dmg`，同时支持 Intel 和 Apple Silicon。
 
-首次启动填写 MultiPush 服务器地址，默认是 `https://publish.yuan-xin.top`；局域网可用 `http://192.168.0.111:34080`。点击「测试连接」确认服务可用后再登录。之后可通过菜单「连接 → 切换服务器…」修改地址。
+本地桌面版**完全在这台电脑上运行**：内置前端、Node 后端和 SQLite，不需要连接 `publish.yuan-xin.top` 或其他服务器，也不需要配置 SMTP。第一次启动直接点击「立即注册」，邮箱只作为本地账号标识，不会发送验证码。
 
-桌面客户端只封装现有服务，不保存业务数据；内容库、账号、登录状态和发布记录仍在服务器。下载的 ZIP/HTML/图片会保存到系统「下载」目录。安装包目前未签名：Windows SmartScreen 需选择「更多信息 → 仍要运行」，macOS 首次启动需右键应用图标选择「打开」。
+数据保存在：
+
+- Windows：`%APPDATA%\MultiPush\data`
+- macOS：`~/Library/Application Support/MultiPush/data`
+
+菜单「本地服务 → 打开数据目录」可以直接查看。升级或卸载应用不会自动删除数据；备份时退出应用后复制整个 `data` 目录即可。
+
+编辑、渲染、预览和下载不需要额外浏览器。公众号、知乎、抖音的自动发布需要本机安装 Chrome 或 Edge；Windows 通常已有 Edge，macOS 建议安装 Google Chrome。下载的 ZIP/HTML/图片会保存到系统「下载」目录。安装包目前未签名：Windows SmartScreen 需选择「更多信息 → 仍要运行」，macOS 首次启动需右键应用图标选择「打开」。
 
 ## 6. 常见问题
 

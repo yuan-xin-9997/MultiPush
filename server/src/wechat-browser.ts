@@ -225,7 +225,11 @@ export function publisherExecutablePath(platform: 'wechat' | 'zhihu' | 'xiaohong
       join(process.env[key]!, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
     ] : []),
     '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
-    '/opt/google/chrome/chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/opt/google/chrome/chrome',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
   ]
   return candidates.find(path => existsSync(path))
 }

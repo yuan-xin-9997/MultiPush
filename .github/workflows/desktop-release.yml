@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "已存在的发布标签，例如 v1.1.0"
+        description: "已存在的发布标签，例如 v2.0.0"
         required: true
         type: string
 
@@ -22,7 +22,7 @@ jobs:
   build:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -30,14 +30,11 @@ jobs:
           - name: Windows x64
             os: windows-latest
             artifact: multipush-desktop-windows
-            package: npm run dist:win
+            package: npm --prefix desktop run dist:win
           - name: macOS Universal
             os: macos-latest
             artifact: multipush-desktop-macos
-            package: npm run dist:mac
-    defaults:
-      run:
-        working-directory: desktop
+            package: npm --prefix desktop run dist:mac
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
@@ -46,7 +43,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Cache Electron
         uses: actions/cache@v4
         with:
@@ -59,8 +58,9 @@ jobs:
             ~/AppData/Local/electron-builder/Cache
           key: ${{ runner.os }}-electron-45.2.2
       - run: npm ci
-      - run: npm run check
-      - run: npm run smoke
+      - run: npm ci --prefix desktop
+      - run: npm run desktop:check
+      - run: npm run desktop:smoke
       - name: Package desktop client
         run: ${{ matrix.package }}
       - uses: actions/upload-artifact@v4
@@ -113,19 +113,32 @@ jobs:
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
           ## MultiPush 桌面客户端 ${TAG}
 
-          Windows 与 macOS 桌面客户端。默认连接 \`https://publish.yuan-xin.top\`，首次启动可填写其他 MultiPush 服务器地址，并在「连接」菜单中随时切换。
+          Windows 与 macOS **完全本地版**。安装后无需连接任何服务器：后端、前端、SQLite 数据库和上传文件都在本机运行和保存。
 
           ### 下载
 
           - Windows x64：\`MultiPush-Setup-${VERSION}-x64.exe\`（安装版）或 \`MultiPush-Portable-${VERSION}-x64.exe\`（便携版）
           - macOS Universal（Intel / Apple Silicon）：\`MultiPush-${VERSION}-universal.dmg\` 或 \`MultiPush-${VERSION}-universal-mac.zip\`
 
+          ### 数据位置
+
+          - Windows：\`%APPDATA%\\MultiPush\\data\`
+          - macOS：\`~/Library/Application Support/MultiPush/data\`
+          - 客户端菜单「本地服务 → 打开数据目录」可直接打开。
+          - 升级或卸载应用不会自动删除该目录；备份时复制整个 \`data\` 目录即可。
+
           ### 安装说明
 
           - Windows 安装包暂未使用商业代码签名证书。SmartScreen 提示时选择「更多信息」→「仍要运行」。
           - macOS 安装包未签名、未公证。打开 DMG 后将 MultiPush 拖入「应用程序」，首次启动请右键点击图标选择「打开」；也可执行：
             \`xattr -dr com.apple.quarantine /Applications/MultiPush.app\`
-          - 桌面客户端复用现有 MultiPush 服务，不在本地保存内容或发布记录；发布自动化仍由服务器执行。
+          - 首次启动直接注册本地账号，不需要邮箱验证码，也不需要配置 SMTP。
+          - 自动发布功能需要本机安装 Chrome 或 Edge；不安装仍可编辑、渲染和导出。
+
+          ### 从在线版迁移
+
+          - 在在线版导出文档 / ZIP，再在本地版内容库导入即可保留文档内容。
+          - 如需完整迁移账号、素材和平台登录会话，可在关闭应用后，将服务器 \`.data\` 目录内容复制到本机数据目录。
 
           ### 校验
 
@@ -136,7 +149,7 @@ jobs:
           \`\`\`
           EOF
           gh release create "$TAG" \
-            --title "MultiPush 桌面客户端 $TAG" \
+            --title "MultiPush 本地桌面版 $TAG" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
             --verify-tag
 

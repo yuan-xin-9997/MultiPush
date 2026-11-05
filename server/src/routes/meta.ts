@@ -12,6 +12,7 @@ export function createMetaRouter(config: AppConfig, requireAuth: RequestHandler)
       status: 'ok',
       service: 'multipush',
       version: config.version,
+      desktopMode: config.desktopMode,
       uptime: Math.round(process.uptime()),
       time: new Date().toISOString(),
     })

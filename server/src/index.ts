@@ -1,62 +1,44 @@
 import 'dotenv/config'
-import { loadConfig } from './config'
-import { openDatabase } from './db'
-import { createApp } from './app'
+import { startMultiPushServer, type StartedMultiPushServer } from './server'
 
-const config = loadConfig()
-const database = openDatabase(config.dbPath)
-const app = createApp(config, database)
-
-const server = app.listen(config.port, config.host, () => {
-  console.log(`[multipush] listening on http://${config.host}:${config.port}`)
-  console.log(`[multipush] environment=${config.nodeEnv} data=${config.dataDir}`)
-  if (config.isProduction) console.log(`[multipush] web=${config.webDist}`)
-})
-
-server.on('error', (error: NodeJS.ErrnoException) => {
-  console.error('[multipush] failed to start server:', error.message)
-  try {
-    database.close()
-  } catch {
-    // ignore
-  }
-  process.exitCode = 1
-})
-
+let running: StartedMultiPushServer | null = null
 let shuttingDown = false
-function shutdown(signal: string): void {
+
+startMultiPushServer()
+  .then((instance) => {
+    running = instance
+    console.log(`[multipush] listening on ${instance.url}`)
+    console.log(`[multipush] environment=${instance.config.nodeEnv} data=${instance.config.dataDir}`)
+    if (instance.config.isProduction) console.log(`[multipush] web=${instance.config.webDist}`)
+  })
+  .catch((error: unknown) => {
+    console.error('[multipush] failed to start server:', error instanceof Error ? error.message : error)
+    process.exitCode = 1
+  })
+
+async function shutdown(signal: string, exitCode = 0): Promise<void> {
   if (shuttingDown) return
   shuttingDown = true
   console.log(`[multipush] received ${signal}, shutting down…`)
   const forceTimer = setTimeout(() => {
     console.error('[multipush] forced shutdown after timeout')
     process.exit(1)
-  }, 10_000)
+  }, 12_000)
   forceTimer.unref()
-
-  server.close(async (error) => {
-    if (error) console.error('[multipush] server close error:', error)
-    try { await app.locals.wechat.close() }
-    catch { console.error('[multipush] failed to close the WeChat browser') }
-    try { await app.locals.douyin.close() }
-    catch { console.error('[multipush] failed to close the Douyin browser') }
-    try { await app.locals.zhihu.close() }
-    catch { console.error('[multipush] failed to close the Zhihu browser') }
-    try {
-      database.close()
-    } catch (dbError) {
-      console.error('[multipush] database close error:', dbError)
-    }
-    clearTimeout(forceTimer)
-    process.exit(error ? 1 : 0)
-  })
+  try {
+    await running?.close()
+  } catch (error) {
+    console.error('[multipush] shutdown error:', error)
+  }
+  clearTimeout(forceTimer)
+  process.exit(exitCode)
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'))
-process.on('SIGINT', () => shutdown('SIGINT'))
+process.on('SIGTERM', () => { void shutdown('SIGTERM') })
+process.on('SIGINT', () => { void shutdown('SIGINT') })
 process.on('uncaughtException', (error) => {
   console.error('[multipush] uncaught exception:', error)
-  shutdown('uncaughtException')
+  void shutdown('uncaughtException', 1)
 })
 process.on('unhandledRejection', (reason) => {
   console.error('[multipush] unhandled rejection:', reason)
