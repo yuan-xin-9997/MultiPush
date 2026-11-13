@@ -35,6 +35,11 @@ import type {
   ZhihuPublication,
   ZhihuPublishInput,
   ZhihuResolveInput,
+  SspaiAccount,
+  SspaiLogin,
+  SspaiPublication,
+  SspaiPublishInput,
+  SspaiResolveInput,
 } from '@shared/types'
 
 const TOKEN_KEY = 'multipush_token'
@@ -256,6 +261,15 @@ export const api = {
     listPublications: () => request<{ publications: DouyinPublication[] }>('/api/douyin/publications', { cache: 'no-store' }),
     publish: (input: DouyinPublishInput) => request<{ publication: DouyinPublication }>('/api/douyin/publications', { method: 'POST', body: JSON.stringify(input) }),
   },
+  sspai: {
+    resolve: (id: string, input: SspaiResolveInput) => request<{ publication: SspaiPublication }>(`/api/sspai/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: SspaiAccount }>('/api/sspai/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: SspaiLogin }>('/api/sspai/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: SspaiLogin }>(`/api/sspai/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/sspai/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: SspaiPublication[] }>('/api/sspai/publications', { cache: 'no-store' }),
+    publish: (input: SspaiPublishInput) => request<{ publication: SspaiPublication }>('/api/sspai/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
 
   renders: {
     adjust: (id: string, platform: PlatformId, input: PlatformAdjustment) => request<{ result: PlatformRender }>(`/api/renders/${id}/platforms/${platform}`, { method: 'PATCH', body: JSON.stringify(input) }),
@@ -270,7 +284,7 @@ export const api = {
 }
 
 export function isPlatformId(value: string): value is PlatformId {
-  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'douyin'
+  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'douyin' || value === 'sspai'
 }
 
 /** Make an uploaded relative URL absolute for previews / rendering. */

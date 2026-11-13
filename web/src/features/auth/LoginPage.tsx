@@ -161,7 +161,7 @@ export default function LoginPage() {
       <p className="auth-form-footnote">
         {desktopMode
           ? '本地版：数据保存在这台电脑，不需要连接远程服务器。'
-          : '一次创作，渲染适配微信公众号、小红书、知乎与抖音。'}
+          : '一次创作，渲染适配微信公众号、小红书、知乎、抖音与少数派。'}
       </p>
     </AuthLayout>
   )

@@ -35,13 +35,13 @@ export function publisherImage(buffer: Buffer, webp = false): PublisherImage {
 }
 
 /** No cookies or credentials; pin validated DNS addresses and recheck every redirect. */
-export async function downloadPublisherImage(src: string, platform: 'wechat' | 'zhihu' = 'wechat'): Promise<PublisherImage> {
+export async function downloadPublisherImage(src: string, platform: 'wechat' | 'zhihu' | 'sspai' = 'wechat'): Promise<PublisherImage> {
   try {
     if (/^data:/i.test(src)) {
       if (src.length > MAX_BYTES * 1.4) throw new Error('图片超过 10 MB')
       const match = /^data:image\/(png|jpeg|gif|webp);base64,([a-z0-9+/=\s]+)$/i.exec(src)
       if (!match) throw new Error('不支持的内嵌图片格式')
-      return publisherImage(Buffer.from(match[2], 'base64'), platform === 'zhihu')
+      return publisherImage(Buffer.from(match[2], 'base64'), platform !== 'wechat')
     }
     const signal = AbortSignal.timeout(20_000)
     let url = new URL(src)
@@ -84,7 +84,7 @@ export async function downloadPublisherImage(src: string, platform: 'wechat' | '
         })
         request.on('error', reject)
       })
-      if (Buffer.isBuffer(result)) return publisherImage(result, platform === 'zhihu')
+      if (Buffer.isBuffer(result)) return publisherImage(result, platform !== 'wechat')
       url = result
     }
     throw new Error('图片重定向次数过多')

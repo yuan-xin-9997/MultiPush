@@ -12,6 +12,7 @@ import Modal from '@/components/Modal'
 import './publish.css'
 import XhsPublishPage from './XhsPublishPage'
 import ZhihuPublishPage from './ZhihuPublishPage'
+import SspaiPublishPage from './SspaiPublishPage'
 
 const STATUS_LABELS: Record<WechatPublication['status'], string> = {
   running: '处理中', draft: '已保存草稿', awaiting_confirmation: '等待微信确认', published: '已发表', failed: '失败', uncertain: '结果待核实',
@@ -286,6 +287,6 @@ function WechatPublishPage() {
 
 export default function PublishPage() {
   const [params, setParams] = useSearchParams()
-  const platform = params.get('platform') === 'douyin' ? 'douyin' : params.get('platform') === 'xiaohongshu' ? 'xiaohongshu' : params.get('platform') === 'zhihu' ? 'zhihu' : 'wechat'
-  return <><nav className="publish-platform-tabs" aria-label="选择发布平台">{(['wechat', 'zhihu', 'xiaohongshu', 'douyin'] as const).map(value => <button key={value} type="button" className={`btn ${platform === value ? 'btn-primary' : ''}`} aria-current={platform === value ? 'page' : undefined} onClick={() => { if (value !== platform) setParams({ platform: value }) }}>{value === 'wechat' ? '微信公众号' : value === 'zhihu' ? '知乎' : value === 'douyin' ? '抖音' : '小红书（手动发布）'}</button>)}</nav>{platform === 'douyin' ? <DouyinPublishPage /> : platform === 'xiaohongshu' ? <XhsPublishPage /> : platform === 'zhihu' ? <ZhihuPublishPage /> : <WechatPublishPage />}</>
+  const platform = params.get('platform') === 'douyin' ? 'douyin' : params.get('platform') === 'xiaohongshu' ? 'xiaohongshu' : params.get('platform') === 'zhihu' ? 'zhihu' : params.get('platform') === 'sspai' ? 'sspai' : 'wechat'
+  return <><nav className="publish-platform-tabs" aria-label="选择发布平台">{(['wechat', 'zhihu', 'sspai', 'xiaohongshu', 'douyin'] as const).map(value => <button key={value} type="button" className={`btn ${platform === value ? 'btn-primary' : ''}`} aria-current={platform === value ? 'page' : undefined} onClick={() => { if (value !== platform) setParams({ platform: value }) }}>{value === 'wechat' ? '微信公众号' : value === 'zhihu' ? '知乎' : value === 'sspai' ? '少数派' : value === 'douyin' ? '抖音' : '小红书（手动发布）'}</button>)}</nav>{platform === 'douyin' ? <DouyinPublishPage /> : platform === 'xiaohongshu' ? <XhsPublishPage /> : platform === 'zhihu' ? <ZhihuPublishPage /> : platform === 'sspai' ? <SspaiPublishPage /> : <WechatPublishPage />}</>
 }

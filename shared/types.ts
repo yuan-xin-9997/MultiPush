@@ -6,7 +6,7 @@
  * dependencies so it can be used in either environment.
  */
 
-export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'douyin'
+export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'douyin' | 'sspai'
 
 export type ContentStatus = 'draft' | 'ready'
 
@@ -74,6 +74,17 @@ export const PLATFORMS: PlatformInfo[] = [
     contentTypes: ['image-text', 'video'],
     highlight: '竖屏封面 · 话题文案 · 视频笔记',
     limits: { titleMax: 55, bodyMax: 1000, imageMax: 35 },
+  },
+  {
+    id: 'sspai',
+    name: '少数派',
+    shortName: '少数派',
+    description: '生成少数派 Matrix 文章排版，提供 Markdown 与富文本；支持保存草稿与立即发布。',
+    color: '#d71a1b',
+    softColor: '#fdeceb',
+    contentTypes: ['image-text'],
+    highlight: 'Matrix 长文 · 草稿 / 立即发布 · 微信扫码',
+    limits: { titleMax: 32, bodyMax: 50000, imageMax: 100 },
   },
 ]
 
@@ -469,6 +480,53 @@ export interface DouyinResolveInput {
   articleUrl?: string
 }
 
+export interface SspaiAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface SspaiLogin {
+  id: string
+  status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'
+  qrCode: string | null
+  message: string
+  expiresAt: string
+}
+
+export interface SspaiPublishInput {
+  renderId: string
+  mode: 'draft' | 'publish'
+  coverMediaId?: string
+}
+
+export interface SspaiPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'published' | 'failed' | 'uncertain'
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+  resolutions?: SspaiResolution[]
+}
+
+export interface SspaiResolution {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
+}
+
+export interface SspaiResolveInput {
+  action: SspaiResolution['action']
+  articleUrl?: string
+}
+
 export interface ApiHealth {
   status: 'ok'
   service: string
@@ -484,4 +542,4 @@ export interface ApiErrorBody {
   issues?: Array<{ path: string; message: string }>
 }
 
-export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'douyin']
+export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai']

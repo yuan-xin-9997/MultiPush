@@ -59,6 +59,7 @@ data/
   .wechat-session-key    公众号会话加密密钥
   .zhihu-session-key     知乎会话加密密钥
   .douyin-session-key    抖音会话加密密钥
+  .sspai-session-key     少数派会话加密密钥
 ```
 
 菜单「本地服务 → 打开数据目录」可直接打开。备份时请先退出应用，再复制整个 `data` 目录；恢复时关闭应用，用备份目录替换即可。
@@ -78,10 +79,11 @@ data/
 - 微信公众号扫码登录、草稿/正式发表
 - 知乎扫码登录、草稿/发布
 - 抖音扫码登录、视频/图文发布
+- 少数派微信扫码登录、草稿/立即发布
 
 检测顺序：
 
-1. `WECHAT_BROWSER_PATH` / `ZHIHU_BROWSER_PATH` / `DOUYIN_BROWSER_PATH` / `CHROME_BIN` 环境变量
+1. `WECHAT_BROWSER_PATH` / `ZHIHU_BROWSER_PATH` / `DOUYIN_BROWSER_PATH` / `SSPAI_BROWSER_PATH` / `CHROME_BIN` 环境变量
 2. Playwright 自带 Chromium（若已安装）
 3. Windows：Chrome、Edge
 4. macOS：Google Chrome、Microsoft Edge、Chromium、Brave

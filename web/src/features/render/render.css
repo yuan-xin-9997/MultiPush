@@ -838,6 +838,7 @@
 /* ---------- Phone frames ---------- */
 .wechat-scene,
 .zhihu-scene,
+.sspai-scene,
 .xhs-scene,
 .douyin-scene {
   display: flex;
@@ -1057,6 +1058,7 @@
 
 .wechat-side-note,
 .zhihu-side-note,
+.sspai-side-note,
 .xhs-side-note {
   width: 228px;
   flex: 0 0 auto;
@@ -1065,6 +1067,7 @@
 
 .wechat-side-icon,
 .zhihu-side-icon,
+.sspai-side-icon,
 .xhs-side-icon {
   display: grid;
   width: 38px;
@@ -1080,6 +1083,11 @@
   color: var(--info);
 }
 
+.sspai-side-icon {
+  background: #fdeceb;
+  color: #d71a1b;
+}
+
 .xhs-side-icon {
   background: #fff0f2;
   color: #e11d3f;
@@ -1087,6 +1095,7 @@
 
 .wechat-side-note h3,
 .zhihu-side-note h3,
+.sspai-side-note h3,
 .xhs-side-note h3 {
   margin-top: 12px;
   color: var(--ink);
@@ -1096,6 +1105,7 @@
 
 .wechat-side-note p,
 .zhihu-side-note p,
+.sspai-side-note p,
 .xhs-side-note p {
   margin-top: 6px;
   color: var(--muted);
@@ -1105,6 +1115,7 @@
 
 .wechat-side-note .btn,
 .zhihu-side-note .btn,
+.sspai-side-note .btn,
 .xhs-side-note .btn {
   margin-top: 13px;
 }
@@ -1274,6 +1285,170 @@
   padding: 4px 9px;
   border-radius: 4px;
   background: #f6f7f9;
+}
+
+/* ---------- Sspai (Matrix) browser ---------- */
+.sspai-browser-shell {
+  display: flex;
+  width: min(720px, 100%);
+  height: min(694px, calc(100vh - 265px));
+  min-height: 540px;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e8e2df;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 22px 54px rgba(31, 35, 41, 0.12);
+}
+
+.sspai-browser-bar {
+  display: flex;
+  height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid #f0ecea;
+  background: #fbfaf9;
+}
+
+.sspai-brand {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #d71a1b;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.sspai-browser-url {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
+  color: #a29a96;
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sspai-browser-action {
+  color: #bdb5b1;
+}
+
+.sspai-browser-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.sspai-article {
+  max-width: 650px;
+  margin: 0 auto;
+  padding: 36px 40px 44px;
+}
+
+.sspai-article-kicker {
+  color: #d71a1b;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.sspai-article > h1 {
+  margin-top: 8px;
+  color: #1f2329;
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.35;
+}
+
+.sspai-author-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 28px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #f1edea;
+}
+
+.sspai-avatar {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fdeceb;
+  color: #d71a1b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sspai-author-row > span:nth-child(2) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.sspai-author-row strong {
+  color: #1f2329;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.sspai-author-row small {
+  color: #9c938f;
+  font-size: 8.5px;
+}
+
+.sspai-follow {
+  padding: 3px 9px;
+  border: 1px solid #e3d9d5;
+  border-radius: 999px;
+  color: #8c7f7a;
+  font-size: 8.5px;
+}
+
+.sspai-body {
+  color: #1f2329;
+  word-break: break-word;
+}
+
+.sspai-body img,
+.sspai-body video {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+.sspai-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.sspai-foot {
+  display: flex;
+  gap: 8px;
+  margin-top: 30px;
+  padding-top: 16px;
+  border-top: 1px solid #f1edea;
+  color: #9c938f;
+  font-size: 8.5px;
+}
+
+.sspai-foot span {
+  padding: 4px 9px;
+  border-radius: 4px;
+  background: #faf7f6;
 }
 
 /* ---------- Xiaohongshu ---------- */
@@ -3044,6 +3219,7 @@
 
   .wechat-side-note,
   .zhihu-side-note,
+  .sspai-side-note,
   .xhs-side-stack,
   .douyin-side-note {
     display: none;
@@ -3089,7 +3265,8 @@
     display: none;
   }
 
-  .browser-shell {
+  .browser-shell,
+  .sspai-browser-shell {
     width: 100%;
   }
 }
@@ -3271,7 +3448,8 @@
     border-radius: 31px;
   }
 
-  .zhihu-article {
+  .zhihu-article,
+  .sspai-article {
     padding: 24px 20px 30px;
   }
 

@@ -13,7 +13,7 @@ const FLOW_STEPS = [
   {
     icon: WandSparkles,
     title: '智能渲染',
-    description: '按公众号、小红书、知乎与抖音的规则重新排版。',
+    description: '按公众号、小红书、知乎、抖音与少数派的规则重新排版。',
   },
   {
     icon: Download,
@@ -23,7 +23,7 @@ const FLOW_STEPS = [
   {
     icon: Send,
     title: '从容发布',
-    description: '第一版下载后手动发布，后续能力规划中。',
+    description: '公众号、知乎、抖音与少数派可扫码连接，保存草稿或发布。',
   },
 ]
 

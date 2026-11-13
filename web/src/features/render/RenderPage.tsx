@@ -87,7 +87,7 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
 
-const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'douyin']
+const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai']
 
 const DOWNLOAD_LABELS = {
   html: 'HTML 页面',
@@ -791,6 +791,11 @@ export default function RenderPage() {
         toast.success('抖音文案已复制')
         return
       }
+      if (activeRender.platform === 'sspai') {
+        await copyText(activeRender.markdown || activeRender.text || '')
+        toast.success('少数派 Markdown 已复制')
+        return
+      }
       const note = activeRender.text || activeRender.cards.flatMap((card) => card.body).join('\n')
       await copyText(note)
       toast.success('小红书文案已复制')
@@ -900,7 +905,7 @@ export default function RenderPage() {
             Render Studio
           </span>
           <h1>智能渲染</h1>
-          <p>一次创作，生成公众号排版、小红书卡片、知乎长文与抖音竖屏文案，预览确认后下载发布。</p>
+          <p>一次创作，生成公众号排版、小红书卡片、知乎长文、抖音竖屏文案与少数派 Matrix 文章，预览确认后下载发布。</p>
         </div>
         <div className="render-head-actions">
           <button type="button" className="btn" onClick={() => setHistoryOpen(true)}>
@@ -1106,7 +1111,7 @@ export default function RenderPage() {
                 <span className="render-empty-spark render-empty-spark-two">✦</span>
               </div>
               <span className="render-empty-eyebrow">ONE SOURCE · FOUR FORMATS</span>
-              <h2>把一篇内容，变成四种发布形态</h2>
+              <h2>把一篇内容，变成五种发布形态</h2>
               <p>选择内容与平台，MultiPush 会按照每个平台的阅读习惯重新排版，生成可直接交付的素材。</p>
               <div className="render-empty-actions">
                 {selectedContent ? (
@@ -1141,6 +1146,10 @@ export default function RenderPage() {
                 <span>
                   <PlatformGlyph platform="douyin" size={14} />
                   抖音竖屏文案
+                </span>
+                <span>
+                  <PlatformGlyph platform="sspai" size={14} />
+                  少数派 Matrix 长文
                 </span>
               </div>
             </div>
@@ -1213,7 +1222,9 @@ export default function RenderPage() {
                           ? activeRender.videos.length > 0
                             ? '抖音视频'
                             : '抖音图文'
-                          : '知乎专栏文章'}
+                          : activeRender.platform === 'sspai'
+                            ? '少数派 Matrix 文章'
+                            : '知乎专栏文章'}
                     </span>
                   )}
                   <span className="render-preview-date">
@@ -1338,6 +1349,52 @@ export default function RenderPage() {
                       </span>
                       <h3>Markdown 与富文本</h3>
                       <p>知乎排版偏向长文阅读，代码块、引用和表格都保留了清晰层级。</p>
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => void copyCurrent()}>
+                        <Copy size={14} />
+                        复制 Markdown
+                      </button>
+                    </div>
+                  </div>
+                ) : activeRender.platform === 'sspai' ? (
+                  <div className="sspai-scene">
+                    <div className="sspai-browser-shell">
+                      <div className="sspai-browser-bar">
+                        <span className="sspai-brand">少数派</span>
+                        <span className="sspai-browser-url">
+                          <BookOpen size={12} />
+                          sspai.com/post/{activeRender.title.slice(0, 8)}
+                        </span>
+                        <span className="sspai-browser-action">
+                          <ExternalLink size={13} />
+                        </span>
+                      </div>
+                      <div className="sspai-browser-scroll">
+                        <article className="sspai-article">
+                          <div className="sspai-article-kicker">Matrix · 社区文章</div>
+                          <h1>{activeRender.title}</h1>
+                          <div className="sspai-author-row">
+                            <span className="sspai-avatar">{authorLabel.slice(0, 1)}</span>
+                            <span>
+                              <strong>{authorLabel}</strong>
+                              <small>发布于 {formatDate(activeRender.generatedAt)} · {activeRender.meta.readMinutes} 分钟阅读</small>
+                            </span>
+                            <span className="sspai-follow">关注</span>
+                          </div>
+                          <div className="sspai-body" dangerouslySetInnerHTML={{ __html: activeRender.html }} />
+                          <div className="sspai-foot">
+                            <span>点赞 328</span>
+                            <span>收藏 96</span>
+                            <span>评论 18</span>
+                          </div>
+                        </article>
+                      </div>
+                    </div>
+                    <div className="sspai-side-note">
+                      <span className="sspai-side-icon">
+                        <PlatformGlyph platform="sspai" size={18} />
+                      </span>
+                      <h3>Matrix 长文排版</h3>
+                      <p>少数派采用简洁的专栏阅读排版，支持标题层级、引用、代码和表格；发布时正文图片会自动上传到少数派图床。</p>
                       <button type="button" className="btn btn-sm btn-primary" onClick={() => void copyCurrent()}>
                         <Copy size={14} />
                         复制 Markdown
@@ -1542,6 +1599,7 @@ export default function RenderPage() {
                   {activeRender.platform === 'wechat' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到公众号</button> : null}
                   {activeRender.platform === 'douyin' && renderId ? <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate(`/publish?platform=douyin&renderId=${encodeURIComponent(renderId)}`)}>发布到抖音</button> : null}
                   {activeRender.platform === 'zhihu' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=zhihu&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到知乎</button> : null}
+                  {activeRender.platform === 'sspai' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=sspai&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到少数派</button> : null}
                 </div>
                 <button
                   type="button"
@@ -1651,6 +1709,7 @@ export default function RenderPage() {
                     <button className="btn btn-sm" onClick={() => void copyPart('tags')}>复制话题</button>
                   </> : null}
                   {activeRender.platform === 'zhihu' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
+                  {activeRender.platform === 'sspai' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
                   <button type="button" className="btn btn-sm" onClick={() => void copyCurrent()}>
                     <Copy size={14} />
                     {activeRender.platform === 'wechat'
@@ -1659,7 +1718,9 @@ export default function RenderPage() {
                         ? '复制 Markdown'
                         : activeRender.platform === 'douyin'
                           ? '复制抖音文案'
-                          : '复制文案'}
+                          : activeRender.platform === 'sspai'
+                            ? '复制 Markdown'
+                            : '复制文案'}
                   </button>
                   {activeRender.platform === 'xiaohongshu' ? (
                     <>
@@ -1802,7 +1863,7 @@ export default function RenderPage() {
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         title="选择内容"
-        subtitle="从内容库中选择一篇文档，渲染为四个平台的发布格式"
+        subtitle="从内容库中选择一篇文档，渲染为五个平台的发布格式"
         size="wide"
       >
         <div className="render-picker-search">

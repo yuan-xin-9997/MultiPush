@@ -24,6 +24,9 @@ import { createWechatRouter } from './routes/wechat'
 import { ZhihuService } from './zhihu'
 import { PlaywrightZhihuDriver, type ZhihuDriver } from './zhihu-browser'
 import { createZhihuRouter } from './routes/zhihu'
+import { SspaiService } from './sspai'
+import { PlaywrightSspaiDriver, type SspaiDriver } from './sspai-browser'
+import { createSspaiRouter } from './routes/sspai'
 
 function securityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction): void {
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -107,7 +110,7 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
@@ -116,6 +119,8 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   database.clearXhsAccounts()
   const douyin = new DouyinService(database, config, douyinDriver ?? new PlaywrightDouyinDriver())
   app.locals.douyin = douyin
+  const sspai = new SspaiService(database, config, sspaiDriver ?? new PlaywrightSspaiDriver())
+  app.locals.sspai = sspai
   app.disable('x-powered-by')
   app.use(securityHeaders)
   if (config.desktopMode) app.use(desktopLoopbackGuard)
@@ -138,6 +143,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/douyin', requireAuth, createDouyinRouter(douyin))
   app.use('/api/xiaohongshu', requireAuth, createXhsRouter(database))
   app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))
+  app.use('/api/sspai', requireAuth, createSspaiRouter(sspai))
   app.use('/api', createMetaRouter(config, requireAuth))
   app.use('/api', apiNotFound)
 

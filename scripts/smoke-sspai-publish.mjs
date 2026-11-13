@@ -1,0 +1,144 @@
+// Build first. Isolated UI fixtures only; never logs in to or publishes on Sspai.
+import assert from 'node:assert/strict'
+import { mkdirSync, existsSync } from 'node:fs'
+import path from 'node:path'
+import express from 'express'
+import { chromium } from 'playwright-core'
+
+const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'artifacts', 'sspai-ui-check')
+mkdirSync(output, { recursive: true })
+const time = new Date().toISOString(), png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7XkAAAAASUVORK5CYII=', 'base64')
+const user = { id: 'alice', username: 'alice', email: 'alice@example.com', displayName: 'Alice', createdAt: time }
+const article = { platform: 'sspai', title: '少数派联调文章', html: '<h2>标题</h2><p>这是一篇少数派测试文章。</p><figure><img src="/uploads/test.png"><figcaption>图 1：说明</figcaption></figure><ul><li>第一项</li><li><a href="https://github.com/example/repo">项目源码</a></li></ul>', meta: { summary: '摘要', tags: ['效率', '工具'] }, warnings: [] }
+const render = { id: 'render-1', contentId: 'content-1', contentTitle: article.title, platforms: ['sspai'], results: [article], options: {}, createdAt: time }
+let connected = false, loginPolls = 0, mode = 'normal', submissions = [], publications = []
+let initialGatewayError = true
+const gatewayHtml = '<!doctype html><html><title>Cloudflare 502</title><body>gateway-internal-detail</body></html>'
+const app = express()
+app.use(express.json())
+app.get('/api/auth/me', (_req, res) => res.json({ user }))
+app.get('/api/renders', (_req, res) => res.json({ renders: [render] }))
+app.get('/api/renders/render-1', (_req, res) => res.json({ render }))
+app.get('/api/contents/content-1', (_req, res) => res.json({ content: { id: 'content-1', title: article.title, coverImage: null } }))
+app.get('/api/media', (_req, res) => res.json({ media: [] }))
+app.get('/uploads/test.png', (_req, res) => res.type('png').send(png))
+app.get('/api/sspai/account', (_req, res) => res.json({ account: { status: connected ? 'connected' : 'disconnected', name: connected ? '测试少数派作者' : null, checkedAt: time } }))
+app.post('/api/sspai/login', (_req, res) => {
+  if (initialGatewayError) { initialGatewayError = false; res.status(502).type('html').send(gatewayHtml); return }
+  loginPolls = 0
+  res.status(202).json({ login: { id: 'login-1', status: 'waiting', qrCode: null, message: '正在准备二维码', expiresAt: time } })
+})
+app.get('/api/sspai/login/login-1', (_req, res) => {
+  loginPolls++
+  if (loginPolls === 1) { res.status(502).type('html').send(gatewayHtml); return }
+  if (loginPolls >= 4) connected = true
+  res.json({ login: { id: 'login-1', status: connected ? 'connected' : 'waiting', qrCode: connected ? null : `data:image/png;base64,${png.toString('base64')}`, message: connected ? '登录成功' : '请扫码', expiresAt: time } })
+})
+app.delete('/api/sspai/account', (_req, res) => { connected = false; res.json({ ok: true }) })
+app.post('/api/sspai/publications', (req, res) => {
+  if (mode === 'failure') { res.status(400).json({ error: 'sspai_image_upload', message: '少数派图片上传失败，请重试' }); return }
+  submissions.push(req.body)
+  const item = { id: `pub-${submissions.length}`, renderId: render.id, title: article.title, mode: req.body.mode, status: mode === 'uncertain' ? 'uncertain' : 'running', message: '正在处理', url: null, remoteId: '123', createdAt: time, updatedAt: time }
+  publications.unshift(item); res.status(202).json({ publication: item })
+})
+app.post('/api/sspai/publications/:id/resolve', (req, res) => {
+  const item = publications.find(p => p.id === req.params.id)
+  assert.equal(item.status, 'uncertain')
+  if (req.body.action === 'check') Object.assign(item, { status: 'running', checking: true })
+  else {
+    Object.assign(item, { status: req.body.action === 'published' ? 'published' : 'failed', message: req.body.action === 'published' ? '用户已人工核实文章发布成功' : '用户已核实未发布，已解除限制', ...(req.body.action === 'published' ? { url: req.body.articleUrl } : {}) })
+    item.resolutions = [{ id: `resolution-${Date.now()}`, action: req.body.action, message: item.message, articleUrl: req.body.articleUrl || null, createdAt: time }, ...(item.resolutions || [])]
+  }
+  res.json({ publication: item })
+})
+app.get('/api/sspai/publications', (_req, res) => {
+  for (const item of publications) if (item.status === 'running') {
+    if (item.checking) Object.assign(item, { status: 'uncertain', checking: false, message: '仍有草稿，请人工核实' })
+    else Object.assign(item, { status: item.mode === 'draft' ? 'draft' : 'published', message: '已核对少数派保存的正文', url: `https://sspai.com/${item.mode === 'draft' ? 'write' : 'post'}/123` })
+  }
+  res.json({ publications })
+})
+app.use(express.static(path.join(root, 'web', 'dist')))
+app.get('*', (_req, res) => res.sendFile(path.join(root, 'web', 'dist', 'index.html')))
+const server = app.listen(0, '127.0.0.1')
+await new Promise(resolve => server.once('listening', resolve))
+const base = `http://127.0.0.1:${server.address().port}`
+let browser
+try {
+  const executablePath = process.env.SSPAI_BROWSER_PATH || process.env.CHROME_BIN || [chromium.executablePath(), 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/chromium', '/usr/bin/google-chrome'].find(existsSync)
+  assert.ok(executablePath, 'Install Chromium or set CHROME_BIN')
+  browser = await chromium.launch({ executablePath, headless: true, chromiumSandbox: true })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+  await context.addInitScript(() => { if (window === window.top) localStorage.setItem('multipush_token', 'isolated-test-token') })
+  const page = await context.newPage(), errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto(`${base}/publish?platform=sspai`)
+  await page.getByRole('heading', { name: '把内容发布到少数派' }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '立即发布到少数派', exact: true }).isDisabled(), true)
+  await page.getByRole('button', { name: '扫码连接少数派', exact: true }).click()
+  await page.getByText('服务连接暂时异常（HTTP 502），请稍后重试。', { exact: true }).waitFor()
+  assert.equal((await page.locator('body').innerText()).includes('gateway-internal-detail'), false, 'Never display an upstream HTML error page')
+  await page.getByRole('button', { name: '重新连接', exact: true }).click()
+  await page.getByText('正在获取少数派微信登录二维码…', { exact: true }).waitFor()
+  await page.getByAltText('少数派微信登录二维码').waitFor()
+  await page.getByText('已连接', { exact: true }).waitFor({ timeout: 15000 })
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  await page.getByRole('button', { name: '保存到少数派草稿', exact: true }).click()
+  await page.getByText('已保存草稿', { exact: true }).waitFor()
+  assert.equal(submissions.length, 1)
+  assert.equal(submissions[0].mode, 'draft')
+  await page.getByRole('button', { name: '立即发布到少数派', exact: true }).click()
+  assert.equal(submissions.length, 1, 'Opening confirmation must not publish')
+  await page.getByRole('button', { name: '确认发布到少数派', exact: true }).click()
+  await page.getByText('已发布', { exact: true }).waitFor()
+  assert.equal(submissions[1].mode, 'publish')
+  assert.equal(await page.getByRole('link', { name: '查看少数派文章' }).getAttribute('href'), 'https://sspai.com/post/123')
+  await page.screenshot({ path: path.join(output, 'desktop.png'), fullPage: true })
+  mode = 'failure'
+  await page.getByRole('button', { name: '保存到少数派草稿', exact: true }).click()
+  await page.locator('.publish-error').filter({ hasText: '少数派图片上传失败' }).waitFor()
+  mode = 'uncertain'
+  await page.getByRole('button', { name: '保存到少数派草稿', exact: true }).click()
+  await page.getByText('结果待核实', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '立即发布到少数派', exact: true }).isDisabled(), true)
+  await page.reload()
+  await page.getByText('结果待核实', { exact: true }).waitFor()
+  assert.equal(submissions.length, 3)
+  await page.getByRole('button', { name: '核实并继续', exact: true }).click()
+  await page.getByRole('button', { name: '重新自动核实', exact: true }).click()
+  await page.getByText('仍有草稿，请人工核实', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '立即发布到少数派', exact: true }).isDisabled(), true)
+  await page.getByRole('button', { name: '核实并继续', exact: true }).click()
+  await page.getByRole('button', { name: '我已核实，未发布', exact: true }).click()
+  assert.equal(submissions.length, 3, 'Selecting a resolution must not publish')
+  await page.getByRole('button', { name: '确认未发布，解除限制', exact: true }).click()
+  await page.getByRole('dialog', { name: '核实少数派发布结果' }).waitFor({ state: 'hidden' })
+  assert.equal(await page.getByRole('button', { name: '立即发布到少数派', exact: true }).isEnabled(), true)
+  assert.equal(submissions.length, 3, 'Resolving an uncertain result must not automatically retry')
+  await page.reload()
+  await page.getByText('用户已核实未发布，已解除限制', { exact: true }).first().waitFor()
+  await page.getByRole('button', { name: '立即发布到少数派', exact: true }).click()
+  await page.getByRole('dialog', { name: '立即发布到少数派？' }).waitFor()
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  mode = 'uncertain'
+  await page.getByRole('button', { name: '保存到少数派草稿', exact: true }).click()
+  await page.getByRole('button', { name: '核实并继续', exact: true }).click()
+  await page.getByRole('button', { name: '我已核实，已发布', exact: true }).click()
+  await page.getByLabel('已发布文章链接').fill('https://sspai.com/post/456')
+  await page.getByRole('button', { name: '确认已发布并关联', exact: true }).click()
+  await page.locator('a[href="https://sspai.com/post/456"]').waitFor()
+  assert.equal(submissions.length, 4)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.frameLocator('iframe').getByText('这是一篇少数派测试文章。').waitFor()
+  await page.locator('iframe').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(350)
+  await page.locator('iframe').screenshot({ path: path.join(output, 'mobile-preview.png') })
+  await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile layout must not overflow')
+  assert.deepEqual(errors, [])
+  console.log(JSON.stringify({ status: 'passed', submissions: submissions.length, loginPolls, screenshots: output }))
+} finally {
+  await browser?.close()
+  server.closeAllConnections()
+  await new Promise(resolve => server.close(resolve))
+}

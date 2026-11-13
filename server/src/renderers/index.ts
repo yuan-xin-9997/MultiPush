@@ -4,12 +4,14 @@ import { renderWechat } from './wechat'
 import { renderXiaohongshu } from './xiaohongshu'
 import { renderZhihu } from './zhihu'
 import { renderDouyin } from './douyin'
+import { renderSspai } from './sspai'
 
 const RENDERERS: Record<PlatformId, PlatformRenderer> = {
   wechat: renderWechat,
   xiaohongshu: renderXiaohongshu,
   zhihu: renderZhihu,
   douyin: renderDouyin,
+  sspai: renderSspai,
 }
 
 /**

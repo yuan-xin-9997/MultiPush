@@ -39,7 +39,7 @@ function content(overrides: Partial<ContentDetail> = {}): ContentDetail {
 
 const options: RenderOptions = { cardStyle: 'clean', includeTags: true }
 
-function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'douyin')[], overrides: Partial<ContentDetail> = {}) {
+function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'douyin' | 'sspai')[], overrides: Partial<ContentDetail> = {}) {
   return {
     content: content(overrides),
     platforms,
@@ -55,6 +55,28 @@ describe('renderPlatforms', () => {
     expect(results.map((result) => result.platform)).toEqual(['douyin', 'zhihu', 'wechat', 'xiaohongshu'])
     expect(results.every((result) => result.generatedAt)).toBe(true)
     expect(results.every((result) => result.meta.wordCount > 0)).toBe(true)
+  })
+
+  it('renders Sspai Matrix article with Markdown and HTML downloads', async () => {
+    const [result] = await renderPlatforms(input(['sspai']))
+    expect(result.platform).toBe('sspai')
+    expect(result.previewMode).toBe('article')
+    expect(result.html).toContain('font-size:16px')
+    expect(result.markdown).toContain('# 一次创作，多平台发布')
+    expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown'])
+    expect(result.downloads[0].filename).toContain('少数派')
+    expect(result.warnings).toEqual([])
+  })
+
+  it('truncates a long Sspai title to 32 characters and warns about video', async () => {
+    const [result] = await renderPlatforms(input(['sspai'], {
+      title: '这是一个非常非常长的少数派文章标题，需要在生成排版时自动截断到三十二个字以内并明确提示作者',
+      contentHtml: '<p>正文</p><video src="/uploads/demo.mp4"></video>',
+    }))
+    expect(Array.from(result.title).length).toBeLessThanOrEqual(32)
+    expect(result.downloads[0].content).toContain('<!DOCTYPE html>')
+    expect(result.warnings.some((warning) => warning.includes('标题'))).toBe(true)
+    expect(result.warnings.some((warning) => warning.includes('视频'))).toBe(true)
   })
 
   it('renders WeChat article with inline styles, downloads and absolute media URLs', async () => {
@@ -195,18 +217,19 @@ describe('renderPlatforms', () => {
 
   it('handles empty content without throwing', async () => {
     const results = await renderPlatforms(
-      input(['wechat', 'xiaohongshu', 'zhihu', 'douyin'], {
+      input(['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai'], {
         title: '空文档',
         contentHtml: '',
         contentJson: {},
         tags: [],
       }),
     )
-    expect(results).toHaveLength(4)
+    expect(results).toHaveLength(5)
     expect(results[0].html).toContain('暂无正文')
     expect(results[1].cards.length).toBeGreaterThanOrEqual(2)
     expect(results[2].markdown).toContain('# 空文档')
     expect(results[3].text).toContain('空文档')
+    expect(results[4].html).toContain('暂无正文')
   })
 })
 

@@ -50,7 +50,7 @@ systemd multipush.service（User=jenkins）→ 0.0.0.0:34080
 | `/opt/MultiPush/JenkinsConfig/health.mjs` | 服务器端健康检查脚本 | `install` 覆盖 |
 | `/opt/MultiPush/package.json` | 应用元数据 | `install` 覆盖 |
 | `/opt/MultiPush/DEPLOYED_COMMIT` | 最近部署的 commit | 原子写入 |
-| `/opt/MultiPush/.data/` | SQLite（含 WAL/SHM）、`uploads/`、`.jwt-secret`、`.wechat-session-key` | **绝不删除、不改权限** |
+| `/opt/MultiPush/.data/` | SQLite（含 WAL/SHM）、`uploads/`、`.jwt-secret`、`.wechat-session-key` 等平台会话密钥 | **绝不删除、不改权限** |
 | `/opt/MultiPush/.env` | 可选环境变量 | **绝不删除、不改权限** |
 | `/opt/MultiPush/apps/` | 旧版本遗留目录（如有） | 不自动删除 |
 
@@ -309,7 +309,7 @@ curl -fsS http://127.0.0.1:34080/api/health
 
 必须备份：
 
-- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`、`.wechat-session-key`。
+- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`、`.wechat-session-key` 等各平台会话密钥。
 - `/opt/MultiPush/.env`（如存在）。
 - 可选的 systemd unit 与当前 `DEPLOYED_COMMIT`，便于恢复环境。
 
