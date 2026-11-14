@@ -5,7 +5,7 @@ import type { BrowserContext } from 'playwright-core'
 
 export type PublisherStorageState = Awaited<ReturnType<BrowserContext['storageState']>>
 
-export function loadPublisherKey(dataDir: string, platform: 'wechat' | 'zhihu' | 'xiaohongshu' | 'douyin' | 'sspai'): Buffer {
+export function loadPublisherKey(dataDir: string, platform: 'wechat' | 'zhihu' | 'xiaohongshu' | 'douyin' | 'sspai' | 'blog'): Buffer {
   const file = path.join(dataDir, `.${platform}-session-key`)
   try { writeFileSync(file, randomBytes(32), { flag: 'wx', mode: 0o600 }) }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
@@ -14,16 +14,25 @@ export function loadPublisherKey(dataDir: string, platform: 'wechat' | 'zhihu' |
   return key
 }
 
-export function encryptPublisherSession(state: PublisherStorageState, key: Buffer, userId: string): string {
+/** Encrypt any JSON-serializable publisher secret (session, token or credentials). */
+export function encryptPublisherSecret(value: unknown, key: Buffer, userId: string): string {
   const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv)
   cipher.setAAD(Buffer.from(userId))
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(state), 'utf8'), cipher.final()])
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()])
   return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64')
 }
 
-export function decryptPublisherSession(value: string, key: Buffer, userId: string): PublisherStorageState {
+export function decryptPublisherSecret<T>(value: string, key: Buffer, userId: string): T {
   const buffer = Buffer.from(value, 'base64'), decipher = createDecipheriv('aes-256-gcm', key, buffer.subarray(0, 12))
   decipher.setAAD(Buffer.from(userId))
   decipher.setAuthTag(buffer.subarray(12, 28))
-  return JSON.parse(Buffer.concat([decipher.update(buffer.subarray(28)), decipher.final()]).toString('utf8')) as PublisherStorageState
+  return JSON.parse(Buffer.concat([decipher.update(buffer.subarray(28)), decipher.final()]).toString('utf8')) as T
+}
+
+export function encryptPublisherSession(state: PublisherStorageState, key: Buffer, userId: string): string {
+  return encryptPublisherSecret(state, key, userId)
+}
+
+export function decryptPublisherSession(value: string, key: Buffer, userId: string): PublisherStorageState {
+  return decryptPublisherSecret<PublisherStorageState>(value, key, userId)
 }

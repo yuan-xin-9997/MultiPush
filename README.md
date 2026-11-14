@@ -1,6 +1,6 @@
 # MultiPush · 多平台智能发布系统
 
-> 一次创作，智能渲染，适配微信公众号、小红书、知乎、抖音与少数派。支持微信公众号、知乎、抖音和少数派登录、保持会话、保存草稿与正式发布；小红书仅支持导出后手动发布；抖音新增扫码登录和视频 / 图文发布（待真实账号联调）。
+> 一次创作，智能渲染，适配微信公众号、小红书、知乎、抖音、少数派与个人博客。支持微信公众号、知乎、抖音、少数派和个人博客连接、保持会话、保存草稿与正式发布；小红书仅支持导出后手动发布；抖音新增扫码登录和视频 / 图文发布（待真实账号联调）。
 
 ![MultiPush](web/public/favicon.svg)
 
@@ -16,13 +16,15 @@
   - 知乎：专栏长文排版、Markdown / HTML 导出。
   - 抖音：竖屏图文 / 视频笔记文案、话题标签、文案与图文 HTML / JSON 导出。
   - 少数派：Matrix 风格长文、内联排版、Markdown / HTML 导出。
-- **平台预览**：手机壳公众号、小红书卡片、知乎桌面文章、抖音竖屏信息流、少数派 Matrix 文章，五种平台各按自身视觉模拟。
+  - 个人博客：Halo 博客文章排版、Markdown / HTML 导出。
+- **平台预览**：手机壳公众号、小红书卡片、知乎桌面文章、抖音竖屏信息流、少数派 Matrix 文章、个人博客文章，六种平台各按自身视觉模拟。
 - **渲染工作台**：各平台独立修改标题、正文、话题并保存到记录，可恢复生成结果；小红书支持卡片排序、光标处分页、换图和裁剪，按实际高度自动分页。提供发布前检查、原文版本提醒、账号默认设置及含缺失清单的 ZIP 导出报告。
 - **公众号发布**：系统内展示官方登录二维码，加密保存登录状态；选择公众号排版和封面，一键保存草稿或正式发表。支持正文图片转存、安全扫码确认、发布记录和重复提交保护。
 - **小红书发布**：自动登录和自动发布已停用，已清除保存会话；保留卡片与文案导出、历史记录，请在官方 App 或创作中心手动发布。详见 [说明](docs/XIAOHONGSHU_PUBLISHING.md)。
 - **知乎发布**：系统内展示知乎官方二维码，按用户加密保存登录状态；选择知乎排版和可选封面，保存草稿或发布专栏文章。图片自动转存、使用原生图注/列表/表格/代码结构，并回读核对内容，发现差异则保留草稿并停止发布。详见 [知乎发布说明](docs/ZHIHU_PUBLISHING.md)。
 - **抖音发布**：系统内展示官方登录二维码，按用户加密保存会话；选择 MP4 视频或 1–35 张图片发布。包含发布记录、重复提交保护、重启恢复与结果人工核实；遇到安全验证停止操作。详见 [抖音发布说明](docs/DOUYIN_PUBLISHING.md)。
 - **少数派发布**：使用微信扫描少数派官方登录二维码，按用户加密保存会话；选择 Matrix 排版，保存草稿或立即发布。正文图片自动上传到少数派图床，发布前回读核对标题、正文、图片和链接；结果不确定时停止重发并支持人工核实。详见 [少数派发布说明](docs/SSPAI_PUBLISHING.md)。
+- **个人博客发布**：输入 Halo 博客地址和个人令牌，按用户加密保存；选择博客排版与封面，保存草稿或公开发布。正文图片自动转存到 Halo 附件库，发布后回读核对内容；支持标签匹配、重复提交保护和结果人工核实。详见 [个人博客发布说明](docs/BLOG_PUBLISHING.md)。
 - **本地桌面版**：Electron 客户端支持 Windows 10+（x64）与 macOS（Intel / Apple Silicon 通用包），内置前端、Node 后端与 SQLite，完全在本机运行；首次启动直接注册本地账号，无需服务器、SMTP 或邮箱验证码。
 - **部署**：监听 `0.0.0.0:34080`，Jenkins 每 30 分钟轮询 GitHub，自动停服、构建、部署、启动与健康检查。
 
@@ -63,7 +65,7 @@ npm run desktop:dist:win      # Windows NSIS + 便携版
 npm run desktop:dist:mac      # macOS universal DMG + ZIP（需在 macOS 构建）
 ```
 
-数据目录：Windows `%APPDATA%\MultiPush\data`，macOS `~/Library/Application Support/MultiPush/data`。自动发布需要本机安装 Chrome 或 Edge；不安装仍可编辑、渲染和导出。详见 [本地桌面版说明](docs/DESKTOP.md)。安装包目前未使用商业代码签名证书，Windows SmartScreen 与 macOS Gatekeeper 会要求手动确认。
+数据目录：Windows `%APPDATA%\MultiPush\data`，macOS `~/Library/Application Support/MultiPush/data`。公众号、知乎、抖音与少数派的自动发布需要本机安装 Chrome 或 Edge；个人博客使用 HTTP API，不依赖浏览器；不安装浏览器仍可编辑、渲染和导出。详见 [本地桌面版说明](docs/DESKTOP.md)。安装包目前未使用商业代码签名证书，Windows SmartScreen 与 macOS Gatekeeper 会要求手动确认。
 
 生产模式本地验证：
 
@@ -97,6 +99,7 @@ npm start
   multipush.sqlite
   uploads/
   .jwt-secret
+  .blog-session-key
   .douyin-session-key
   .sspai-session-key
   .xiaohongshu-session-key

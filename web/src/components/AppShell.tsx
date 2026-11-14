@@ -93,7 +93,7 @@ export default function AppShell() {
             </span>
             <div>
               <p className="app-sidebar-note-title">一次创作，多端适配</p>
-              <p className="app-sidebar-note-text">公众号、知乎、抖音与少数派支持连接发布；小红书仅支持导出后手动发布。</p>
+              <p className="app-sidebar-note-text">公众号、知乎、抖音、少数派与个人博客支持连接发布；小红书仅支持导出后手动发布。</p>
             </div>
           </div>
 

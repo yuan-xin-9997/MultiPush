@@ -6,7 +6,7 @@
  * dependencies so it can be used in either environment.
  */
 
-export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'douyin' | 'sspai'
+export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'douyin' | 'sspai' | 'blog'
 
 export type ContentStatus = 'draft' | 'ready'
 
@@ -85,6 +85,17 @@ export const PLATFORMS: PlatformInfo[] = [
     contentTypes: ['image-text'],
     highlight: 'Matrix 长文 · 草稿 / 立即发布 · 微信扫码',
     limits: { titleMax: 32, bodyMax: 50000, imageMax: 100 },
+  },
+  {
+    id: 'blog',
+    name: '个人博客',
+    shortName: '博客',
+    description: '生成 Halo 个人博客文章排版，支持保存草稿与公开发布，正文图片自动转存到博客附件库。',
+    color: '#0f172a',
+    softColor: '#f1f5f9',
+    contentTypes: ['image-text'],
+    highlight: 'Halo 博客 · 草稿 / 发布 · 图片转存',
+    limits: { titleMax: 120, bodyMax: 100000, imageMax: 200 },
   },
 ]
 
@@ -527,6 +538,51 @@ export interface SspaiResolveInput {
   articleUrl?: string
 }
 
+export interface BlogAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  baseUrl: string | null
+  checkedAt: string | null
+}
+
+export interface BlogConnectInput {
+  baseUrl: string
+  token: string
+}
+
+export interface BlogPublishInput {
+  renderId: string
+  mode: 'draft' | 'publish'
+  coverMediaId?: string
+}
+
+export interface BlogPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'published' | 'failed' | 'uncertain'
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+  resolutions?: BlogResolution[]
+}
+
+export interface BlogResolution {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
+}
+
+export interface BlogResolveInput {
+  action: BlogResolution['action']
+  articleUrl?: string
+}
+
 export interface ApiHealth {
   status: 'ok'
   service: string
@@ -542,4 +598,4 @@ export interface ApiErrorBody {
   issues?: Array<{ path: string; message: string }>
 }
 
-export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai']
+export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai', 'blog']

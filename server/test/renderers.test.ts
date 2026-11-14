@@ -39,7 +39,7 @@ function content(overrides: Partial<ContentDetail> = {}): ContentDetail {
 
 const options: RenderOptions = { cardStyle: 'clean', includeTags: true }
 
-function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'douyin' | 'sspai')[], overrides: Partial<ContentDetail> = {}) {
+function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
   return {
     content: content(overrides),
     platforms,
@@ -65,6 +65,17 @@ describe('renderPlatforms', () => {
     expect(result.markdown).toContain('# 一次创作，多平台发布')
     expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown'])
     expect(result.downloads[0].filename).toContain('少数派')
+    expect(result.warnings).toEqual([])
+  })
+
+  it('renders personal blog article with Markdown and HTML downloads', async () => {
+    const [result] = await renderPlatforms(input(['blog']))
+    expect(result.platform).toBe('blog')
+    expect(result.previewMode).toBe('article')
+    expect(result.html).toContain('font-size:17px')
+    expect(result.markdown).toContain('# 一次创作，多平台发布')
+    expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown'])
+    expect(result.downloads[0].filename).toContain('博客')
     expect(result.warnings).toEqual([])
   })
 
@@ -217,19 +228,20 @@ describe('renderPlatforms', () => {
 
   it('handles empty content without throwing', async () => {
     const results = await renderPlatforms(
-      input(['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai'], {
+      input(['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai', 'blog'], {
         title: '空文档',
         contentHtml: '',
         contentJson: {},
         tags: [],
       }),
     )
-    expect(results).toHaveLength(5)
+    expect(results).toHaveLength(6)
     expect(results[0].html).toContain('暂无正文')
     expect(results[1].cards.length).toBeGreaterThanOrEqual(2)
     expect(results[2].markdown).toContain('# 空文档')
     expect(results[3].text).toContain('空文档')
     expect(results[4].html).toContain('暂无正文')
+    expect(results[5].html).toContain('暂无正文')
   })
 })
 

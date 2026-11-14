@@ -93,3 +93,7 @@
 .publish-resolution-actions { display: grid; gap: 10px; margin-bottom: 18px; }
 .publish-resolution-history { margin-top: 12px; font-size: 12px; color: var(--muted); }
 .publish-resolution-history summary { cursor: pointer; }
+
+.blog-publish-page .publish-account-icon { font-size: 28px; font-weight: 700; color: #0f172a; background: #f1f5f9; }
+.blog-connect-form { display: flex; flex-direction: column; gap: 14px; }
+.blog-connect-form .publish-muted { display: flex; align-items: center; gap: 6px; }

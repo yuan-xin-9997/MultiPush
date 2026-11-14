@@ -25,6 +25,8 @@ import type {
   ZhihuResolution,
   SspaiPublication,
   SspaiResolution,
+  BlogPublication,
+  BlogResolution,
 } from '../../shared/types'
 import { PLATFORM_ORDER } from '../../shared/types'
 import { DEFAULT_BOOK_COLOR } from './config'
@@ -179,6 +181,15 @@ export interface WechatAccountSession {
 }
 
 export interface ZhihuAccountSession extends WechatAccountSession { accountId: string }
+
+export interface BlogAccountSession {
+  encryptedCredentials: string
+  accountId: string
+  baseUrl: string
+  name: string | null
+  status: 'connected' | 'expired'
+  checkedAt: string
+}
 
 export interface CreateWechatPublicationValues {
   renderId: string
@@ -453,7 +464,42 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_sspai_resolutions_publication ON sspai_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 8;
+      CREATE TABLE IF NOT EXISTS blog_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_credentials TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS blog_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('draft', 'publish')),
+        status TEXT NOT NULL CHECK (status IN ('running', 'draft', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_blog_publications_user_created ON blog_publications(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS blog_publication_resolutions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL REFERENCES blog_publications(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN ('check', 'not_published', 'published')),
+        message TEXT NOT NULL,
+        article_url TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_blog_resolutions_publication ON blog_publication_resolutions(publication_id, created_at DESC);
+      PRAGMA user_version = 9;
     `)
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     this.run(`UPDATE douyin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先核实抖音发布结果，避免重复发布。', nowIso()])
@@ -465,6 +511,8 @@ export class Database {
       ['服务已重启，请先核对知乎草稿与已发布文章，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE sspai_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
       ['服务已重启，请先核对少数派草稿与已发布文章，系统不会自动重复发布。', nowIso()])
+    this.run(`UPDATE blog_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
+      ['服务已重启，请先核对个人博客草稿与已发布文章，系统不会自动重复发布。', nowIso()])
   }
 
   private all(sql: string, params: SqlValue[] = []): Row[] {
@@ -1342,6 +1390,71 @@ export class Database {
       if (!current || !['uncertain', 'running'].includes(current.status)) return null
       this.run('INSERT INTO sspai_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
       return this.updateSspaiPublication(userId, id, values)
+    })
+  }
+
+  getBlogAccount(userId: string): BlogAccountSession | null {
+    const row = this.get('SELECT * FROM blog_accounts WHERE user_id = ?', [userId])
+    return row ? { encryptedCredentials: text(row.encrypted_credentials), accountId: text(row.account_id), baseUrl: text(row.base_url), name: nullableText(row.name), status: row.status as BlogAccountSession['status'], checkedAt: text(row.checked_at) } : null
+  }
+
+  saveBlogAccount(userId: string, values: BlogAccountSession): void {
+    this.run(`INSERT INTO blog_accounts (user_id, encrypted_credentials, account_id, base_url, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET encrypted_credentials = excluded.encrypted_credentials,
+      account_id = excluded.account_id, base_url = excluded.base_url, name = excluded.name, status = excluded.status, checked_at = excluded.checked_at`,
+      [userId, values.encryptedCredentials, values.accountId, values.baseUrl, values.name, values.status, values.checkedAt])
+  }
+
+  deleteBlogAccount(userId: string): void { this.run('DELETE FROM blog_accounts WHERE user_id = ?', [userId]) }
+
+  private mapBlogPublication(row: Row): BlogPublication {
+    const resolutions: BlogResolution[] = this.all('SELECT * FROM blog_publication_resolutions WHERE publication_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 10', [text(row.id), text(row.user_id)])
+      .map(r => ({ id: text(r.id), action: r.action as BlogResolution['action'], message: text(r.message), articleUrl: nullableText(r.article_url), createdAt: text(r.created_at) }))
+    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as BlogPublication['mode'], status: row.status as BlogPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at), resolutions }
+  }
+
+  createBlogPublication(userId: string, values: CreateWechatPublicationValues): BlogPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO blog_publications (id, user_id, render_id, title, mode, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?) ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+      [randomUUID(), userId, values.renderId, values.title, values.mode, '正在准备个人博客文章', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findBlogPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create blog publication')
+    return publication
+  }
+
+  getBlogPublication(userId: string, id: string): BlogPublication | null {
+    const row = this.get('SELECT * FROM blog_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapBlogPublication(row) : null
+  }
+
+  findBlogPublication(userId: string, key: string): BlogPublication | null {
+    const row = this.get('SELECT * FROM blog_publications WHERE user_id = ? AND idempotency_key = ?', [userId, key])
+    return row ? this.mapBlogPublication(row) : null
+  }
+
+  hasUncertainBlogPublication(userId: string): boolean {
+    return !!this.get("SELECT id FROM blog_publications WHERE user_id = ? AND status = 'uncertain' LIMIT 1", [userId])
+  }
+
+  listBlogPublications(userId: string): BlogPublication[] {
+    return this.all('SELECT * FROM blog_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapBlogPublication(row))
+  }
+
+  updateBlogPublication(userId: string, id: string, values: Partial<Pick<BlogPublication, 'status' | 'message' | 'url' | 'remoteId'>>): BlogPublication | null {
+    const current = this.getBlogPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE blog_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getBlogPublication(userId, id)
+  }
+
+  resolveBlogPublication(userId: string, id: string, action: BlogResolution['action'], values: Pick<BlogPublication, 'status' | 'message' | 'url' | 'remoteId'>): BlogPublication | null {
+    return this.transaction(() => {
+      const current = this.getBlogPublication(userId, id)
+      if (!current || !['uncertain', 'running'].includes(current.status)) return null
+      this.run('INSERT INTO blog_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
+      return this.updateBlogPublication(userId, id, values)
     })
   }
 }

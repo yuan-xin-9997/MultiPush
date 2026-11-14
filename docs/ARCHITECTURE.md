@@ -35,7 +35,7 @@ Express (single Node process, 0.0.0.0:34080)
 1. `POST /api/renders` 校验平台列表和内容归属。
 2. 读取 `ContentDetail`（Tiptap JSON + HTML）与用户显示名。
 3. 构造 `RenderInput`：`content`、`platforms`、`options`、`authorName`、`baseUrl`。
-4. `renderPlatforms()` 分派到 `wechat.ts` / `xiaohongshu.ts` / `zhihu.ts` / `douyin.ts` / `sspai.ts`：
+4. `renderPlatforms()` 分派到 `wechat.ts` / `xiaohongshu.ts` / `zhihu.ts` / `douyin.ts` / `sspai.ts` / `blog.ts`：
    - HTML 清洗（sanitize-html），相对媒体 URL 转绝对；
    - 提取图片/视频、纯文本、字数、标签；
    - 按平台规则排版，生成 `PlatformRender`（HTML、Markdown、文案、卡片数据、下载内容、警告）。
@@ -97,7 +97,7 @@ Express + node:sqlite → <userData>/data/multipush.sqlite + uploads/
 - 主窗口 `nodeIntegration=false`、`contextIsolation=true`、`sandbox=true`；本地页面仍是普通 Web 安全模型。
 - 素材、账号、会话和发布记录全部保存在 `userData/data`，升级/卸载不自动删除。
 - 自动发布复用本机 Chrome / Edge；没有浏览器时只影响自动发布，不影响编辑、渲染和导出。
-- 发布由 GitHub Actions 在 Windows / macOS 构建，详见 [桌面客户端说明](DESKTOP.md)。少数派使用微信扫码登录，会话与发布记录按用户加密保存，详见 [少数派发布说明](SSPAI_PUBLISHING.md)。
+- 发布由 GitHub Actions 在 Windows / macOS 构建，详见 [桌面客户端说明](DESKTOP.md)。少数派使用微信扫码登录，会话与发布记录按用户加密保存，详见 [少数派发布说明](SSPAI_PUBLISHING.md)。个人博客使用 Halo 个人令牌连接，地址与令牌按用户加密保存，通过 Halo Console API 上传附件并创建/发布文章，详见 [个人博客发布说明](BLOG_PUBLISHING.md)。
 
 ## 部署
 

@@ -839,6 +839,7 @@
 .wechat-scene,
 .zhihu-scene,
 .sspai-scene,
+.blog-scene,
 .xhs-scene,
 .douyin-scene {
   display: flex;
@@ -1059,6 +1060,7 @@
 .wechat-side-note,
 .zhihu-side-note,
 .sspai-side-note,
+.blog-side-note,
 .xhs-side-note {
   width: 228px;
   flex: 0 0 auto;
@@ -1068,6 +1070,7 @@
 .wechat-side-icon,
 .zhihu-side-icon,
 .sspai-side-icon,
+.blog-side-icon,
 .xhs-side-icon {
   display: grid;
   width: 38px;
@@ -1088,6 +1091,11 @@
   color: #d71a1b;
 }
 
+.blog-side-icon {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
 .xhs-side-icon {
   background: #fff0f2;
   color: #e11d3f;
@@ -1096,6 +1104,7 @@
 .wechat-side-note h3,
 .zhihu-side-note h3,
 .sspai-side-note h3,
+.blog-side-note h3,
 .xhs-side-note h3 {
   margin-top: 12px;
   color: var(--ink);
@@ -1106,6 +1115,7 @@
 .wechat-side-note p,
 .zhihu-side-note p,
 .sspai-side-note p,
+.blog-side-note p,
 .xhs-side-note p {
   margin-top: 6px;
   color: var(--muted);
@@ -1116,6 +1126,7 @@
 .wechat-side-note .btn,
 .zhihu-side-note .btn,
 .sspai-side-note .btn,
+.blog-side-note .btn,
 .xhs-side-note .btn {
   margin-top: 13px;
 }
@@ -1449,6 +1460,168 @@
   padding: 4px 9px;
   border-radius: 4px;
   background: #faf7f6;
+}
+
+/* ---------- Personal blog (Halo) ---------- */
+.blog-browser-shell {
+  display: flex;
+  width: min(760px, 100%);
+  height: min(694px, calc(100vh - 265px));
+  min-height: 540px;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e7e5e4;
+  border-radius: 14px;
+  background: #fafaf9;
+  box-shadow: 0 22px 54px rgba(31, 35, 41, 0.12);
+}
+
+.blog-browser-bar {
+  display: flex;
+  height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid #e7e5e4;
+  background: rgba(250, 250, 249, 0.92);
+}
+
+.blog-brand {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.blog-browser-url {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
+  color: #a8a29e;
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.blog-browser-action {
+  color: #bdb5b1;
+}
+
+.blog-browser-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.blog-article {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 38px 42px 46px;
+}
+
+.blog-article-kicker {
+  color: #78716c;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.blog-article > h1 {
+  margin-top: 10px;
+  color: #1c1917;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.35;
+}
+
+.blog-author-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 28px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #e7e5e4;
+}
+
+.blog-avatar {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.blog-author-row > span:nth-child(2) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.blog-author-row strong {
+  color: #1c1917;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.blog-author-row small {
+  color: #a8a29e;
+  font-size: 8.5px;
+}
+
+.blog-follow {
+  padding: 3px 9px;
+  border: 1px solid #d6d3d1;
+  border-radius: 999px;
+  color: #78716c;
+  font-size: 8.5px;
+}
+
+.blog-body {
+  color: #1c1917;
+  word-break: break-word;
+}
+
+.blog-body img,
+.blog-body video {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+.blog-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.blog-foot {
+  display: flex;
+  gap: 8px;
+  margin-top: 30px;
+  padding-top: 16px;
+  border-top: 1px solid #e7e5e4;
+  color: #a8a29e;
+  font-size: 8.5px;
+}
+
+.blog-foot span {
+  padding: 4px 9px;
+  border-radius: 4px;
+  background: #f5f5f4;
 }
 
 /* ---------- Xiaohongshu ---------- */
@@ -3220,6 +3393,7 @@
   .wechat-side-note,
   .zhihu-side-note,
   .sspai-side-note,
+  .blog-side-note,
   .xhs-side-stack,
   .douyin-side-note {
     display: none;
@@ -3266,7 +3440,8 @@
   }
 
   .browser-shell,
-  .sspai-browser-shell {
+  .sspai-browser-shell,
+  .blog-browser-shell {
     width: 100%;
   }
 }
@@ -3449,7 +3624,8 @@
   }
 
   .zhihu-article,
-  .sspai-article {
+  .sspai-article,
+  .blog-article {
     padding: 24px 20px 30px;
   }
 

@@ -112,7 +112,7 @@ export const favoriteBodySchema = z.object({
   favorite: z.boolean(),
 })
 
-const platformSchema = z.enum(['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai'])
+const platformSchema = z.enum(['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai', 'blog'])
 const mediaUrlSchema = z.string().max(2048).refine((value) => /^(https?:\/\/|\/uploads\/|data:image\/(png|jpeg|webp|gif);base64,)/i.test(value), '图片地址无效')
 export const renderPlatformParamsSchema = z.object({ id: z.string().max(100), platform: platformSchema })
 export const platformAdjustmentSchema = z.object({
@@ -147,7 +147,7 @@ export const renderRequestSchema = z.object({
   platforms: z
     .array(platformSchema)
     .min(1, '请至少选择一个平台')
-    .max(5, '最多选择五个平台')
+    .max(6, '最多选择六个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
 })

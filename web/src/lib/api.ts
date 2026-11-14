@@ -40,6 +40,11 @@ import type {
   SspaiPublication,
   SspaiPublishInput,
   SspaiResolveInput,
+  BlogAccount,
+  BlogConnectInput,
+  BlogPublication,
+  BlogPublishInput,
+  BlogResolveInput,
 } from '@shared/types'
 
 const TOKEN_KEY = 'multipush_token'
@@ -270,6 +275,14 @@ export const api = {
     listPublications: () => request<{ publications: SspaiPublication[] }>('/api/sspai/publications', { cache: 'no-store' }),
     publish: (input: SspaiPublishInput) => request<{ publication: SspaiPublication }>('/api/sspai/publications', { method: 'POST', body: JSON.stringify(input) }),
   },
+  blog: {
+    resolve: (id: string, input: BlogResolveInput) => request<{ publication: BlogPublication }>(`/api/blog/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: BlogAccount }>('/api/blog/account', { cache: 'no-store' }),
+    connect: (input: BlogConnectInput) => request<{ account: BlogAccount }>('/api/blog/connect', { method: 'POST', body: JSON.stringify(input) }),
+    disconnect: () => request<{ ok: true }>('/api/blog/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: BlogPublication[] }>('/api/blog/publications', { cache: 'no-store' }),
+    publish: (input: BlogPublishInput) => request<{ publication: BlogPublication }>('/api/blog/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
 
   renders: {
     adjust: (id: string, platform: PlatformId, input: PlatformAdjustment) => request<{ result: PlatformRender }>(`/api/renders/${id}/platforms/${platform}`, { method: 'PATCH', body: JSON.stringify(input) }),
@@ -284,7 +297,7 @@ export const api = {
 }
 
 export function isPlatformId(value: string): value is PlatformId {
-  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'douyin' || value === 'sspai'
+  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'douyin' || value === 'sspai' || value === 'blog'
 }
 
 /** Make an uploaded relative URL absolute for previews / rendering. */

@@ -27,6 +27,9 @@ import { createZhihuRouter } from './routes/zhihu'
 import { SspaiService } from './sspai'
 import { PlaywrightSspaiDriver, type SspaiDriver } from './sspai-browser'
 import { createSspaiRouter } from './routes/sspai'
+import { BlogService } from './blog'
+import { HaloBlogDriver, type BlogDriver } from './blog-halo'
+import { createBlogRouter } from './routes/blog'
 
 function securityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction): void {
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -110,7 +113,7 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
@@ -121,6 +124,8 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.douyin = douyin
   const sspai = new SspaiService(database, config, sspaiDriver ?? new PlaywrightSspaiDriver())
   app.locals.sspai = sspai
+  const blog = new BlogService(database, config, blogDriver ?? new HaloBlogDriver())
+  app.locals.blog = blog
   app.disable('x-powered-by')
   app.use(securityHeaders)
   if (config.desktopMode) app.use(desktopLoopbackGuard)
@@ -144,6 +149,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/xiaohongshu', requireAuth, createXhsRouter(database))
   app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))
   app.use('/api/sspai', requireAuth, createSspaiRouter(sspai))
+  app.use('/api/blog', requireAuth, createBlogRouter(blog))
   app.use('/api', createMetaRouter(config, requireAuth))
   app.use('/api', apiNotFound)
 

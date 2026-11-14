@@ -1,4 +1,4 @@
-import { BookOpen, Heart, MessageCircle, Music2, Newspaper } from 'lucide-react'
+import { BookOpen, Globe2, Heart, MessageCircle, Music2, Newspaper } from 'lucide-react'
 import type { PlatformId } from '@shared/types'
 
 interface PlatformGlyphProps {
@@ -26,6 +26,9 @@ export default function PlatformGlyph({
   }
   if (platform === 'sspai') {
     return <Newspaper size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
+  }
+  if (platform === 'blog') {
+    return <Globe2 size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
   }
   return <BookOpen size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
 }
