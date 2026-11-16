@@ -5,6 +5,7 @@ import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
 import { ApiError } from './errors'
+import { qrReady } from './qr-capture'
 
 export interface ToutiaoIdentity { accountId: string; name: string }
 export interface ToutiaoArticle { title: string; html: string; text: string; images: PublisherImage[] }
@@ -29,6 +30,8 @@ const EDITOR = 'div.ProseMirror[contenteditable="true"], div[contenteditable="tr
 type Data = Record<string, unknown>
 function object(value: unknown): Data { return value && typeof value === 'object' && !Array.isArray(value) ? value as Data : {} }
 const expired = () => new ApiError(409, 'toutiao_session_expired', '今日头条登录状态已失效，请重新扫码连接')
+function log(...parts: unknown[]): void { console.log('[toutiao]', ...parts) }
+
 
 export function parseToutiaoLogin(value: unknown): ToutiaoIdentity | null {
   const root = object(value)
@@ -71,13 +74,22 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
     return context
   }
 
-  private async profile(context: BrowserContext): Promise<ToutiaoIdentity | null> {
+  private async profile(context: BrowserContext, verbose = false): Promise<ToutiaoIdentity | null> {
     const response = await context.request.get(`${HOME}mp/agw/media/user_login_status_api`, {
       headers: { 'x-requested-with': 'XMLHttpRequest', Referer: `${HOME}profile_v4/index`, Accept: 'application/json' },
       timeout: 20_000,
-    })
-    if (response.status() === 401 || response.status() === 403) return null
-    return parseToutiaoLogin(await response.json().catch(() => null))
+    }).catch(() => null)
+    if (!response) { if (verbose) log('login status request failed'); return null }
+    if (response.status() === 401 || response.status() === 403) { if (verbose) log('login status', response.status()); return null }
+    const body = await response.text().catch(() => '')
+    let parsed: unknown = null
+    try { parsed = JSON.parse(body) } catch {}
+    const identity = parseToutiaoLogin(parsed)
+    if (!identity && verbose) {
+      const root = object(parsed), data = object(root.data)
+      log('login status did not report a signed-in account', 'status=' + response.status(), 'code=' + String(root.code), 'is_login=' + String(data.is_login))
+    }
+    return identity
   }
 
   private async security(page: Page): Promise<void> {
@@ -100,6 +112,7 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
     const readQr = async (): Promise<string | null> => {
       const qr = page.locator(QR).first()
       if (!await qr.isVisible().catch(() => false)) return null
+      await qrReady(qr)
       return `data:image/png;base64,${(await qr.screenshot({ type: 'png', timeout: 5_000 })).toString('base64')}`
     }
     try {
@@ -107,6 +120,7 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
       if (response?.status() === 403) throw new ApiError(409, 'toutiao_security_check', '今日头条登录页要求安全验证，请稍后重试')
       await page.locator(QR).first().waitFor({ state: 'visible', timeout: 20_000 })
       qrCode = await readQr()
+      log('login QR ready')
     } catch (error) {
       await close()
       if (error instanceof ApiError) throw error
@@ -118,12 +132,23 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
         if (closed || Date.now() > deadline) return { status: 'expired', qrCode: null, message: '今日头条登录二维码已过期，请重新获取' }
         const text = await page.locator('body').innerText().catch(() => '')
         if (/二维码已过期|二维码失效/.test(text)) return { status: 'expired', qrCode: null, message: '二维码已失效，请重新获取' }
-        const identity = await this.profile(context).catch(() => null)
-        if (identity) return { status: 'connected', qrCode: null, message: '今日头条已登录，登录状态已保存', state: await context.storageState(), identity }
+        // Leaving the login page means the scan was accepted and the session is being created.
+        const leftLogin = !/\/auth\/page\/login|passport/i.test(page.url())
+        const identity = await this.profile(context, leftLogin).catch(() => null)
+        if (identity) {
+          log('login completed', identity.accountId)
+          return { status: 'connected', qrCode: null, message: '今日头条已登录，登录状态已保存', state: await context.storageState(), identity }
+        }
         const next = await readQr().catch(() => null)
         if (next) qrCode = next
-        const scanned = /扫码成功|已扫码|请在手机上确认|在今日头条App中确认/.test(text)
-        return { status: scanned ? 'scanned' : 'waiting', qrCode, message: scanned ? '请在今日头条 App 中确认登录' : '请使用今日头条 App 扫描二维码登录' }
+        const scanned = /成功扫描|扫描成功|扫码成功|已扫码|请在手机.{0,8}确认|在今日头条App中确认|登录成功/.test(text) || leftLogin
+        return {
+          status: scanned ? 'scanned' : 'waiting',
+          qrCode,
+          message: leftLogin
+            ? '今日头条已登录，正在读取账号信息…'
+            : scanned ? '已扫描，请在今日头条 App 中点击确认登录' : '请使用今日头条 App 扫描二维码登录',
+        }
       },
     }
   }

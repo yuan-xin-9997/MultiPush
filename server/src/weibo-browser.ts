@@ -4,6 +4,7 @@ import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
 import { ApiError } from './errors'
+import { qrReady } from './qr-capture'
 
 export interface WeiboIdentity { accountId: string; name: string }
 export interface WeiboArticle { text: string; images: PublisherImage[] }
@@ -21,11 +22,20 @@ export interface WeiboDriver {
 
 const HOME = 'https://weibo.com/'
 const LOGIN = 'https://passport.weibo.com/sso/signin?entry=miniblog&source=miniblog'
+const CONFIG = 'https://m.weibo.cn/api/config'
 const QR = 'img[src*="qr.weibo.cn"], img[src*="qrcode"]'
 const COMPOSER = 'textarea[placeholder*="有什么新鲜事"], textarea[placeholder*="分享"], div[contenteditable="true"][data-placeholder*="新鲜事"], div[contenteditable="true"][aria-label*="微博"]'
 type Data = Record<string, unknown>
 function object(value: unknown): Data { return value && typeof value === 'object' && !Array.isArray(value) ? value as Data : {} }
 const expired = () => new ApiError(409, 'weibo_session_expired', '微博登录状态已失效，请重新扫码连接')
+function log(...parts: unknown[]): void { console.log('[weibo]', ...parts) }
+let lastProfileLog = 0
+function logThrottled(...parts: unknown[]): void {
+  if (Date.now() - lastProfileLog < 30_000) return
+  lastProfileLog = Date.now()
+  log(...parts)
+}
+
 
 async function weiboJson(response: APIResponse, action: string): Promise<Data> {
   const data = object(await response.json().catch(() => null))
@@ -80,14 +90,46 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
     return context
   }
 
+  /**
+   * Reads the signed-in account without guessing at an id: `m.weibo.cn/api/config`
+   * reports the current uid for the cookie jar. Weibo's desktop `ajax/profile/info`
+   * rejects requests without `uid` ("缺少必要参数"), so the uid is mandatory.
+   */
+  private async currentUser(context: BrowserContext): Promise<WeiboIdentity | null> {
+    const response = await context.request.get(CONFIG, {
+      headers: { Accept: 'application/json', Referer: 'https://m.weibo.cn/', 'x-requested-with': 'XMLHttpRequest' },
+      timeout: 20_000,
+    }).catch(() => null)
+    if (!response) { logThrottled('current user request failed'); return null }
+    const data = object(object(await response.json().catch(() => null)).data)
+    const flag = data.login
+    if (!(flag === true || flag === 1 || flag === 'true')) {
+      logThrottled('config reports not signed in', response.status())
+      return null
+    }
+    const raw = data.uid ?? object(data.user).uid ?? data.user_id ?? data.id
+    const accountId = typeof raw === 'string' || typeof raw === 'number' ? String(raw) : ''
+    const name = [data.screen_name, data.nick, object(data.user).screen_name]
+      .find((value): value is string => typeof value === 'string' && value.trim().length > 0)?.trim() ?? ''
+    if (!accountId) logThrottled('config reports signed in without uid')
+    return { accountId, name }
+  }
+
   private async profile(context: BrowserContext): Promise<WeiboIdentity | null> {
-    const response = await context.request.get(`${HOME}ajax/profile/info`, {
+    const current = await this.currentUser(context).catch(() => null)
+    if (!current) return null
+    if (!current.accountId) return { accountId: '', name: current.name || '微博用户' }
+    const response = await context.request.get(`${HOME}ajax/profile/info?uid=${encodeURIComponent(current.accountId)}`, {
       headers: { 'x-requested-with': 'XMLHttpRequest', Referer: HOME, Accept: 'application/json' },
       timeout: 20_000,
-    })
-    if (response.status() === 401 || response.status() === 403) return null
-    const data = object(await response.json().catch(() => null))
-    return parseWeiboProfile(data)
+    }).catch(() => null)
+    if (response) {
+      const identity = parseWeiboProfile(object(await response.json().catch(() => null)))
+      if (identity) return identity
+      log('profile/info returned no identity', response.status(), 'uid=' + current.accountId)
+    }
+    // Keep the nickname learned from the config endpoint when the profile call fails.
+    return { accountId: current.accountId, name: current.name || '微博用户' }
   }
 
   private async security(page: Page): Promise<void> {
@@ -99,12 +141,13 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
 
   async beginLogin(): Promise<WeiboLoginAttempt> {
     const context = await this.context(), page = await context.newPage()
-    let closed = false, qrCode: string | null = null
+    let closed = false, qrCode: string | null = null, signedInAt = 0
     const close = async () => { if (!closed) { closed = true; await context.close().catch(() => {}) } }
     const deadline = Date.now() + 5 * 60_000
     const readQr = async (): Promise<string | null> => {
       const qr = page.locator(QR).first()
       if (!await qr.isVisible().catch(() => false)) return null
+      await qrReady(qr)
       return `data:image/png;base64,${(await qr.screenshot({ type: 'png', timeout: 5_000 })).toString('base64')}`
     }
     try {
@@ -112,6 +155,7 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
       if (response?.status() === 403) throw new ApiError(409, 'weibo_security_check', '微博登录页要求安全验证，请稍后重试')
       await page.locator(QR).first().waitFor({ state: 'visible', timeout: 20_000 })
       qrCode = await readQr()
+      log('login QR ready')
     } catch (error) {
       await close()
       if (error instanceof ApiError) throw error
@@ -124,14 +168,33 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
         const text = await page.locator('body').innerText().catch(() => '')
         if (/二维码已过期|二维码失效/.test(text)) return { status: 'expired', qrCode: null, message: '二维码已失效，请重新获取' }
         const cookies = await context.cookies().catch(() => [])
-        if (cookies.some(cookie => cookie.name === 'SUB' && cookie.value && /(^|\.)weibo\.com$/i.test(cookie.domain))) {
+        const signedIn = cookies.some(cookie => cookie.name === 'SUB' && cookie.value && /(^|\.)weibo\.com$/i.test(cookie.domain))
+        if (signedIn) {
+          if (!signedInAt) signedInAt = Date.now()
           const identity = await this.profile(context).catch(() => null)
-          if (identity) return { status: 'connected', qrCode: null, message: '微博已登录，登录状态已保存', state: await context.storageState(), identity }
+          if (identity) {
+            log('login completed', identity.accountId || '(uid unavailable)')
+            return { status: 'connected', qrCode: null, message: '微博已登录，登录状态已保存', state: await context.storageState(), identity }
+          }
+          // The session cookie is already valid; never leave the user stuck on a
+          // cosmetic nickname lookup. Fall back after a short grace period.
+          if (Date.now() - signedInAt > 6_000) {
+            log('identity lookup kept failing; saving the session with a placeholder name')
+            return { status: 'connected', qrCode: null, message: '微博已登录，登录状态已保存', state: await context.storageState(), identity: { accountId: '', name: '微博用户' } }
+          }
+          log('SUB cookie present but identity lookup failed; will retry')
         }
         const next = await readQr().catch(() => null)
         if (next) qrCode = next
-        const scanned = /扫码成功|已扫码|请在手机上确认|在手机微博中确认/.test(text)
-        return { status: scanned ? 'scanned' : 'waiting', qrCode, message: scanned ? '请在微博 App 中确认登录' : '请使用微博 App 扫描二维码登录' }
+        // The official page says "成功扫描，请在手机点击确认以登录".
+        const scanned = /成功扫描|扫描成功|扫码成功|已扫码|请在手机.{0,8}确认|在手机微博中确认|登录成功/.test(text)
+        return {
+          status: scanned ? 'scanned' : 'waiting',
+          qrCode,
+          message: signedIn
+            ? '微博已登录，正在读取账号信息…'
+            : scanned ? '已扫描，请在微博 App 中点击确认登录' : '请使用微博 App 扫描二维码登录',
+        }
       },
     }
   }

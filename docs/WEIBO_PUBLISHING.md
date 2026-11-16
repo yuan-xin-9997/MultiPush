@@ -20,12 +20,13 @@
 在「发布管理 → 微博」点击「扫码连接微博」，系统打开微博官方登录页 `https://passport.weibo.com/sso/signin?entry=miniblog&source=miniblog`，读取官方二维码并展示在系统内。
 
 - 使用微博 App 扫码并在手机上确认；
-- 登录成功后从 `weibo.com/ajax/profile/info` 读取账号 ID 和昵称；
+- 登录成功后先用 `m.weibo.cn/api/config` 读取当前 uid（`weibo.com/ajax/profile/info` 必须带 `?uid=`，否则返回 400「缺少必要参数」），再读取账号昵称；
+- 扫码后页面提示「成功扫描，请在手机点击确认以登录」时，界面同步提示已扫码；
 - 浏览器 Cookie/localStorage 使用 AES-256-GCM 加密保存，密钥位于 `DATA_DIR/.weibo-session-key`，加密绑定 MultiPush 用户 ID；
 - 断开连接只删除本系统会话，不会退出微博其他设备；
 - 会话过期时重新扫码；遇到安全验证停止操作。
 
-真实登录页和二维码已在本地通过无头 Chrome 验证；账号状态、二维码轮询和账号隔离由单元测试覆盖。
+真实扫码登录已在本地通过无头 Chrome 验证：二维码图片不会在加载完成前截屏；扫码后 4 秒内确认，Cookie 写入后即可读出 uid 和昵称。账号状态、二维码轮询和账号隔离由单元测试覆盖。
 
 ## 发布
 
