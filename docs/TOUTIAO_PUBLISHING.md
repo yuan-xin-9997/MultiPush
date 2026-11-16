@@ -17,12 +17,13 @@
 在「发布管理 → 今日头条」点击「扫码连接今日头条」，系统打开头条号官方登录页 `https://mp.toutiao.com/auth/page/login`，读取官方二维码并展示在系统内。
 
 - 使用今日头条 App 扫码并在手机上确认；
-- 登录成功后通过 `GET /mp/agw/media/user_login_status_api` 读取账号状态、账号 ID 和昵称；
+- 扫码登录后 `/mp/agw/media/user_login_status_api` 只返回 `is_login: true`（`user`/`media` 为空），账号 ID 与昵称改从 `GET /mp/agw/media/get_media_info` 读取；该接口失败不阻塞登录，昵称回退为「今日头条作者」；
+- 二维码扫码后页面提示「登录成功」并跳转，界面同步显示已扫描/正在读取账号信息；
 - 浏览器 Cookie/localStorage 使用 AES-256-GCM 加密保存，密钥位于 `DATA_DIR/.toutiao-session-key`，加密绑定 MultiPush 用户 ID；
 - 断开连接只删除本系统会话，不会退出其他设备；
 - 会话过期时重新扫码；遇到安全验证停止操作。
 
-真实登录页和二维码已用本机无头 Chrome 验证；账号状态、二维码轮询和账号隔离由单元测试覆盖。
+真实扫码登录已验证：二维码图片加载完成后再截屏，手机确认后 `is_login` 变为 true 即完成连接。账号状态、二维码轮询和账号隔离由单元测试覆盖。
 
 ## 发布
 

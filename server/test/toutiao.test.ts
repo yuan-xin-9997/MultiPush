@@ -8,7 +8,7 @@ import { ApiError } from '../src/errors'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey } from '../src/publisher-session'
 import { renderPlatforms } from '../src/renderers'
 import { ToutiaoService, parseToutiaoPublishedId } from '../src/toutiao'
-import { parseToutiaoLogin, parseToutiaoPublished, type ToutiaoDriver, type ToutiaoLoginAttempt } from '../src/toutiao-browser'
+import { parseToutiaoLogin, parseToutiaoMediaInfo, parseToutiaoPublished, type ToutiaoDriver, type ToutiaoLoginAttempt } from '../src/toutiao-browser'
 import type { ContentDetail } from '../../shared/types'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -106,6 +106,11 @@ describe('Toutiao parsing', () => {
   it('parses login, article IDs and public links', () => {
     expect(parseToutiaoLogin({ code: 0, data: { is_login: true, user: { user_id: '123', screen_name: '作者' } } })).toEqual({ accountId: '123', name: '作者' })
     expect(parseToutiaoLogin({ code: 0, data: { is_login: false } })).toBeNull()
+    // QR sign-in reports is_login without user/media; the account comes from get_media_info.
+    expect(parseToutiaoLogin({ code: 0, data: { is_login: true, user: {}, media: {} } })).toBeNull()
+    expect(parseToutiaoMediaInfo({ media: { media_id: '1234567890', name: '头条号' }, user: { user_id: '42', screen_name: '作者' } })).toEqual({ accountId: '1234567890', name: '头条号' })
+    expect(parseToutiaoMediaInfo({ user: { user_id: '42', screen_name: '作者' } })).toEqual({ accountId: '42', name: '作者' })
+    expect(parseToutiaoMediaInfo({})).toEqual({ accountId: '', name: '' })
     expect(parseToutiaoPublished({ code: 0, data: { pgc_id: '5000000000000001' } })).toEqual({ remoteId: '5000000000000001', url: 'https://www.toutiao.com/article/5000000000000001/' })
     expect(parseToutiaoPublishedId('https://www.toutiao.com/article/5000000000000001/')).toBe('5000000000000001')
     expect(parseToutiaoPublishedId('https://m.toutiao.com/article/5000000000000001/')).toBe('5000000000000001')

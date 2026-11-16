@@ -47,6 +47,30 @@ export function parseToutiaoLogin(value: unknown): ToutiaoIdentity | null {
   return { accountId: id, name: name || '今日头条作者' }
 }
 
+/** Pulls the media/user identity out of `mp/agw/media/get_media_info` without assuming one exact shape. */
+export function parseToutiaoMediaInfo(value: unknown): ToutiaoIdentity {
+  const root = object(value)
+  const bags = [object(root.media), object(root.user), object(root.account), root]
+  const pick = (keys: string[]): string => {
+    for (const bag of bags) {
+      for (const key of keys) {
+        const raw = bag[key]
+        if (typeof raw === 'string' && raw.trim()) return raw.trim()
+        if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw)
+      }
+    }
+    return ''
+  }
+  return {
+    accountId: pick(['media_id', 'user_id', 'idstr', 'id_str', 'uid', 'id']),
+    name: pick(['media_name', 'screen_name', 'name', 'nickname', 'user_name']),
+  }
+}
+
+function json(text: string): unknown {
+  try { return JSON.parse(text) } catch { return null }
+}
+
 export function parseToutiaoPublished(value: unknown): { remoteId: string; url: string } | null {
   const root = object(value)
   if (Number(root.code ?? 0) !== 0) return null
@@ -75,21 +99,36 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
   }
 
   private async profile(context: BrowserContext, verbose = false): Promise<ToutiaoIdentity | null> {
-    const response = await context.request.get(`${HOME}mp/agw/media/user_login_status_api`, {
-      headers: { 'x-requested-with': 'XMLHttpRequest', Referer: `${HOME}profile_v4/index`, Accept: 'application/json' },
-      timeout: 20_000,
-    }).catch(() => null)
+    const headers = { 'x-requested-with': 'XMLHttpRequest', Referer: `${HOME}profile_v4/index`, Accept: 'application/json' }
+    const response = await context.request.get(`${HOME}mp/agw/media/user_login_status_api`, { headers, timeout: 20_000 }).catch(() => null)
     if (!response) { if (verbose) log('login status request failed'); return null }
     if (response.status() === 401 || response.status() === 403) { if (verbose) log('login status', response.status()); return null }
-    const body = await response.text().catch(() => '')
-    let parsed: unknown = null
-    try { parsed = JSON.parse(body) } catch {}
-    const identity = parseToutiaoLogin(parsed)
-    if (!identity && verbose) {
-      const root = object(parsed), data = object(root.data)
-      log('login status did not report a signed-in account', 'status=' + response.status(), 'code=' + String(root.code), 'is_login=' + String(data.is_login))
+    const parsed = json(await response.text().catch(() => ''))
+    // Password/SMS sign-in embeds the account in the status payload.
+    const embedded = parseToutiaoLogin(parsed)
+    if (embedded) return embedded
+    const root = object(parsed), data = object(root.data)
+    const signedIn = Number(root.code) === 0 && [true, 1, '1'].includes(data.is_login as boolean | number | string)
+    if (!signedIn) {
+      if (verbose) log('login status did not report a signed-in account', 'status=' + response.status(), 'code=' + String(root.code), 'is_login=' + String(data.is_login))
+      return null
     }
-    return identity
+    // QR sign-in answers `{is_login:true, user:{}, media:{}}`; the account itself
+    // comes from get_media_info. Never block the login on this lookup.
+    let accountId = '', name = ''
+    const info = await context.request.get(`${HOME}mp/agw/media/get_media_info`, { headers, timeout: 20_000 }).catch(() => null)
+    if (info?.ok()) {
+      const infoRoot = object(json(await info.text().catch(() => '')))
+      if (Number(infoRoot.code) === 0) {
+        const identity = parseToutiaoMediaInfo(infoRoot.data)
+        accountId = identity.accountId; name = identity.name
+        if (!accountId && verbose) {
+          const payload = object(infoRoot.data)
+          log('media info has no recognisable id', JSON.stringify(Object.keys(payload)), JSON.stringify(Object.keys(object(payload.media))), JSON.stringify(Object.keys(object(payload.user))))
+        }
+      } else if (verbose) log('media info', info.status(), 'code=' + String(infoRoot.code))
+    }
+    return { accountId, name: name || '今日头条作者' }
   }
 
   private async security(page: Page): Promise<void> {
