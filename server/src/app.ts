@@ -30,6 +30,10 @@ import { createSspaiRouter } from './routes/sspai'
 import { BlogService } from './blog'
 import { HaloBlogDriver, type BlogDriver } from './blog-halo'
 import { createBlogRouter } from './routes/blog'
+import { BatchService } from './batch'
+import { AiService } from './ai'
+import { createBatchRouter } from './routes/batch'
+import { createAiRouter } from './routes/ai'
 
 function securityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction): void {
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -126,6 +130,10 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.sspai = sspai
   const blog = new BlogService(database, config, blogDriver ?? new HaloBlogDriver())
   app.locals.blog = blog
+  const batch = new BatchService(database, config, wechat, zhihu, sspai, blog)
+  app.locals.batch = batch
+  const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, batch)
+  app.locals.ai = ai
   app.disable('x-powered-by')
   app.use(securityHeaders)
   if (config.desktopMode) app.use(desktopLoopbackGuard)
@@ -150,6 +158,8 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))
   app.use('/api/sspai', requireAuth, createSspaiRouter(sspai))
   app.use('/api/blog', requireAuth, createBlogRouter(blog))
+  app.use('/api/ai', requireAuth, createAiRouter(ai))
+  app.use('/api/batch', requireAuth, createBatchRouter(batch))
   app.use('/api', createMetaRouter(config, requireAuth))
   app.use('/api', apiNotFound)
 

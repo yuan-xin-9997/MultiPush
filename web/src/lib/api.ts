@@ -12,6 +12,7 @@ import type {
   LoginInput,
   MediaAsset,
   PlatformInfo,
+  PublicationDeletion,
   PlatformId,
   RegisterInput,
   RenderListItem,
@@ -45,6 +46,14 @@ import type {
   BlogPublication,
   BlogPublishInput,
   BlogResolveInput,
+  AiChatResult,
+  AiSession,
+  AiSessionDetail,
+  AiSettings,
+  AiSettingsInput,
+  BatchJob,
+  BatchPublishInput,
+  BatchRenderInput,
 } from '@shared/types'
 
 const TOKEN_KEY = 'multipush_token'
@@ -237,6 +246,7 @@ export const api = {
     listPublications: () => request<{ publications: WechatPublication[] }>('/api/wechat/publications', { cache: 'no-store' }),
     publish: (input: WechatPublishInput) => request<{ publication: WechatPublication }>('/api/wechat/publications', { method: 'POST', body: JSON.stringify(input) }),
     getPublication: (id: string) => request<{ publication: WechatPublication }>(`/api/wechat/publications/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/wechat/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
 
   zhihu: {
@@ -247,6 +257,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/zhihu/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: ZhihuPublication[] }>('/api/zhihu/publications', { cache: 'no-store' }),
     publish: (input: ZhihuPublishInput) => request<{ publication: ZhihuPublication }>('/api/zhihu/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/zhihu/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   xiaohongshu: {
     resolve: (id: string, input: XhsResolveInput) => request<{ publication: XhsPublication }>(`/api/xiaohongshu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -265,6 +276,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/douyin/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: DouyinPublication[] }>('/api/douyin/publications', { cache: 'no-store' }),
     publish: (input: DouyinPublishInput) => request<{ publication: DouyinPublication }>('/api/douyin/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/douyin/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   sspai: {
     resolve: (id: string, input: SspaiResolveInput) => request<{ publication: SspaiPublication }>(`/api/sspai/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -274,6 +286,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/sspai/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: SspaiPublication[] }>('/api/sspai/publications', { cache: 'no-store' }),
     publish: (input: SspaiPublishInput) => request<{ publication: SspaiPublication }>('/api/sspai/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/sspai/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   blog: {
     resolve: (id: string, input: BlogResolveInput) => request<{ publication: BlogPublication }>(`/api/blog/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -282,6 +295,26 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/blog/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: BlogPublication[] }>('/api/blog/publications', { cache: 'no-store' }),
     publish: (input: BlogPublishInput) => request<{ publication: BlogPublication }>('/api/blog/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/blog/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
+
+  ai: {
+    settings: () => request<{ settings: AiSettings }>('/api/ai/settings', { cache: 'no-store' }),
+    saveSettings: (input: AiSettingsInput) => request<{ settings: AiSettings }>('/api/ai/settings', { method: 'PUT', body: JSON.stringify(input) }),
+    deleteSettings: () => request<{ ok: true }>('/api/ai/settings', { method: 'DELETE' }),
+    testSettings: () => request<{ ok: true; message: string; model: string }>('/api/ai/settings/test', { method: 'POST' }),
+    listSessions: () => request<{ sessions: AiSession[] }>('/api/ai/sessions', { cache: 'no-store' }),
+    createSession: (title?: string) => request<{ session: AiSession }>('/api/ai/sessions', { method: 'POST', body: JSON.stringify({ ...(title ? { title } : {}) }) }),
+    getSession: (id: string) => request<{ session: AiSessionDetail }>(`/api/ai/sessions/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    deleteSession: (id: string) => request<{ ok: true }>(`/api/ai/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    sendMessage: (id: string, message: string) => request<AiChatResult>(`/api/ai/sessions/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ message }) }),
+  },
+
+  batch: {
+    listJobs: () => request<{ jobs: BatchJob[] }>('/api/batch/jobs', { cache: 'no-store' }),
+    getJob: (id: string) => request<{ job: BatchJob }>(`/api/batch/jobs/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    render: (input: BatchRenderInput) => request<{ job: BatchJob }>('/api/batch/render', { method: 'POST', body: JSON.stringify(input) }),
+    publish: (input: BatchPublishInput) => request<{ job: BatchJob }>('/api/batch/publish', { method: 'POST', body: JSON.stringify(input) }),
   },
 
   renders: {

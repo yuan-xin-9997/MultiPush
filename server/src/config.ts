@@ -3,6 +3,13 @@ import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import packageJson from '../package.json'
 
+export interface AiDefaultConfig {
+  apiKey: string
+  baseUrl: string
+  model: string
+  label: string
+}
+
 export interface AppConfig {
   host: string
   port: number
@@ -15,6 +22,7 @@ export interface AppConfig {
   jwtSecret: string
   publicBaseUrl: string | null
   desktopMode: boolean
+  aiDefaults: AiDefaultConfig | null
   version: string
 }
 
@@ -27,6 +35,7 @@ export interface ConfigOverrides {
   jwtSecret?: string
   publicBaseUrl?: string | null
   desktopMode?: boolean
+  aiDefaults?: AiDefaultConfig | null
 }
 
 const DEFAULT_PORT = 34080
@@ -144,6 +153,20 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
   const publicBaseUrl =
     overrides.publicBaseUrl === undefined ? normalizeBaseUrl(trimmedEnv('PUBLIC_BASE_URL')) : normalizeBaseUrl(overrides.publicBaseUrl)
   const desktopMode = overrides.desktopMode ?? (trimmedEnv('MULTIPUSH_DESKTOP') === '1')
+  const openCodeKey = trimmedEnv('OPENCODE_GO_API_KEY')
+  const defaultApiKey = trimmedEnv('AI_DEFAULT_API_KEY') ?? openCodeKey
+  const defaultBaseUrl = trimmedEnv('AI_DEFAULT_BASE_URL') ?? (openCodeKey ? 'https://opencode.ai/inference/go/openai/v1' : null)
+  const defaultModel = trimmedEnv('AI_DEFAULT_MODEL') ?? (openCodeKey ? 'deepseek-v4.1-flash' : null)
+  const aiDefaults = overrides.aiDefaults !== undefined
+    ? overrides.aiDefaults
+    : defaultApiKey && defaultBaseUrl && defaultModel
+      ? {
+          apiKey: defaultApiKey,
+          baseUrl: defaultBaseUrl,
+          model: defaultModel,
+          label: trimmedEnv('AI_DEFAULT_LABEL') ?? (openCodeKey ? 'OpenCode Go' : '系统默认模型'),
+        }
+      : null
 
   return {
     host: overrides.host ?? trimmedEnv('HOST') ?? DEFAULT_HOST,
@@ -157,6 +180,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
     jwtSecret: explicitSecret && explicitSecret.length > 0 ? explicitSecret : getOrCreateJwtSecret(dataDir),
     publicBaseUrl,
     desktopMode,
+    aiDefaults,
     version: typeof packageJson.version === 'string' ? packageJson.version : '1.0.0',
   }
 }

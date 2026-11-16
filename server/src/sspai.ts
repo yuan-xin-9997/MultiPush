@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { load } from 'cheerio'
-import type { SspaiAccount, SspaiLogin, SspaiPublishInput, SspaiPublication, SspaiResolveInput } from '../../shared/types'
+import type { PublicationDeletion, SspaiAccount, SspaiLogin, SspaiPublishInput, SspaiPublication, SspaiResolveInput } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -188,6 +188,29 @@ export class SspaiService {
     const value = this.database.getSspaiPublication(userId, id)
     if (!value) throw notFound('少数派发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'sspai_delete_busy', '少数派任务正在处理，请等待完成后再删除')
+    if (current.status === 'published') throw new ApiError(409, 'sspai_delete_published', '已发布文章记录不能删除')
+    if (current.mode !== 'draft') throw new ApiError(409, 'sspai_delete_published', '只能删除少数派草稿；已发布文章请到少数派后台处理')
+    this.active.add(userId)
+    try {
+      let remoteDeleted = false
+      if (current.remoteId) {
+        const account = this.database.getSspaiAccount(userId)
+        const result = await this.driver.deleteDraft(this.state(userId), current.remoteId)
+        if (account) this.save(userId, result.state, { accountId: account.accountId, name: account.name || account.accountId })
+        remoteDeleted = true
+      }
+      if (!this.database.deleteSspaiPublication(userId, id)) throw notFound('少数派发布记录不存在')
+      return { ok: true, remoteDeleted }
+    } catch (error) {
+      this.expire(userId, error)
+      throw error
+    } finally { this.active.delete(userId) }
   }
 
   async resolve(userId: string, id: string, input: SspaiResolveInput): Promise<SspaiPublication> {

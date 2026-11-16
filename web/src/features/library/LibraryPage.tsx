@@ -13,6 +13,8 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Send,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -32,6 +34,7 @@ import {
 } from '@/lib/content-io'
 import { cn } from '@/lib/utils'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import BatchDialog from '@/features/batch/BatchDialog'
 import EmptyState from '@/components/EmptyState'
 import Modal from '@/components/Modal'
 import BookSidebar from './BookSidebar'
@@ -98,6 +101,7 @@ export default function LibraryPage() {
   const [moving, setMoving] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [batchMode, setBatchMode] = useState<'render' | 'publish' | null>(null)
   const [importProgress, setImportProgress] = useState<{ done: number; total: number; label: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
@@ -573,6 +577,14 @@ export default function LibraryPage() {
                 <Download size={15} />
                 导出 ZIP
               </button>
+              <button type="button" className="btn btn-sm" onClick={() => setBatchMode('render')}>
+                <Sparkles size={15} />
+                批量渲染
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => setBatchMode('publish')}>
+                <Send size={15} />
+                批量发布
+              </button>
               <button
                 type="button"
                 className="btn btn-sm"
@@ -885,6 +897,7 @@ export default function LibraryPage() {
         </div>
         {exporting ? <p className="export-progress">正在打包，请稍候…</p> : null}
       </Modal>
+      <BatchDialog open={batchMode !== null} mode={batchMode} contents={selectedItems} onClose={() => setBatchMode(null)} />
     </div>
   )
 }

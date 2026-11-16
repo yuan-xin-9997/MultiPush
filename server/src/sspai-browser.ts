@@ -18,6 +18,7 @@ export interface SspaiDriver {
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: SspaiIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'draft' | 'missing' | 'unknown'; url: string | null; message: string }>
   publish(state: PublisherStorageState, article: SspaiArticle, mode: 'draft' | 'publish', progress: (value: Partial<Pick<SspaiPublication, 'message' | 'remoteId' | 'url'>>) => void, resumeId?: string): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
+  deleteDraft(state: PublisherStorageState, remoteId: string): Promise<{ state: PublisherStorageState; message: string }>
   close(): Promise<void>
 }
 
@@ -261,6 +262,31 @@ export class PlaywrightSspaiDriver implements SspaiDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'sspai_check_failed', '重新核实少数派结果未完成，请稍后重试或人工核实')
+    } finally { await context.close().catch(() => {}) }
+  }
+
+  async deleteDraft(state: PublisherStorageState, remoteId: string) {
+    if (!/^\d{1,20}$/.test(remoteId)) throw new ApiError(400, 'sspai_draft_invalid', '少数派草稿编号无效')
+    const context = await this.context(state)
+    try {
+      const token = await this.token(context, state)
+      await this.identity(context, token)
+      const headers = { Authorization: `Bearer ${token}`, Referer: `${WRITE}/${remoteId}`, 'x-requested-with': 'fetch' }
+      const article = await articleInfo(context, token, remoteId)
+      if (!article) return { state: await context.storageState(), message: '少数派草稿已不存在，已清理本地发布记录' }
+      const type = sspaiNumber(article.type)
+      if (type === 5) throw new ApiError(409, 'sspai_delete_published', '该少数派文章已经发布，不能作为草稿删除；如需删除已发布文章，请到少数派后台操作')
+      if (type !== 4) throw new ApiError(409, 'sspai_delete_unsupported', '该少数派内容不在草稿状态，请到少数派后台核对后再处理')
+      const payload = { ...article, id: Number(remoteId), token: typeof article.token === 'string' ? article.token : '', delete_status: true }
+      await sspaiData(await context.request.post(`${API}/matrix/editor/article/update`, { headers, data: payload, timeout: 30_000 }), '删除少数派草稿', false)
+      const stored = await articleInfo(context, token, remoteId)
+      if (stored && stored.delete_status !== true && Number(stored.delete_status) !== 1) {
+        throw new ApiError(502, 'sspai_draft_delete_unverified', '少数派未确认草稿已删除，请到少数派后台核对后重试')
+      }
+      return { state: await context.storageState(), message: '已删除少数派草稿' }
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'sspai_draft_delete_failed', '删除少数派草稿未完成，请稍后重试或到少数派后台手动删除')
     } finally { await context.close().catch(() => {}) }
   }
 

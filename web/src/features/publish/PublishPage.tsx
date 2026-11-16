@@ -1,7 +1,7 @@
 import DouyinPublishPage from './DouyinPublishPage'
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, CheckCircle2, ExternalLink, FileText, ImagePlus, LoaderCircle, LogOut, MessageCircle, QrCode, RefreshCw, Send, ShieldCheck, Sparkles } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ExternalLink, FileText, ImagePlus, LoaderCircle, LogOut, MessageCircle, QrCode, RefreshCw, Send, ShieldCheck, Sparkles, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { MediaAsset, RenderListItem, RenderRecord, WechatAccount, WechatLogin, WechatPublication } from '@shared/types'
 import { absoluteUrl, api } from '@/lib/api'
@@ -47,6 +47,8 @@ function WechatPublishPage() {
   const [error, setError] = useState('')
   const [pollError, setPollError] = useState('')
   const [confirmation, setConfirmation] = useState<'publish' | 'disconnect' | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<WechatPublication | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const article = record?.results.find((item) => item.platform === 'wechat')
   const processing = publications.some(isProcessing)
   const busy = submitting || uploading || processing
@@ -231,6 +233,23 @@ function WechatPublishPage() {
     }
   }
 
+  async function deletePublication() {
+    if (!deleteTarget) return
+    setDeleteBusy(true)
+    setError('')
+    try {
+      const result = await api.wechat.deletePublication(deleteTarget.id)
+      if (!mounted.current) return
+      setPublications((current) => current.filter((item) => item.id !== deleteTarget.id))
+      setDeleteTarget(null)
+      toast.success(result.remoteDeleted ? '已删除公众号后台草稿和本地发布记录' : '已删除本地发布记录')
+    } catch (cause) {
+      if (mounted.current) { setError(getErrorMessage(cause)); setDeleteTarget(null) }
+    } finally {
+      if (mounted.current) setDeleteBusy(false)
+    }
+  }
+
   return (
     <div className="publish-page">
       <header className="publish-heading">
@@ -274,7 +293,7 @@ function WechatPublishPage() {
 
       <section className="publish-panel publish-history" aria-labelledby="publish-history-title"><div className="publish-section-head"><div><h2 id="publish-history-title">发布记录</h2><p>草稿与正式发表分别记录，处理中的任务会自动更新。</p></div><a href="https://mp.weixin.qq.com/" className="btn btn-sm" target="_blank" rel="noreferrer">公众号后台<ExternalLink size={13} /></a></div>
         {pollError ? <p className="publish-warning" role="alert">{pollError}</p> : null}
-        {!publications.length ? <div className="publish-empty"><Send size={23} /><p>还没有发布记录</p></div> : <div className="publish-history-list">{publications.map((item) => <article className="publish-history-item" key={item.id}><div className="publish-history-summary"><div><h3>{item.title}</h3><small>{item.mode === 'draft' ? '保存草稿' : '正式发表'} · {formatDateTime(item.createdAt)}</small></div><span className={`publish-status ${item.status === 'published' || item.status === 'draft' ? 'is-success' : item.status === 'failed' ? 'is-error' : item.status === 'uncertain' ? 'is-warning' : ''}`}>{isProcessing(item) ? <LoaderCircle size={13} className="spin" /> : null}{STATUS_LABELS[item.status]}</span></div><p className={item.status === 'failed' ? 'publish-failure-message' : ''}>{item.message}</p>{item.status === 'awaiting_confirmation' && item.qrCode ? <div className="publish-confirm-qr"><img src={item.qrCode} alt="请使用公众号管理员微信扫描此二维码确认发表" /><span>请使用公众号管理员微信扫码，并在手机上确认。验证完成后会继续处理，无需重复提交。</span></div> : null}{item.status === 'uncertain' ? <p className="publish-warning">请核对公众号后台的草稿箱与发表记录，确认结果后再操作。系统不会自动重试发表。</p> : null}{item.url && /^https:\/\/mp\.weixin\.qq\.com\//.test(item.url) ? <a href={item.url} target="_blank" rel="noreferrer" className="btn btn-sm">{item.status === 'published' ? '查看文章' : '打开公众号后台'}<ExternalLink size={13} /></a> : null}</article>)}</div>}
+        {!publications.length ? <div className="publish-empty"><Send size={23} /><p>还没有发布记录</p></div> : <div className="publish-history-list">{publications.map((item) => <article className="publish-history-item" key={item.id}><div className="publish-history-summary"><div><h3>{item.title}</h3><small>{item.mode === 'draft' ? '保存草稿' : '正式发表'} · {formatDateTime(item.createdAt)}</small></div><span className={`publish-status ${item.status === 'published' || item.status === 'draft' ? 'is-success' : item.status === 'failed' ? 'is-error' : item.status === 'uncertain' ? 'is-warning' : ''}`}>{isProcessing(item) ? <LoaderCircle size={13} className="spin" /> : null}{STATUS_LABELS[item.status]}</span></div><p className={item.status === 'failed' ? 'publish-failure-message' : ''}>{item.message}</p>{item.status === 'awaiting_confirmation' && item.qrCode ? <div className="publish-confirm-qr"><img src={item.qrCode} alt="请使用公众号管理员微信扫描此二维码确认发表" /><span>请使用公众号管理员微信扫码，并在手机上确认。验证完成后会继续处理，无需重复提交。</span></div> : null}{item.status === 'uncertain' ? <p className="publish-warning">请核对公众号后台的草稿箱与发表记录，确认结果后再操作。系统不会自动重试发表。</p> : null}{item.url && /^https:\/\/mp\.weixin\.qq\.com\//.test(item.url) ? <a href={item.url} target="_blank" rel="noreferrer" className="btn btn-sm">{item.status === 'published' ? '查看文章' : '打开公众号后台'}<ExternalLink size={13} /></a> : null}{item.mode === 'draft' && !isProcessing(item) ? <button type="button" className="btn btn-sm publish-delete-button" disabled={busy || deleteBusy} onClick={() => setDeleteTarget(item)}><Trash2 size={13} />删除草稿</button> : null}</article>)}</div>}
       </section>
 
       <p className="publish-bottom-note"><ShieldCheck size={14} />通过微信官方页面扫码，不需要提供公众号密码。知乎可在发布中心切换平台后连接并发布。</p>
@@ -282,6 +301,7 @@ function WechatPublishPage() {
       <Modal open={loginOpen} onClose={() => setLoginOpen(false)} title="连接微信公众号" subtitle="使用公众号管理员微信扫一扫，并在手机上选择公众号" size="compact"><div className="publish-login" aria-live="polite">{loginBusy ? <><LoaderCircle size={30} className="spin" /><p>正在获取微信登录二维码…</p></> : login ? <>{login.qrCode && ['waiting', 'scanned'].includes(login.status) ? <img className="publish-login-qr" src={login.qrCode} alt="微信公众号登录二维码，请使用管理员微信扫码" /> : <QrCode size={35} />}<p>{login.message}</p>{['waiting', 'scanned'].includes(login.status) ? <small>二维码有效期至 {formatDateTime(login.expiresAt)}，请在手机上完成确认。</small> : <button type="button" className="btn btn-primary" onClick={() => void startLogin()}><RefreshCw size={15} />重新获取二维码</button>}</> : null}{loginError ? <p className="publish-failure-message" role="alert">{loginError}</p> : null}{!loginBusy && !login ? <button type="button" className="btn btn-primary" onClick={() => void startLogin()}>重试连接</button> : null}<small>关闭窗口后可继续在本页查看登录状态。</small></div></Modal>
       <ConfirmDialog open={confirmation === 'publish'} title="正式发表到微信公众号？" description={<><strong>{article?.title}</strong><p>将发表至「{account?.name || '已连接公众号'}」，内容可能对外公开。若微信要求安全验证，请使用管理员微信扫码确认。</p></>} confirmLabel="确认正式发表" tone="primary" loading={submitting} onConfirm={() => publish('publish')} onClose={() => setConfirmation(null)} />
       <ConfirmDialog open={confirmation === 'disconnect'} title="断开公众号连接？" description="将删除本系统保存的微信登录状态。下次发布需要重新扫码，已保存的草稿和已发表文章不会受影响。" confirmLabel="断开连接" loading={submitting} onConfirm={disconnect} onClose={() => setConfirmation(null)} />
+      <ConfirmDialog open={!!deleteTarget} title="删除公众号草稿？" description={<><strong>{deleteTarget?.title}</strong><p>将同时删除微信公众号后台的这份草稿和本系统的发布记录，删除后无法恢复。</p></>} confirmLabel="删除草稿" loading={deleteBusy} onConfirm={deletePublication} onClose={() => setDeleteTarget(null)} />
     </div>
   )
 }

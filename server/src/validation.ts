@@ -171,3 +171,21 @@ export function parseInput<S extends z.ZodType>(schema: S, data: unknown): z.out
   }
   return result.data
 }
+
+export const batchRenderSchema = z.object({
+  contentIds: z.array(z.string().trim().min(1, '内容 ID 不能为空').max(100)).min(1, '请选择要批量渲染的内容').max(30, '一次最多批量渲染 30 篇内容'),
+  platforms: z
+    .array(platformSchema)
+    .min(1, '请至少选择一个平台')
+    .max(6, '最多选择六个平台')
+    .transform((platforms) => [...new Set(platforms)]),
+  options: renderOptionsSchema.optional(),
+}).strict()
+
+export const batchPublishSchema = z.object({
+  contentIds: z.array(z.string().trim().min(1, '内容 ID 不能为空').max(100)).min(1, '请选择要批量发布的内容').max(10, '一次最多批量发布 10 篇内容'),
+  platform: z.enum(['wechat', 'zhihu', 'sspai', 'blog'], { message: '该平台暂不支持批量发布' }),
+  mode: z.enum(['draft', 'publish']),
+  coverMediaId: z.uuid().optional(),
+  options: renderOptionsSchema.optional(),
+}).strict()

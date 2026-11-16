@@ -9,6 +9,7 @@ import LibraryPage from '@/features/library/LibraryPage'
 import EditorPage from '@/features/editor/EditorPage'
 import RenderPage from '@/features/render/RenderPage'
 import PublishPage from '@/features/publish/PublishPage'
+import AiPage from '@/features/ai/AiPage'
 import { Loader2 } from 'lucide-react'
 
 function FullScreenLoading() {
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="/library/favorites" element={<LibraryPage />} />
         <Route path="/library/trash" element={<LibraryPage />} />
         <Route path="/library/book/:bookId" element={<LibraryPage />} />
+        <Route path="/ai" element={<AiPage />} />
         <Route path="/render" element={<RenderPage />} />
         <Route path="/publish" element={<PublishPage />} />
         <Route path="*" element={<Navigate to="/library" replace />} />

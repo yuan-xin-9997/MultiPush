@@ -25,6 +25,9 @@
 - **抖音发布**：系统内展示官方登录二维码，按用户加密保存会话；选择 MP4 视频或 1–35 张图片发布。包含发布记录、重复提交保护、重启恢复与结果人工核实；遇到安全验证停止操作。详见 [抖音发布说明](docs/DOUYIN_PUBLISHING.md)。
 - **少数派发布**：使用微信扫描少数派官方登录二维码，按用户加密保存会话；选择 Matrix 排版，保存草稿或立即发布。正文图片自动上传到少数派图床，发布前回读核对标题、正文、图片和链接；结果不确定时停止重发并支持人工核实。详见 [少数派发布说明](docs/SSPAI_PUBLISHING.md)。
 - **个人博客发布**：输入 Halo 博客地址和个人令牌，按用户加密保存；选择博客排版与封面，保存草稿或公开发布。正文图片自动转存到 Halo 附件库，发布后回读核对内容；支持标签匹配、重复提交保护和结果人工核实。详见 [个人博客发布说明](docs/BLOG_PUBLISHING.md)。
+- **草稿删除**：微信公众号、知乎、少数派和个人博客的发布记录支持删除草稿，并同步删除平台后台的对应草稿；已发表内容不会被删除。抖音当前没有自动草稿模式，只允许清理失败的本地发布记录。
+- **AI 创作**：新增 AI 创作页，可按账号配置 OpenAI 兼容大模型接口、模型与 API Key；对话中可读取知识库、内容、素材、渲染和发布记录，并通过工具写文章、生成多平台排版、保存草稿、正式发布及创建批量任务。详见 [AI 创作说明](docs/AI_CREATION.md)。
+- **批量任务**：内容库多选后支持批量渲染和批量发布；任务在服务端顺序执行并持久保存进度，可查看每篇内容的排版、发布状态和失败原因。
 - **本地桌面版**：Electron 客户端支持 Windows 10+（x64）与 macOS（Intel / Apple Silicon 通用包），内置前端、Node 后端与 SQLite，完全在本机运行；首次启动直接注册本地账号，无需服务器、SMTP 或邮箱验证码。
 - **部署**：监听 `0.0.0.0:34080`，Jenkins 每 30 分钟轮询 GitHub，自动停服、构建、部署、启动与健康检查。
 
@@ -34,7 +37,7 @@
 | --- | --- |
 | 前端 | React 19、TypeScript、Vite 7、React Router 6、Tiptap 2、纯 CSS |
 | 后端 | Node.js 22、Express 4、TypeScript、`node:sqlite`、JWT、bcryptjs、multer |
-| 渲染 | 服务端规则模板（cheerio / sanitize-html / turndown），无外部 AI 依赖 |
+| 渲染 | 服务端规则模板（cheerio / sanitize-html / turndown），不依赖外部 AI；AI 创作使用用户自配置的 OpenAI 兼容模型 |
 | 下载 | html-to-image（小红书卡片）、JSZip |
 | 桌面端 | Electron 45、electron-builder、Playwright Electron 冒烟测试 |
 | 部署 | esbuild 单文件后端、Jenkins Pipeline、systemd、GitHub Actions 桌面构建 |
@@ -90,6 +93,10 @@ npm start
 | `PUBLIC_BASE_URL` | 请求 Host | 渲染结果中的媒体绝对地址 |
 | `DOUYIN_BROWSER_PATH` | 自动探测 | 抖音发布使用的 Chrome / Chromium 路径 |
 | `SSPAI_BROWSER_PATH` | 自动探测 | 少数派发布使用的 Chrome / Chromium 路径 |
+| `OPENCODE_GO_API_KEY` | 未设置 | AI 创作默认模型的 API Key；配置后默认使用 OpenCode Go |
+| `AI_DEFAULT_BASE_URL` | OpenCode Go 地址 | 默认模型接口地址，可覆盖 |
+| `AI_DEFAULT_MODEL` | `deepseek-v4.1-flash` | 默认模型名称 |
+| `AI_DEFAULT_LABEL` | `OpenCode Go` | AI 页面显示的默认配置名称 |
 | `WECHAT_BROWSER_PATH` | 自动探测 | 服务器 Chrome / Chromium 可执行文件绝对路径 |
 
 数据目录结构：
@@ -105,6 +112,7 @@ npm start
   .xiaohongshu-session-key
   .wechat-session-key
   .zhihu-session-key
+  .ai-session-key
 ```
 
 ## 目录结构

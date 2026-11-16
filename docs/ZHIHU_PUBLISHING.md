@@ -48,6 +48,7 @@
 | `POST /api/zhihu/publications` | 提交 `{renderId, mode: "draft"或"publish", coverMediaId?}` |
 | `GET /api/zhihu/publications` | 当前用户最近 50 条记录 |
 | `GET /api/zhihu/publications/:id` | 查询进度、草稿或文章链接 |
+| `DELETE /api/zhihu/publications/:id` | 删除知乎草稿：同步删除知乎后台草稿与本系统记录；已发布文章不可删除 |
 | `POST /api/zhihu/publications/:id/resolve` | `{action:"check"}` 异步复查；`{action:"not_published"}` 人工确认未发布；`{action:"published",articleUrl}` 人工关联已发布文章 |
 
 ## 参考方案与验收

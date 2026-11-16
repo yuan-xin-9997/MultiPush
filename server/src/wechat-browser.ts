@@ -42,6 +42,7 @@ export interface WechatBrowserDriver {
     url: string | null
     remoteId: string
   }>
+  deleteDraft(state: WechatStorageState, remoteId: string): Promise<{ state: WechatStorageState; message: string }>
   close(): Promise<void>
 }
 
@@ -334,6 +335,27 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
       const info = await sessionInfo(await context.newPage())
       return { state: await context.storageState(), name: info.name }
     } finally { await context.close() }
+  }
+
+  async deleteDraft(state: WechatStorageState, remoteId: string) {
+    if (!/^\d+$/.test(remoteId)) throw new ApiError(400, 'wechat_draft_invalid', '公众号草稿编号无效')
+    const context = await this.context(state)
+    try {
+      const page = await context.newPage()
+      const info = await sessionInfo(page)
+      const response = await context.request.post(`${HOME}cgi-bin/operate_appmsg?sub=del&t=ajax-response`, {
+        form: { AppMsgId: remoteId, token: info.token, lang: 'zh_CN', f: 'json', ajax: '1' },
+        headers: { Referer: `${HOME}cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=10&isMul=1&token=${info.token}&lang=zh_CN` },
+        timeout: 30_000,
+      })
+      if (response.status() === 401 || response.status() === 403) throw expired()
+      if (!response.ok()) throw new ApiError(502, 'wechat_draft_delete_failed', `删除公众号草稿失败（HTTP ${response.status()}），请稍后重试`)
+      assertWechatResponse(await response.json().catch(() => null), '删除公众号草稿', 'wechat_draft_delete_failed')
+      return { state: await context.storageState(), message: '已删除公众号草稿' }
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'wechat_draft_delete_failed', '删除公众号草稿未完成，请稍后重试或到公众号后台手动删除')
+    } finally { await context.close().catch(() => {}) }
   }
 
   async publish(state: WechatStorageState, article: WechatArticle, mode: 'draft' | 'publish', onProgress: (update: WechatProgress) => void) {

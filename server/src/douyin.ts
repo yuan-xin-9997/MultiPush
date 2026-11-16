@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { DouyinAccount, DouyinLogin, DouyinPublishInput, DouyinPublication, DouyinResolveInput } from '../../shared/types'
+import type { DouyinAccount, DouyinLogin, DouyinPublishInput, DouyinPublication, DouyinResolveInput, PublicationDeletion } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -175,6 +175,16 @@ export class DouyinService {
     const value = this.database.getDouyinPublication(userId, id)
     if (!value) throw notFound('抖音发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'douyin_delete_busy', '抖音任务正在处理，请等待完成后再删除')
+    if (current.status === 'uncertain') throw new ApiError(409, 'douyin_delete_uncertain', '请先核实这条抖音任务的结果，再删除发布记录')
+    if (current.status === 'published') throw new ApiError(409, 'douyin_delete_published', '抖音当前只支持直接发布，没有草稿；已发布作品请到抖音创作者中心处理')
+    if (!this.database.deleteDouyinPublication(userId, id)) throw notFound('抖音发布记录不存在')
+    return { ok: true, remoteDeleted: false }
   }
 
   async resolve(userId: string, id: string, input: DouyinResolveInput): Promise<DouyinPublication> {

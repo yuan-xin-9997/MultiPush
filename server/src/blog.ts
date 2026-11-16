@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { load } from 'cheerio'
-import type { BlogAccount, BlogConnectInput, BlogPublication, BlogPublishInput, BlogResolveInput } from '../../shared/types'
+import type { BlogAccount, BlogConnectInput, BlogPublication, BlogPublishInput, BlogResolveInput, PublicationDeletion } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -162,6 +162,27 @@ export class BlogService {
     const value = this.database.getBlogPublication(userId, id)
     if (!value) throw notFound('个人博客发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'blog_delete_busy', '个人博客任务正在处理，请等待完成后再删除')
+    if (current.status === 'published') throw new ApiError(409, 'blog_delete_published', '已发布文章记录不能删除')
+    if (current.mode !== 'draft') throw new ApiError(409, 'blog_delete_published', '只能删除个人博客草稿；已发布文章请到博客后台处理')
+    this.active.add(userId)
+    try {
+      let remoteDeleted = false
+      if (current.remoteId) {
+        await this.driver.deleteDraft(this.credentials(userId), current.remoteId)
+        remoteDeleted = true
+      }
+      if (!this.database.deleteBlogPublication(userId, id)) throw notFound('个人博客发布记录不存在')
+      return { ok: true, remoteDeleted }
+    } catch (error) {
+      this.expire(userId, error)
+      throw error
+    } finally { this.active.delete(userId) }
   }
 
   async resolve(userId: string, id: string, input: BlogResolveInput): Promise<BlogPublication> {

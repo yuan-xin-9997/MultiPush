@@ -8,7 +8,8 @@ import { openDatabase, type Database } from '../src/db'
 import { ApiError } from '../src/errors'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey } from '../src/publisher-session'
 import { SspaiService } from '../src/sspai'
-import { parseSspaiPublishedId, sspaiTokenFromState, type SspaiDriver, type SspaiLoginAttempt } from '../src/sspai-browser'
+import { parseSspaiPublishedId, sspaiTokenFromState, PlaywrightSspaiDriver, type SspaiDriver, type SspaiLoginAttempt } from '../src/sspai-browser'
+import { chromium, type APIResponse, type Browser } from 'playwright-core'
 import { prepareSspaiContent, sspaiEditorContent, verifySspaiContent } from '../src/sspai-content'
 import type { PlatformRender } from '../../shared/types'
 
@@ -29,6 +30,7 @@ function setup() {
     checkSession: vi.fn<SspaiDriver['checkSession']>().mockResolvedValue({ state, identity }),
     checkPublication: vi.fn<SspaiDriver['checkPublication']>().mockResolvedValue({ state, status: 'unknown', url: null, message: '请人工核实' }),
     publish: vi.fn<SspaiDriver['publish']>().mockResolvedValue({ state, status: 'published', remoteId: '118886', url: 'https://sspai.com/post/118886', message: '成功' }),
+    deleteDraft: vi.fn<SspaiDriver['deleteDraft']>().mockResolvedValue({ state, message: '已删除少数派草稿' }),
     close: vi.fn(async () => {}),
   }
   const service = new SspaiService(database, config, driver)
@@ -157,5 +159,67 @@ describe('Sspai content preparation', () => {
     const stored = '<h2>标题</h2><p>正文</p><figure class="image"><img src="https://cdnfile.sspai.com/a.png?imageView2/2/w/1120"></figure>'
     expect(() => verifySspaiContent(expected, stored)).not.toThrow()
     expect(() => verifySspaiContent(expected, '<h2>标题</h2><p>正文变了</p><figure><img src="https://cdnfile.sspai.com/a.png"></figure>')).toThrow()
+  })
+})
+
+
+describe('Sspai draft deletion', () => {
+  it('deletes the remote draft and local record for the owner only', async () => {
+    const { service, database, driver, alice, bob } = setup()
+    const draft = database.createSspaiPublication(alice.id, { renderId: 'render-id', title: '待删草稿', mode: 'draft', idempotencyKey: 'draft-key' })
+    database.updateSspaiPublication(alice.id, draft.id, { status: 'draft', remoteId: '118886' })
+    await expect(service.remove(bob.id, draft.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: true })
+    expect(driver.deleteDraft).toHaveBeenCalledWith(state, '118886')
+    expect(database.getSspaiPublication(alice.id, draft.id)).toBeNull()
+  })
+
+  it('rejects published records and keeps the local record when remote deletion fails', async () => {
+    const { service, database, driver, alice } = setup()
+    const published = database.createSspaiPublication(alice.id, { renderId: 'render-id', title: '已发布', mode: 'publish', idempotencyKey: 'publish-key' })
+    database.updateSspaiPublication(alice.id, published.id, { status: 'published' })
+    await expect(service.remove(alice.id, published.id)).rejects.toMatchObject({ code: 'sspai_delete_published' })
+
+    const draft = database.createSspaiPublication(alice.id, { renderId: 'render-id', title: '远端草稿', mode: 'draft', idempotencyKey: 'draft-key' })
+    database.updateSspaiPublication(alice.id, draft.id, { status: 'draft', remoteId: '118887' })
+    driver.deleteDraft.mockRejectedValueOnce(new ApiError(502, 'sspai_draft_delete_failed', '删除失败'))
+    await expect(service.remove(alice.id, draft.id)).rejects.toMatchObject({ code: 'sspai_draft_delete_failed' })
+    expect(database.getSspaiPublication(alice.id, draft.id)).not.toBeNull()
+  })
+})
+
+
+describe('Sspai browser draft deletion', () => {
+  const jsonResponse = (data: unknown, status = 200) => ({ status: () => status, ok: () => status >= 200 && status < 300, headers: () => ({ 'content-type': 'application/json' }), json: async () => data }) as APIResponse
+
+  it('marks the remote draft deleted through the editor update endpoint and verifies it', async () => {
+    let deleted = false
+    let type = 4
+    const get = vi.fn(async (url: string) => {
+      if (url.endsWith('/api/v1/user/info/get')) return jsonResponse({ error: 0, data: { id: 482910, nickname: '测试作者' } })
+      if (url.includes('/matrix/editor/article/single/info/get')) {
+        if (!url.includes('id=118886')) return jsonResponse({ error: 404 }, 404)
+        return jsonResponse({ error: 0, data: { id: 118886, type, title_last: '测试少数派文章', delete_status: deleted } })
+      }
+      return jsonResponse({ error: 404 }, 404)
+    })
+    const post = vi.fn(async (_url: string, _options: { data: Record<string, unknown> }) => {
+      deleted = true
+      return jsonResponse({ error: 0, data: {} })
+    })
+    const context = { setDefaultTimeout: vi.fn(), storageState: async () => state, close: vi.fn(async () => {}), request: { get, post } }
+    vi.stubEnv('SSPAI_BROWSER_PATH', process.execPath)
+    vi.spyOn(chromium, 'launch').mockResolvedValue({ newContext: async () => context, on: vi.fn(), close: async () => {} } as unknown as Browser)
+    const driver = new PlaywrightSspaiDriver()
+    try {
+      await expect(driver.deleteDraft(state, '118886')).resolves.toMatchObject({ message: '已删除少数派草稿' })
+      const [url, options] = post.mock.calls[0]
+      expect(url).toContain('/matrix/editor/article/update')
+      expect(options.data).toMatchObject({ id: 118886, delete_status: true })
+      await expect(driver.deleteDraft(state, '999')).resolves.toMatchObject({ message: expect.stringContaining('已不存在') })
+      deleted = false
+      type = 5
+      await expect(driver.deleteDraft(state, '118886')).rejects.toMatchObject({ code: 'sspai_delete_published' })
+    } finally { await driver.close() }
   })
 })

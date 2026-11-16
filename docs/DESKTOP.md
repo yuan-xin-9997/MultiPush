@@ -37,7 +37,7 @@ Electron 主进程
 ```
 
 - 不依赖 `publish.yuan-xin.top` 或其他远程服务器。
-- 不把内容上传到第三方；素材保存在本机 `data/uploads`。
+- 不使用 AI 创作时，不把内容上传到第三方；素材保存在本机 `data/uploads`。启用 AI 创作后，对话内容和工具读取到的必要数据会发送到你配置的大模型接口。
 - 账号由本机 SQLite 管理，注册不需要邮箱验证码。
 - 自动发布仍由本机 Chrome / Edge 执行，Playwright 只启动本机浏览器，不连接云端浏览器服务。
 - 微信、知乎、抖音的登录会话加密保存在本机数据目录。
@@ -61,6 +61,7 @@ data/
   .douyin-session-key    抖音会话加密密钥
   .sspai-session-key     少数派会话加密密钥
   .blog-session-key      个人博客令牌加密密钥
+  .ai-session-key        AI 模型 API Key 加密密钥
 ```
 
 菜单「本地服务 → 打开数据目录」可直接打开。备份时请先退出应用，再复制整个 `data` 目录；恢复时关闭应用，用备份目录替换即可。

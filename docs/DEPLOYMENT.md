@@ -50,7 +50,7 @@ systemd multipush.service（User=jenkins）→ 0.0.0.0:34080
 | `/opt/MultiPush/JenkinsConfig/health.mjs` | 服务器端健康检查脚本 | `install` 覆盖 |
 | `/opt/MultiPush/package.json` | 应用元数据 | `install` 覆盖 |
 | `/opt/MultiPush/DEPLOYED_COMMIT` | 最近部署的 commit | 原子写入 |
-| `/opt/MultiPush/.data/` | SQLite（含 WAL/SHM）、`uploads/`、`.jwt-secret`、`.wechat-session-key` 等平台会话密钥 | **绝不删除、不改权限** |
+| `/opt/MultiPush/.data/` | SQLite（含 WAL/SHM）、`uploads/`、`.jwt-secret`、`.wechat-session-key`、`.ai-session-key` 等平台会话与 AI 密钥 | **绝不删除、不改权限** |
 | `/opt/MultiPush/.env` | 可选环境变量 | **绝不删除、不改权限** |
 | `/opt/MultiPush/apps/` | 旧版本遗留目录（如有） | 不自动删除 |
 
@@ -303,17 +303,30 @@ curl -fsS http://127.0.0.1:34080/api/health
 
 浏览器访问 `http://192.168.0.111:34080/`，完成一次注册/登录、创建文档、上传图片，再执行一次部署，确认文档和图片仍在（验证 `.data` 未被删除）。
 
+## AI 默认模型（可选）
+
+AI 创作页按用户保存模型配置。若希望部署后所有用户直接可用，可在 `/opt/MultiPush/.env` 提供服务器默认值：
+
+```dotenv
+OPENCODE_GO_API_KEY=oc_sk_xxx
+AI_DEFAULT_BASE_URL=https://opencode.ai/inference/go/openai/v1
+AI_DEFAULT_MODEL=deepseek-v4.1-flash
+AI_DEFAULT_LABEL=OpenCode Go
+```
+
+也可使用 `AI_DEFAULT_API_KEY`。服务器默认 Key 不会返回前端；用户在 AI 设置中保存自己的配置后优先使用用户配置。修改 `.env` 后需重启服务。
+
 ## 6. 数据备份与恢复
 
 ### 6.1 备份范围
 
 必须备份：
 
-- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`、`.wechat-session-key` 等各平台会话密钥。
+- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`、`.wechat-session-key` 等各平台会话密钥，以及 `.ai-session-key`（AI 模型 API Key 加密密钥）。
 - `/opt/MultiPush/.env`（如存在）。
 - 可选的 systemd unit 与当前 `DEPLOYED_COMMIT`，便于恢复环境。
 
-不要只备份 SQLite 而忽略上传目录和两个密钥文件；否则素材丢失、系统登录或公众号会话无法恢复。
+不要只备份 SQLite 而忽略上传目录和密钥文件；否则素材丢失、系统登录、公众号会话或 AI 配置无法恢复。
 
 ### 6.2 冷备份（推荐）
 

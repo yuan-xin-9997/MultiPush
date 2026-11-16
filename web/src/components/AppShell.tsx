@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LibraryBig, LogOut, Menu, Send, Sparkles, X } from 'lucide-react'
+import { Bot, LibraryBig, LogOut, Menu, Send, Sparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/contexts/AuthContext'
 import { useServerInfo } from '@/contexts/ServerContext'
@@ -11,6 +11,7 @@ import Logo from './Logo'
 import './app-shell.css'
 
 const NAV_ITEMS = [
+  { to: '/ai', label: 'AI 创作', icon: Bot, badge: null },
   { to: '/library', label: '内容库', icon: LibraryBig, badge: null },
   { to: '/render', label: '智能渲染', icon: Sparkles, badge: null },
   { to: '/publish', label: '发布管理', icon: Send, badge: null },

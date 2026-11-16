@@ -25,6 +25,17 @@
 
 发布记录按用户隔离，内容与素材字节用于重复提交判定。只有明确成功响应及有效作品 ID 才标记成功；提交超时、响应不明确、运行中服务重启均变为“结果待核实”，不会自动重发。先检查创作者中心，再确认未发布，或填写已发布作品的完整链接。所有待核实任务处理完才能继续发布。
 
+## 草稿与记录删除
+
+抖音当前版本只支持直接发布，没有「保存草稿」模式，因此 MultiPush 不会在抖音后台创建草稿。发布记录中的失败记录可以在发布页删除，删除操作只清理本系统的失败记录，不会删除已经发布或正在审核的作品。已发布和结果待核实的记录会阻止删除，避免误以为远端作品已被清理。
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `GET /api/douyin/publications` | 当前用户最近 50 条发布记录 |
+| `GET /api/douyin/publications/:id` | 查询进度、核实状态与作品链接 |
+| `POST /api/douyin/publications/:id/resolve` | `{action:"check"}` 异步复查；`{action:"not_published"}` 人工确认未发布；`{action:"published",articleUrl}` 人工关联已发布作品 |
+| `DELETE /api/douyin/publications/:id` | 删除失败的本地发布记录（`remoteDeleted` 恒为 `false`）；已发布和待核实记录返回 409 |
+
 ## 验证
 
 运行 npm run typecheck、npm test、npm run build；浏览器模拟验证运行 node scripts/smoke-douyin-publish.mjs，覆盖扫码状态、视频选择、发布确认、待核实任务阻止重发。模拟验证不会发布真实内容，截图位于 artifacts/douyin-ui-check/publish.png。

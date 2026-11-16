@@ -49,6 +49,7 @@
 | `POST /api/blog/publications` | 提交 `{renderId, mode: "draft"或"publish", coverMediaId?}` |
 | `GET /api/blog/publications` | 当前用户最近 50 条记录 |
 | `GET /api/blog/publications/:id` | 查询进度、草稿或文章链接 |
+| `DELETE /api/blog/publications/:id` | 删除个人博客草稿：同步删除 Halo 后台草稿与本系统记录；已发布文章不可删除 |
 | `POST /api/blog/publications/:id/resolve` | `{action:"check"}` 异步复查；`{action:"not_published"}` 人工确认未发布；`{action:"published",articleUrl}` 人工关联已发布文章 |
 
 ## 验证

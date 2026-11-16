@@ -23,6 +23,7 @@ export function createWechatRouter(service: WechatService): Router {
   router.get('/login/:id', asyncHandler(async (req, res) => { res.json({ login: await service.pollLogin(currentUser(req).id, req.params.id) }) }))
   router.get('/publications', asyncHandler((req, res) => { res.json({ publications: service.list(currentUser(req).id) }) }))
   router.get('/publications/:id', asyncHandler((req, res) => { res.json({ publication: service.get(currentUser(req).id, req.params.id) }) }))
+  router.delete('/publications/:id', asyncHandler(async (req, res) => { res.json(await service.remove(currentUser(req).id, req.params.id)) }))
   router.post('/publications', asyncHandler(async (req, res) => {
     const input = parseInput(publicationSchema, req.body)
     res.status(202).json({ publication: await service.publish(currentUser(req).id, input, `${req.protocol}://${req.get('host')}`) })

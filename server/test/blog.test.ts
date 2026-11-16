@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BlogService } from '../src/blog'
 import { blogAbsoluteUrl, blogSlug, prepareBlogContent, verifyBlogContent } from '../src/blog-content'
-import { normalizeBlogBaseUrl, type BlogDriver } from '../src/blog-halo'
+import { HaloBlogDriver, normalizeBlogBaseUrl, type BlogDriver } from '../src/blog-halo'
 import { loadConfig } from '../src/config'
 import { openDatabase, type Database } from '../src/db'
 import { ApiError } from '../src/errors'
@@ -27,6 +27,7 @@ function setup() {
     checkSession: vi.fn<BlogDriver['checkSession']>().mockResolvedValue({ identity }),
     checkPublication: vi.fn<BlogDriver['checkPublication']>().mockResolvedValue({ status: 'unknown', url: null, message: '请人工核实' }),
     publish: vi.fn<BlogDriver['publish']>().mockResolvedValue({ status: 'published', remoteId: 'post-1', url: 'https://blog.example.com/archives/test', message: '成功' }),
+    deleteDraft: vi.fn<BlogDriver['deleteDraft']>().mockResolvedValue({ message: '已删除个人博客草稿' }),
   }
   const service = new BlogService(database, config, driver, async (value) => normalizeBlogBaseUrl(value))
   const key = loadPublisherKey(directory, 'blog')
@@ -159,5 +160,59 @@ describe('Blog content preparation', () => {
     const stored = '<h2>标题</h2><p>正文</p><figure class="image"><img src="/upload/a.png?width=800"></figure>'
     expect(() => verifyBlogContent(expected, stored)).not.toThrow()
     expect(() => verifyBlogContent(expected, '<h2>标题</h2><p>正文变了</p><figure><img src="/upload/a.png"></figure>')).toThrow()
+  })
+})
+
+
+describe('Blog draft deletion', () => {
+  it('deletes the remote Halo draft and local record for the owner only', async () => {
+    const { service, database, driver, alice, bob } = setup()
+    const draft = database.createBlogPublication(alice.id, { renderId: 'render-id', title: '待删草稿', mode: 'draft', idempotencyKey: 'draft-key' })
+    database.updateBlogPublication(alice.id, draft.id, { status: 'draft', remoteId: 'post-2' })
+    await expect(service.remove(bob.id, draft.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: true })
+    expect(driver.deleteDraft).toHaveBeenCalledWith(credentials, 'post-2')
+    expect(database.getBlogPublication(alice.id, draft.id)).toBeNull()
+  })
+
+  it('rejects published records and keeps the local record when remote deletion fails', async () => {
+    const { service, database, driver, alice } = setup()
+    const published = database.createBlogPublication(alice.id, { renderId: 'render-id', title: '已发布', mode: 'publish', idempotencyKey: 'publish-key' })
+    database.updateBlogPublication(alice.id, published.id, { status: 'published' })
+    await expect(service.remove(alice.id, published.id)).rejects.toMatchObject({ code: 'blog_delete_published' })
+
+    const draft = database.createBlogPublication(alice.id, { renderId: 'render-id', title: '远端草稿', mode: 'draft', idempotencyKey: 'draft-key' })
+    database.updateBlogPublication(alice.id, draft.id, { status: 'draft', remoteId: 'post-3' })
+    driver.deleteDraft.mockRejectedValueOnce(new ApiError(502, 'blog_draft_delete_failed', '删除失败'))
+    await expect(service.remove(alice.id, draft.id)).rejects.toMatchObject({ code: 'blog_draft_delete_failed' })
+    expect(database.getBlogPublication(alice.id, draft.id)).not.toBeNull()
+  })
+})
+
+
+describe('Halo browserless draft deletion', () => {
+  it('deletes only an unpublished Halo post and verifies the post is gone', async () => {
+    let deleted = false
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'DELETE' && url.endsWith('/apis/api.console.halo.run/v1alpha1/posts/post-2')) {
+        deleted = true
+        return new Response(null, { status: 204 })
+      }
+      if (url.endsWith('/apis/content.halo.run/v1alpha1/posts/post-2')) {
+        if (deleted) return new Response(JSON.stringify({ title: 'Not Found' }), { status: 404, headers: { 'content-type': 'application/json' } })
+        return new Response(JSON.stringify({ metadata: { name: 'post-2' }, spec: { publish: false, title: '草稿' }, status: { phase: 'DRAFT' } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.endsWith('/apis/content.halo.run/v1alpha1/posts/post-3')) {
+        return new Response(JSON.stringify({ metadata: { name: 'post-3' }, spec: { publish: true, title: '已发布' }, status: { phase: 'PUBLISHED' } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ title: 'Not Found' }), { status: 404, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await expect(new HaloBlogDriver().deleteDraft(credentials, 'post-2')).resolves.toEqual({ message: '已删除个人博客草稿' })
+      await expect(new HaloBlogDriver().deleteDraft(credentials, 'post-3')).rejects.toMatchObject({ code: 'blog_delete_published' })
+      await expect(new HaloBlogDriver().deleteDraft(credentials, 'missing')).resolves.toMatchObject({ message: expect.stringContaining('已不存在') })
+    } finally { vi.unstubAllGlobals() }
   })
 })

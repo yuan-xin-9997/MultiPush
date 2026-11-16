@@ -132,3 +132,23 @@ describe('Douyin publishing', () => {
     expect(reopened.getDouyinAccount(alice.id)?.status).toBe('connected')
   })
 })
+
+
+describe('Douyin publication record cleanup', () => {
+  it('removes failed local records but never hides published or uncertain work', async () => {
+    const { service, database, alice, bob } = setup()
+    const failed = database.createDouyinPublication(alice.id, { renderId: 'render-id', title: '失败记录', mode: 'publish', idempotencyKey: 'failed-key' })
+    database.updateDouyinPublication(alice.id, failed.id, { status: 'failed' })
+    await expect(service.remove(bob.id, failed.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, failed.id)).resolves.toEqual({ ok: true, remoteDeleted: false })
+    expect(database.getDouyinPublication(alice.id, failed.id)).toBeNull()
+
+    const published = database.createDouyinPublication(alice.id, { renderId: 'render-id', title: '已发布', mode: 'publish', idempotencyKey: 'published-key' })
+    database.updateDouyinPublication(alice.id, published.id, { status: 'published' })
+    await expect(service.remove(alice.id, published.id)).rejects.toMatchObject({ code: 'douyin_delete_published' })
+
+    const uncertain = database.createDouyinPublication(alice.id, { renderId: 'render-id', title: '待核实', mode: 'publish', idempotencyKey: 'uncertain-key' })
+    database.updateDouyinPublication(alice.id, uncertain.id, { status: 'uncertain' })
+    await expect(service.remove(alice.id, uncertain.id)).rejects.toMatchObject({ code: 'douyin_delete_uncertain' })
+  })
+})

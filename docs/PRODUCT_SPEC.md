@@ -21,7 +21,9 @@
    - 个人博客：Halo 博客文章预览、Markdown/HTML 下载、复制富文本，支持令牌连接后保存草稿或公开发布。
    - 支持“下载全部 ZIP”。
 7. 发布管理页：支持微信公众号扫码登录、持久会话、草稿和正式发表；知乎与少数派扫码登录、草稿和发布；抖音扫码登录与素材发布；个人博客令牌连接、草稿和发布；其他平台保留手动发布。接入与限制见 `WECHAT_PUBLISHING.md`、`ZHIHU_PUBLISHING.md`、`DOUYIN_PUBLISHING.md`、`SSPAI_PUBLISHING.md` 与 `BLOG_PUBLISHING.md`。
-8. 响应式：桌面优先，至少 1024px 宽度体验完整；移动端可登录、浏览内容库、查看渲染结果（编辑器可提示使用桌面端）。
+8. AI 创作页：配置 OpenAI 兼容大模型接口、模型和按用户加密保存的 API Key；通过对话和工具读取用户内容库、素材、渲染与发布数据，创建/修改文章、生成排版、保存平台草稿、正式发布，并创建批量渲染、批量发布任务。
+9. 批量任务：内容库多选后支持批量渲染和批量发布；任务在服务端顺序执行，持久保存每项状态，页面可轮询进度并在完成后打开对应排版或发布记录。
+10. 响应式：桌面优先，至少 1024px 宽度体验完整；移动端可登录、浏览内容库、使用 AI 创作、查看渲染结果（编辑器可提示使用桌面端）。
 9. 监听 `0.0.0.0:34080`；生产由同一个 Node 服务提供 API、上传文件和前端静态文件。
 
 非目标：平台 OAuth 授权接入、绕过平台安全验证 / 验证码、AI 改写（仅预留扩展接口）。
@@ -42,6 +44,8 @@ server/src/              API、数据库、鉴权、渲染器
 web/src/                 前端
   components/            全局布局与通用组件
   features/auth          登录注册
+  features/ai            AI 创作与工具会话
+  features/batch         批量渲染 / 批量发布弹窗
   features/library       内容库
   features/editor        编辑器
   features/render        智能渲染与预览
@@ -65,7 +69,7 @@ docs/                    文档
 
 ### 3.2 应用外壳
 
-- 左侧固定导航：Logo、内容库、智能渲染、发布管理；底部用户菜单（退出登录）。
+- 左侧固定导航：Logo、AI 创作、内容库、智能渲染、发布管理；底部用户菜单（退出登录）。
 - 内容库子导航：知识库列表（可新建/重命名/删除）、全部内容、我的收藏、回收站。
 - 顶部可按页面定制；整体类语雀：白底、细边框、绿色主色 `#00b96b`。
 
@@ -126,6 +130,22 @@ docs/                    文档
 - 公众号官方扫码登录，加密保存按用户隔离的会话；选择已保存的公众号排版、封面、作者和摘要，支持草稿与正式发表；安全验证时显示二维码。只有核实微信发表记录后显示成功，网络中断或服务重启后不自动重发。
 - 少数派使用微信扫码登录，加密保存按用户隔离的会话；选择 Matrix 排版与题图，支持保存草稿和立即发布。正文图片上传到少数派图床，保存后回读核对标题、正文、图片和链接；结果不确定时不自动重发。
 - 个人博客使用 Halo 个人令牌连接，加密保存按用户隔离的地址和令牌；选择博客排版与封面，支持保存草稿和公开发布。正文图片转存到 Halo 附件库，发布后回读核对内容；结果不确定时不自动重发。其他平台继续下载后手动发布。
+- 发布记录支持删除草稿：微信公众号、知乎、少数派和个人博客会同步删除平台后台草稿并清理本地记录；已发布内容、处理中和结果待核实记录不允许删除。抖音没有自动草稿模式，只允许清理失败的本地记录。
+
+### 3.7 AI 创作
+
+- 左侧会话列表、设置入口和新建会话；主区域为消息流与输入框。
+- 设置弹窗配置 OpenAI 兼容接口地址、模型、API Key 和温度；API Key 只显示“已保存”，不回显明文。
+- 工具调用以可折叠轨迹展示参数和结果；助手正文支持多轮对话。
+- 未配置模型时显示配置引导，不允许发送消息。
+- 工具可读写当前用户数据，并调用现有渲染、发布和批量任务服务。
+
+### 3.8 批量任务
+
+- 内容库多选后出现「批量渲染」「批量发布」按钮。
+- 批量渲染选择多个平台；批量发布选择公众号（仅草稿）、知乎、少数派或个人博客，并选择草稿/正式发布。
+- 弹窗显示任务进度、每篇状态、失败原因，以及打开排版/发布记录的链接。
+- 任务在服务端顺序执行；运行中关闭弹窗不终止任务，结果持久保存。
 
 ## 4. 后端 API 契约
 
@@ -188,6 +208,23 @@ docs/                    文档
 - `DELETE /api/renders/:id` → `{ ok: true }`
 - `PATCH /api/renders/:id/platforms/:platform` → `{ result: PlatformRender }`；接收 `{ title, html?, body?, tags, cards? }`，复用渲染器清洗和排版，保存当前平台调整。
 - `DELETE /api/renders/:id/platforms/:platform` → `{ result: PlatformRender }`；移除当前平台调整，恢复此记录的生成结果。
+
+### AI 创作与批量
+
+- `GET /api/ai/settings` → `{ settings: AiSettings }`（不返回 Key）
+- `PUT /api/ai/settings` `{ baseUrl, model, apiKey?, temperature? }` → `{ settings }`
+- `POST /api/ai/settings/test` → `{ ok, message, model }`
+- `GET /api/ai/sessions` → `{ sessions: AiSession[] }`
+- `POST /api/ai/sessions` `{ title? }` → `{ session }`
+- `GET /api/ai/sessions/:id` → `{ session: AiSessionDetail }`（含消息与工具轨迹）
+- `DELETE /api/ai/sessions/:id` → `{ ok: true }`
+- `POST /api/ai/sessions/:id/messages` `{ message }` → `AiChatResult`
+- `GET /api/batch/jobs` → `{ jobs: BatchJob[] }`
+- `GET /api/batch/jobs/:id` → `{ job }`
+- `POST /api/batch/render` `{ contentIds, platforms, options? }` → 202 `{ job }`
+- `POST /api/batch/publish` `{ contentIds, platform, mode, coverMediaId?, options? }` → 202 `{ job }`
+
+AI 工具在服务端按当前用户执行，发布仍复用各平台发布服务和幂等、安全校验。批量任务顺序执行并持久化每项状态，最多渲染 30 篇、发布 10 篇。
 
 ### 其他
 

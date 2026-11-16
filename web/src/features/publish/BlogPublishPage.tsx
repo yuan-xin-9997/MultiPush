@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, CheckCircle2, ExternalLink, FileText, Globe2, KeyRound, Link2, LoaderCircle, LogOut, RefreshCw, Send, ShieldCheck } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ExternalLink, FileText, Globe2, KeyRound, Link2, LoaderCircle, LogOut, RefreshCw, Send, ShieldCheck, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { BlogAccount, BlogPublication, BlogResolveInput, MediaAsset, RenderListItem, RenderRecord } from '@shared/types'
 import { absoluteUrl, api, ApiError } from '@/lib/api'
@@ -37,6 +37,8 @@ export default function BlogPublishPage() {
   const [resolveUrl, setResolveUrl] = useState('')
   const [resolveBusy, setResolveBusy] = useState(false)
   const [resolveError, setResolveError] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<BlogPublication | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const article = record?.results.find(result => result.platform === 'blog')
   const processing = publications.some(item => item.status === 'running')
   const busy = submitting || uploading || processing || resolveBusy || connecting
@@ -133,6 +135,20 @@ export default function BlogPublishPage() {
     finally { if (mounted.current) setSubmitting(false) }
   }
 
+  async function deletePublication() {
+    if (!deleteTarget) return
+    setDeleteBusy(true); setError('')
+    try {
+      const result = await api.blog.deletePublication(deleteTarget.id)
+      if (!mounted.current) return
+      setPublications(current => current.filter(item => item.id !== deleteTarget.id))
+      setDeleteTarget(null)
+      toast.success(result.remoteDeleted ? '已删除个人博客草稿和本地发布记录' : '已删除本地发布记录')
+    } catch (cause) {
+      if (mounted.current) { setError(getErrorMessage(cause)); setDeleteTarget(null) }
+    } finally { if (mounted.current) setDeleteBusy(false) }
+  }
+
   function openResolution(item: BlogPublication) {
     setResolveItem(item); setResolveChoice(null); setResolveUrl(''); setResolveError('')
   }
@@ -170,7 +186,7 @@ export default function BlogPublishPage() {
         <p className="publish-form-hint" role="status">{account?.status !== 'connected' ? '请先连接个人博客。' : busy ? '任务正在处理，请在下方查看进度。' : '发布后文章会出现在个人博客文章列表中。'}</p>
       </> : null}
     </section><aside className="publish-panel publish-preview-panel"><div className="publish-section-head"><h2>个人博客文章预览</h2><p>以 Halo 主题实际渲染为准。</p></div>{article ? <><h3>{article.title}</h3><iframe title="待发布的个人博客正文" sandbox="" srcDoc={`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>body{padding:18px;font-family:sans-serif;overflow-wrap:anywhere;background:#fafaf9;color:#1c1917}img{max-width:100%;height:auto}</style><body>${article.html}</body></html>`} /></> : <div className="publish-empty"><p>选择内容后预览个人博客排版</p></div>}</aside></div>
-    <section className="publish-panel publish-history"><div className="publish-section-head"><h2>个人博客发布记录</h2><p>草稿和正式发布分别记录，处理中的任务会自动更新。</p></div>{!publications.length ? <div className="publish-empty"><p>还没有个人博客发布记录</p></div> : <div className="publish-history-list">{publications.map(item => <article key={item.id} className="publish-history-item"><div className="publish-history-title"><strong>{item.title}</strong><span className={`publish-status ${item.status === 'published' || item.status === 'draft' ? 'is-success' : item.status === 'failed' ? 'is-error' : ''}`}>{labels[item.status]}</span></div><small>{item.mode === 'draft' ? '保存草稿' : '正式发布'} · {formatDateTime(item.createdAt)}</small><p>{item.message}</p>{safeUrl(item.url) ? <a className="btn btn-sm" href={item.url!} target="_blank" rel="noreferrer">{item.status === 'published' ? '查看博客文章' : '打开博客草稿'}<ExternalLink size={13} /></a> : null}{item.status === 'uncertain' ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(item)}>核实结果</button> : null}{item.resolutions?.length ? <details className="publish-resolution-history"><summary>核实记录（{item.resolutions.length}）</summary>{item.resolutions.map(entry => <p key={entry.id}><small>{formatDateTime(entry.createdAt)}</small> · {entry.message}</p>)}</details> : null}</article>)}</div>}</section>
+    <section className="publish-panel publish-history"><div className="publish-section-head"><h2>个人博客发布记录</h2><p>草稿和正式发布分别记录，处理中的任务会自动更新。</p></div>{!publications.length ? <div className="publish-empty"><p>还没有个人博客发布记录</p></div> : <div className="publish-history-list">{publications.map(item => <article key={item.id} className="publish-history-item"><div className="publish-history-title"><strong>{item.title}</strong><span className={`publish-status ${item.status === 'published' || item.status === 'draft' ? 'is-success' : item.status === 'failed' ? 'is-error' : ''}`}>{labels[item.status]}</span></div><small>{item.mode === 'draft' ? '保存草稿' : '正式发布'} · {formatDateTime(item.createdAt)}</small><p>{item.message}</p>{safeUrl(item.url) ? <a className="btn btn-sm" href={item.url!} target="_blank" rel="noreferrer">{item.status === 'published' ? '查看博客文章' : '打开博客草稿'}<ExternalLink size={13} /></a> : null}{item.status === 'uncertain' ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(item)}>核实结果</button> : null}{item.mode === 'draft' && item.status !== 'running' ? <button type="button" className="btn btn-sm publish-delete-button" disabled={busy || deleteBusy} onClick={() => setDeleteTarget(item)}><Trash2 size={13} />删除草稿</button> : null}{item.resolutions?.length ? <details className="publish-resolution-history"><summary>核实记录（{item.resolutions.length}）</summary>{item.resolutions.map(entry => <p key={entry.id}><small>{formatDateTime(entry.createdAt)}</small> · {entry.message}</p>)}</details> : null}</article>)}</div>}</section>
     <p className="publish-bottom-note"><ShieldCheck size={14} />个人令牌只加密保存在本机服务，不会返回给浏览器；可随时在 Halo 后台撤销令牌。</p>
     <Modal open={connectOpen} onClose={() => { if (!connecting) setConnectOpen(false) }} title="连接个人博客" subtitle="Halo 2.x 地址与个人令牌" size="compact" closeOnBackdrop={!connecting}>
       <div className="blog-connect-form">
@@ -196,5 +212,6 @@ export default function BlogPublishPage() {
     </Modal>
     <ConfirmDialog open={confirmation === 'publish'} title="发布到个人博客？" description={<><strong>{article?.title}</strong><p>将发布至「{account?.name || '已连接个人博客'}」，文章会公开显示在博客中。</p></>} confirmLabel="确认发布到个人博客" tone="primary" loading={submitting} onConfirm={() => publish('publish')} onClose={() => setConfirmation(null)} />
     <ConfirmDialog open={confirmation === 'disconnect'} title="断开个人博客连接？" description="删除系统保存的博客地址和令牌，下次发布需要重新连接。博客上的草稿和文章保持不变。" confirmLabel="断开连接" loading={submitting} onConfirm={disconnect} onClose={() => setConfirmation(null)} />
+    <ConfirmDialog open={!!deleteTarget} title="删除个人博客草稿？" description={<><strong>{deleteTarget?.title}</strong><p>将同时删除个人博客后台的这份草稿和本系统的发布记录，删除后无法恢复。</p></>} confirmLabel="删除草稿" loading={deleteBusy} onConfirm={deletePublication} onClose={() => setDeleteTarget(null)} />
   </div>
 }

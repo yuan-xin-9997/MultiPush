@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { load } from 'cheerio'
-import type { WechatAccount, WechatLogin, WechatPublication, WechatPublishInput } from '../../shared/types'
+import type { PublicationDeletion, WechatAccount, WechatLogin, WechatPublication, WechatPublishInput } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -232,6 +232,33 @@ export class WechatService {
     const publication = this.database.getWechatPublication(userId, id)
     if (!publication) throw notFound('发布记录不存在')
     return this.withQr(publication)
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.assertIdle(userId)
+    const publication = this.get(userId, id)
+    if (['running', 'awaiting_confirmation'].includes(publication.status)) throw new ApiError(409, 'wechat_delete_busy', '公众号任务正在处理，请等待完成后再删除')
+    if (publication.status === 'published') throw new ApiError(409, 'wechat_delete_published', '已发表的文章记录不能删除')
+    if (publication.mode !== 'draft') throw new ApiError(409, 'wechat_delete_published', '只能删除公众号草稿；已发表文章请到公众号后台处理')
+    this.activeUsers.add(userId)
+    try {
+      let remoteDeleted = false
+      if (publication.remoteId) {
+        try {
+          const result = await this.driver.deleteDraft(this.readState(userId), publication.remoteId)
+          this.saveState(userId, result.state)
+          remoteDeleted = true
+        } catch (error) {
+          if (error instanceof ApiError && error.code === 'wechat_session_expired') {
+            const account = this.database.getWechatAccount(userId)
+            if (account) this.database.saveWechatAccount(userId, { ...account, status: 'expired', checkedAt: now() })
+          }
+          throw error
+        }
+      }
+      if (!this.database.deleteWechatPublication(userId, id)) throw notFound('发布记录不存在')
+      return { ok: true, remoteDeleted }
+    } finally { this.activeUsers.delete(userId) }
   }
 
   async publish(userId: string, input: WechatPublishInput, baseUrl?: string): Promise<WechatPublication> {

@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { chromium, type Browser } from 'playwright-core'
 import { ApiError } from '../src/errors'
 import { load } from 'cheerio'
-import { applyWechatImage, assertWechatResponse, classifyWechatFailure, findPublishedArticle, isWechatLoginScanned, parseWechatPage, parseWechatUpload, prepareWechatLinks, wechatSwitchState } from '../src/wechat-browser'
+import { applyWechatImage, assertWechatResponse, classifyWechatFailure, findPublishedArticle, isWechatLoginScanned, parseWechatPage, parseWechatUpload, prepareWechatLinks, wechatSwitchState, PlaywrightWechatDriver, type WechatStorageState } from '../src/wechat-browser'
 
 describe('WeChat browser responses', () => {
   it('preserves external addresses as text when the account cannot save clickable links', () => {
@@ -140,5 +141,43 @@ describe('WeChat browser responses', () => {
     expect(classifyWechatFailure(sessionExpired, { draftRequested: false, submitted: false, remoteId: '' })).toBe(sessionExpired)
     const cannotVerify = new ApiError(409, 'wechat_notification_unverified', '无法确认群发通知')
     expect(classifyWechatFailure(cannotVerify, { draftRequested: true, submitted: false, remoteId: '123' })).toMatchObject({ code: 'wechat_notification_unverified' })
+  })
+})
+
+
+const deleteSession: WechatStorageState = {
+  cookies: [{ name: 'bizuin', value: 'private', domain: 'mp.weixin.qq.com', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'Lax' }],
+  origins: [],
+}
+
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
+
+describe('WeChat browser draft deletion', () => {
+  it('calls the admin delete endpoint with the draft appmsgid and rejects unsupported responses', async () => {
+    const post = vi.fn(async (_url: string, _options: { form: Record<string, string> }) => ({
+      status: () => 200, ok: () => true, json: async () => ({ base_resp: { ret: 0 } }),
+    }))
+    const page = {
+      goto: vi.fn(),
+      content: async () => '<script>var data={t:"123",user_name:"gh_test",ticket:"ticket",nick_name:"测试公众号"};</script>',
+      url: () => 'https://mp.weixin.qq.com/?token=123',
+    }
+    const context = {
+      newPage: async () => page,
+      setDefaultTimeout: vi.fn(),
+      storageState: async () => deleteSession,
+      close: vi.fn(async () => {}),
+      request: { post },
+    }
+    vi.stubEnv('WECHAT_BROWSER_PATH', process.execPath)
+    vi.spyOn(chromium, 'launch').mockResolvedValue({ newContext: async () => context, on: vi.fn(), close: async () => {} } as unknown as Browser)
+    const driver = new PlaywrightWechatDriver()
+    try {
+      await expect(driver.deleteDraft(deleteSession, '345')).resolves.toMatchObject({ message: '已删除公众号草稿' })
+      const [url, options] = post.mock.calls[0]
+      expect(url).toContain('/cgi-bin/operate_appmsg?sub=del')
+      expect(options.form).toMatchObject({ AppMsgId: '345', token: '123', lang: 'zh_CN' })
+      await expect(driver.deleteDraft(deleteSession, '../bad')).rejects.toMatchObject({ code: 'wechat_draft_invalid' })
+    } finally { await driver.close() }
   })
 })

@@ -14,6 +14,7 @@ afterEach(async () => { for (const driver of drivers.splice(0)) await driver.clo
 function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publishTimeout?: boolean; draftId?: string; existing?: boolean; existingSpacing?: boolean; checkState?: 'published' | 'draft' | 'reviewing'; foreignAuthor?: boolean } = {}) {
   const draftId = options.draftId || '123'
   let saved: Record<string, unknown> = { id: draftId, state: 'draft' }, publishListener: (value: unknown) => void = () => {}
+  let deleted = false
   const upload = vi.fn(async () => response({ src: 'https://pic4.zhimg.com/uploaded.png' }))
   const post = vi.fn(async (url: string) => {
     if (url.endsWith('/uploaded_images')) return upload()
@@ -23,8 +24,12 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
   const patch = vi.fn(async (_url: string, value: { data: Record<string, unknown> }) => { saved = { ...saved, ...value.data }; return response({}) })
   const get = vi.fn(async (url: string) => {
     if (url.endsWith('/me')) return response({ id: 'account', name: '作者' })
-    if (url === `https://zhuanlan.zhihu.com/api/articles/${draftId}/draft` || saved.state === 'published' && url === `https://zhuanlan.zhihu.com/api/articles/${saved.id}`) return response({ ...saved, ...(options.mismatch ? { content: '<p>丢失的内容</p>' } : {}) })
+    if (url === `https://zhuanlan.zhihu.com/api/articles/${draftId}/draft` && !deleted || saved.state === 'published' && url === `https://zhuanlan.zhihu.com/api/articles/${saved.id}`) return response({ ...saved, ...(options.mismatch ? { content: '<p>丢失的内容</p>' } : {}) })
     return response({ error: { code: 4041 } }, 404)
+  })
+  const remove = vi.fn(async (url: string) => {
+    if (url === `https://zhuanlan.zhihu.com/api/articles/${draftId}/draft`) deleted = true
+    return response({})
   })
   const click = vi.fn(async () => {
     if (options.publishTimeout) throw Error('timeout with secret-cookie')
@@ -32,7 +37,7 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
     publishListener({ request: () => ({ method: () => 'POST' }), url: () => 'https://www.zhihu.com/api/v4/content/publish', json: async () => ({ code: 0, data: { result: JSON.stringify({ publish: { id: '456' } }) } }) })
   })
   const page = { goto: vi.fn(), url: () => 'https://zhuanlan.zhihu.com/p/123/edit', on: (_event: string, listener: typeof publishListener) => { publishListener = listener }, getByRole: () => ({ first: () => ({ click }) }), waitForTimeout: vi.fn() }
-  const context = { setDefaultTimeout: vi.fn(), storageState: async () => state, cookies: async () => [{ name: '_xsrf', value: 'test-xsrf' }], close: vi.fn(async () => {}), newPage: async () => page, request: { post, patch, get } }
+  const context = { setDefaultTimeout: vi.fn(), storageState: async () => state, cookies: async () => [{ name: '_xsrf', value: 'test-xsrf' }], close: vi.fn(async () => {}), newPage: async () => page, request: { post, patch, get, delete: remove } }
   vi.stubEnv('ZHIHU_BROWSER_PATH', process.execPath)
   vi.spyOn(chromium, 'launch').mockResolvedValue({ newContext: async () => context, on: vi.fn(), close: async () => {} } as unknown as Browser)
   const driver = new PlaywrightZhihuDriver(); drivers.push(driver)
@@ -40,7 +45,7 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
   if (options.existing) saved = { ...saved, title: article.title, content: zhihuEditorContent(article.html.replace('https://external.test/image.png', 'https://pic4.zhimg.com/uploaded.png')) }
   if (options.existingSpacing) saved.content = String(saved.content).replace('</h2>', '</h2>\n<p><br></p>\n')
   if (options.checkState) saved = { ...saved, title: article.title, author: { id: options.foreignAuthor ? 'other-account' : 'account' }, state: options.checkState === 'published' ? 'published' : 'draft', has_publishing_draft: options.checkState === 'reviewing' }
-  return { driver, article, post, patch, get, page, click, context }
+  return { driver, article, post, patch, get, remove, page, click, context }
 }
 
 describe('Zhihu browser publishing', () => {
@@ -142,5 +147,20 @@ describe('Zhihu browser publishing', () => {
   it('does not infer publication success from an accepted response, missing ID, or malformed data', () => {
     for (const value of [{}, { code: '', data: { result: { publish: { id: '123' } } } }, { code: 0 }, { code: 0, data: { result: 'bad' } }, { code: 1, data: { result: { publish: { id: 123 } } } }]) expect(parseZhihuPublishedId(value)).toBeNull()
     expect(parseZhihuPublishedId({ code: 0, data: { result: '{"publish":{"id":123}}' } })).toBe('123')
+  })
+})
+
+
+describe('Zhihu browser draft deletion', () => {
+  it('deletes a draft with the documented draft endpoint and verifies it is gone', async () => {
+    const { driver, remove } = fixture()
+    await expect(driver.deleteDraft(state, '123')).resolves.toMatchObject({ message: '已删除知乎草稿' })
+    expect(remove).toHaveBeenCalledWith('https://zhuanlan.zhihu.com/api/articles/123/draft', expect.anything())
+  })
+
+  it('never deletes a published article through the draft endpoint', async () => {
+    const { driver, remove } = fixture({ checkState: 'published' })
+    await expect(driver.deleteDraft(state, '123')).rejects.toMatchObject({ code: 'zhihu_delete_published' })
+    expect(remove).not.toHaveBeenCalled()
   })
 })

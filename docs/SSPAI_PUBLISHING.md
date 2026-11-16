@@ -48,6 +48,7 @@
 | `POST /api/sspai/publications` | 提交 `{renderId, mode: "draft"或"publish", coverMediaId?}` |
 | `GET /api/sspai/publications` | 当前用户最近 50 条记录 |
 | `GET /api/sspai/publications/:id` | 查询进度、草稿或文章链接 |
+| `DELETE /api/sspai/publications/:id` | 删除少数派草稿：同步删除少数派后台草稿与本系统记录；已发布文章不可删除 |
 | `POST /api/sspai/publications/:id/resolve` | `{action:"check"}` 异步复查；`{action:"not_published"}` 人工确认未发布；`{action:"published",articleUrl}` 人工关联已发布文章 |
 
 ## 参考与验收

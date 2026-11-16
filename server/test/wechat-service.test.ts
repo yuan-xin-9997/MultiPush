@@ -43,6 +43,7 @@ function fakeDriver() {
       state: session, status: mode === 'draft' ? 'draft' : 'published', message: mode === 'draft' ? '草稿已保存' : '已发表',
       remoteId: 'wechat-draft-id', url: mode === 'publish' ? 'https://mp.weixin.qq.com/s/published' : null,
     })),
+    deleteDraft: vi.fn<WechatBrowserDriver['deleteDraft']>().mockResolvedValue({ state: session, message: '已删除公众号草稿' }),
     close: vi.fn(async () => {}),
   }
   return { driver, attempt }
@@ -403,5 +404,64 @@ describe('WeChat API authentication', () => {
       const rejected = await fetch(`${base}/api/wechat/publications`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ renderId: alice.id, coverMediaId: alice.id, mode: 'draft', sourceUrl }) })
       expect(rejected.status).toBe(400)
     }
+  })
+
+  it('exposes the draft deletion route with user isolation and no-store caching', async () => {
+    const { config, database, driver, alice, bob, seedAccount } = setup()
+    seedAccount()
+    const draft = database.createWechatPublication(alice.id, { renderId: 'render-id', title: '待删草稿', mode: 'draft', idempotencyKey: 'route-draft' })
+    database.updateWechatPublication(alice.id, draft.id, { status: 'draft', remoteId: '345' })
+    const app = createApp(config, database, driver)
+    const apiService = app.locals.wechat as WechatService
+    if (apiService) services.push(apiService)
+    const server = app.listen(0, '127.0.0.1')
+    servers.push(server)
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Missing port')
+    const base = `http://127.0.0.1:${address.port}`
+    const headers = { Authorization: `Bearer ${signToken(alice, config.jwtSecret)}` }
+    const otherHeaders = { Authorization: `Bearer ${signToken(bob, config.jwtSecret)}` }
+    expect((await fetch(`${base}/api/wechat/publications/${draft.id}`, { method: 'DELETE' })).status).toBe(401)
+    expect((await fetch(`${base}/api/wechat/publications/${draft.id}`, { method: 'DELETE', headers: otherHeaders })).status).toBe(404)
+    const response = await fetch(`${base}/api/wechat/publications/${draft.id}`, { method: 'DELETE', headers })
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.json()).toEqual({ ok: true, remoteDeleted: true })
+    expect(database.getWechatPublication(alice.id, draft.id)).toBeNull()
+  })
+})
+
+
+describe('WeChat draft deletion', () => {
+  it('deletes the platform draft and the local record, and only for the owner’s draft records', async () => {
+    const { service, database, driver, alice, bob, seedAccount } = setup()
+    seedAccount()
+    const draft = database.createWechatPublication(alice.id, { renderId: 'render-id', title: '待删草稿', mode: 'draft', idempotencyKey: 'draft-key' })
+    database.updateWechatPublication(alice.id, draft.id, { status: 'draft', remoteId: '345' })
+    await expect(service.remove(bob.id, draft.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: true })
+    expect(driver.deleteDraft).toHaveBeenCalledWith(session, '345')
+    expect(database.getWechatPublication(alice.id, draft.id)).toBeNull()
+
+    const published = database.createWechatPublication(alice.id, { renderId: 'render-id', title: '已发表文章', mode: 'publish', idempotencyKey: 'publish-key' })
+    database.updateWechatPublication(alice.id, published.id, { status: 'published' })
+    await expect(service.remove(alice.id, published.id)).rejects.toMatchObject({ code: 'wechat_delete_published' })
+    expect(database.getWechatPublication(alice.id, published.id)).not.toBeNull()
+  })
+
+  it('removes a local draft record without a remote id and clears stale sessions on failure', async () => {
+    const { service, database, driver, alice, seedAccount } = setup()
+    seedAccount()
+    const local = database.createWechatPublication(alice.id, { renderId: 'render-id', title: '本地记录', mode: 'draft', idempotencyKey: 'local-key' })
+    database.updateWechatPublication(alice.id, local.id, { status: 'failed' })
+    await expect(service.remove(alice.id, local.id)).resolves.toEqual({ ok: true, remoteDeleted: false })
+    expect(driver.deleteDraft).not.toHaveBeenCalled()
+
+    const remote = database.createWechatPublication(alice.id, { renderId: 'render-id', title: '远端草稿', mode: 'draft', idempotencyKey: 'remote-key' })
+    database.updateWechatPublication(alice.id, remote.id, { status: 'draft', remoteId: '456' })
+    driver.deleteDraft.mockRejectedValueOnce(new ApiError(409, 'wechat_session_expired', '请重新扫码'))
+    await expect(service.remove(alice.id, remote.id)).rejects.toMatchObject({ code: 'wechat_session_expired' })
+    expect(database.getWechatAccount(alice.id)?.status).toBe('expired')
+    expect(database.getWechatPublication(alice.id, remote.id)).not.toBeNull()
   })
 })

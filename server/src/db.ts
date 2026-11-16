@@ -27,6 +27,13 @@ import type {
   SspaiResolution,
   BlogPublication,
   BlogResolution,
+  AiMessage,
+  AiSession,
+  AiToolCall,
+  BatchJob,
+  BatchJobItem,
+  BatchJobKind,
+  BatchJobStatus,
 } from '../../shared/types'
 import { PLATFORM_ORDER } from '../../shared/types'
 import { DEFAULT_BOOK_COLOR } from './config'
@@ -190,6 +197,34 @@ export interface BlogAccountSession {
   status: 'connected' | 'expired'
   checkedAt: string
 }
+
+export interface AiSettingsRecord {
+  encryptedApiKey: string
+  baseUrl: string
+  model: string
+  temperature: number
+  updatedAt: string
+}
+
+export interface CreateAiMessageValues {
+  role: AiMessage['role']
+  content: string
+  toolCalls?: AiToolCall[]
+  toolCallId?: string | null
+  toolName?: string | null
+  toolArguments?: unknown
+  toolResult?: unknown
+}
+
+export interface CreateBatchJobValues {
+  kind: BatchJobKind
+  total: number
+  message?: string
+  input: unknown
+  items: BatchJobItem[]
+}
+
+export type UpdateBatchJobValues = Partial<Pick<BatchJob, 'status' | 'done' | 'message' | 'items'>>
 
 export interface CreateWechatPublicationValues {
   renderId: string
@@ -499,7 +534,52 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_blog_resolutions_publication ON blog_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 9;
+      CREATE TABLE IF NOT EXISTS ai_settings (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_api_key TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        model TEXT NOT NULL,
+        temperature REAL NOT NULL DEFAULT 0.7,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ai_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_sessions_user_updated ON ai_sessions(user_id, updated_at DESC);
+      CREATE TABLE IF NOT EXISTS ai_messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES ai_sessions(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+        content TEXT NOT NULL DEFAULT '',
+        tool_calls_json TEXT,
+        tool_call_id TEXT,
+        tool_name TEXT,
+        tool_arguments_json TEXT,
+        tool_result_json TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_messages_session_created ON ai_messages(session_id, created_at);
+      CREATE TABLE IF NOT EXISTS batch_jobs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('render', 'publish')),
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+        total INTEGER NOT NULL,
+        done INTEGER NOT NULL DEFAULT 0,
+        message TEXT NOT NULL DEFAULT '',
+        input_json TEXT NOT NULL DEFAULT '{}',
+        items_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_batch_jobs_user_created ON batch_jobs(user_id, created_at DESC);
+      PRAGMA user_version = 10;
     `)
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     this.run(`UPDATE douyin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先核实抖音发布结果，避免重复发布。', nowIso()])
@@ -513,6 +593,8 @@ export class Database {
       ['服务已重启，请先核对少数派草稿与已发布文章，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE blog_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
       ['服务已重启，请先核对个人博客草稿与已发布文章，系统不会自动重复发布。', nowIso()])
+    this.run(`UPDATE batch_jobs SET status = 'failed', message = ?, updated_at = ? WHERE status IN ('queued', 'running')`,
+      ['服务已重启，批量任务已中断，请重新提交。', nowIso()])
   }
 
   private all(sql: string, params: SqlValue[] = []): Row[] {
@@ -1141,6 +1223,10 @@ export class Database {
     return this.getWechatPublication(userId, id)
   }
 
+  deleteWechatPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM wechat_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
   getZhihuAccount(userId: string): ZhihuAccountSession | null {
     const row = this.get('SELECT * FROM zhihu_accounts WHERE user_id = ?', [userId])
     return row ? { encryptedSession: text(row.encrypted_session), accountId: text(row.account_id), name: nullableText(row.name), status: row.status === 'expired' ? 'expired' : 'connected', checkedAt: text(row.checked_at) } : null
@@ -1190,6 +1276,10 @@ export class Database {
     this.run(`UPDATE zhihu_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
       [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
     return this.getZhihuPublication(userId, id)
+  }
+
+  deleteZhihuPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM zhihu_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
   }
 
   resolveZhihuPublication(userId: string, id: string, action: ZhihuResolution['action'], values: Pick<ZhihuPublication, 'status' | 'message' | 'url' | 'remoteId'>): ZhihuPublication | null {
@@ -1256,6 +1346,10 @@ export class Database {
     return this.getXhsPublication(userId, id)
   }
 
+  deleteXhsPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM xiaohongshu_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
   resolveXhsPublication(userId: string, id: string, action: XhsResolution['action'], values: Pick<XhsPublication, 'status' | 'message' | 'url' | 'remoteId'>): XhsPublication | null {
     return this.transaction(() => {
       const current = this.getXhsPublication(userId, id)
@@ -1317,6 +1411,10 @@ export class Database {
     this.run(`UPDATE douyin_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
       [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
     return this.getDouyinPublication(userId, id)
+  }
+
+  deleteDouyinPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM douyin_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
   }
 
   resolveDouyinPublication(userId: string, id: string, action: DouyinResolution['action'], values: Pick<DouyinPublication, 'status' | 'message' | 'url' | 'remoteId'>): DouyinPublication | null {
@@ -1384,6 +1482,10 @@ export class Database {
     return this.getSspaiPublication(userId, id)
   }
 
+  deleteSspaiPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM sspai_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
   resolveSspaiPublication(userId: string, id: string, action: SspaiResolution['action'], values: Pick<SspaiPublication, 'status' | 'message' | 'url' | 'remoteId'>): SspaiPublication | null {
     return this.transaction(() => {
       const current = this.getSspaiPublication(userId, id)
@@ -1449,6 +1551,10 @@ export class Database {
     return this.getBlogPublication(userId, id)
   }
 
+  deleteBlogPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM blog_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
   resolveBlogPublication(userId: string, id: string, action: BlogResolution['action'], values: Pick<BlogPublication, 'status' | 'message' | 'url' | 'remoteId'>): BlogPublication | null {
     return this.transaction(() => {
       const current = this.getBlogPublication(userId, id)
@@ -1456,6 +1562,151 @@ export class Database {
       this.run('INSERT INTO blog_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
       return this.updateBlogPublication(userId, id, values)
     })
+  }
+
+  // ------------------------------------------------------------------- AI
+
+  getAiSettings(userId: string): AiSettingsRecord | null {
+    const row = this.get('SELECT * FROM ai_settings WHERE user_id = ?', [userId])
+    return row ? {
+      encryptedApiKey: text(row.encrypted_api_key),
+      baseUrl: text(row.base_url),
+      model: text(row.model),
+      temperature: numberValue(row.temperature),
+      updatedAt: text(row.updated_at),
+    } : null
+  }
+
+  saveAiSettings(userId: string, values: { encryptedApiKey: string; baseUrl: string; model: string; temperature: number }): void {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO ai_settings (user_id, encrypted_api_key, base_url, model, temperature, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET
+      encrypted_api_key = excluded.encrypted_api_key, base_url = excluded.base_url, model = excluded.model,
+      temperature = excluded.temperature, updated_at = excluded.updated_at`,
+      [userId, values.encryptedApiKey, values.baseUrl, values.model, values.temperature, createdAt, createdAt])
+  }
+
+  deleteAiSettings(userId: string): void { this.run('DELETE FROM ai_settings WHERE user_id = ?', [userId]) }
+
+  createAiSession(userId: string, title = '新会话'): AiSession {
+    const id = randomUUID(), createdAt = nowIso()
+    this.run('INSERT INTO ai_sessions (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      [id, userId, title, createdAt, createdAt])
+    const row = this.get('SELECT * FROM ai_sessions WHERE id = ? AND user_id = ?', [id, userId])
+    if (!row) throw new Error('Failed to create AI session')
+    return this.mapAiSession(row)
+  }
+
+  private mapAiSession(row: Row): AiSession {
+    return { id: text(row.id), title: text(row.title), createdAt: text(row.created_at), updatedAt: text(row.updated_at) }
+  }
+
+  getAiSession(userId: string, id: string): AiSession | null {
+    const row = this.get('SELECT * FROM ai_sessions WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapAiSession(row) : null
+  }
+
+  listAiSessions(userId: string): AiSession[] {
+    return this.all('SELECT * FROM ai_sessions WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT 50', [userId])
+      .map(row => this.mapAiSession(row))
+  }
+
+  updateAiSession(userId: string, id: string, values: { title?: string; touch?: boolean }): AiSession | null {
+    const current = this.getAiSession(userId, id)
+    if (!current) return null
+    this.run('UPDATE ai_sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+      [values.title ?? current.title, values.touch === false ? current.updatedAt : nowIso(), id, userId])
+    return this.getAiSession(userId, id)
+  }
+
+  deleteAiSession(userId: string, id: string): boolean {
+    return this.run('DELETE FROM ai_sessions WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
+  private mapAiMessage(row: Row): AiMessage {
+    const toolCalls = parseJson(row.tool_calls_json)
+    return {
+      id: text(row.id),
+      role: row.role as AiMessage['role'],
+      content: text(row.content),
+      toolCalls: Array.isArray(toolCalls) ? toolCalls as AiToolCall[] : undefined,
+      toolCallId: nullableText(row.tool_call_id) ?? undefined,
+      toolName: nullableText(row.tool_name) ?? undefined,
+      toolArguments: parseJson(row.tool_arguments_json) ?? undefined,
+      toolResult: parseJson(row.tool_result_json) ?? undefined,
+      createdAt: text(row.created_at),
+    }
+  }
+
+  listAiMessages(userId: string, sessionId: string): AiMessage[] {
+    return this.all('SELECT * FROM ai_messages WHERE session_id = ? AND user_id = ? ORDER BY created_at ASC, rowid ASC', [sessionId, userId])
+      .map(row => this.mapAiMessage(row))
+  }
+
+  createAiMessage(userId: string, sessionId: string, values: CreateAiMessageValues): AiMessage {
+    const id = randomUUID()
+    this.run(`INSERT INTO ai_messages (id, session_id, user_id, role, content, tool_calls_json, tool_call_id, tool_name, tool_arguments_json, tool_result_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, sessionId, userId, values.role, values.content,
+        values.toolCalls ? JSON.stringify(values.toolCalls) : null,
+        values.toolCallId ?? null, values.toolName ?? null,
+        values.toolArguments === undefined ? null : JSON.stringify(values.toolArguments),
+        values.toolResult === undefined ? null : JSON.stringify(values.toolResult),
+        nowIso()])
+    const row = this.get('SELECT * FROM ai_messages WHERE id = ? AND user_id = ?', [id, userId])
+    if (!row) throw new Error('Failed to create AI message')
+    return this.mapAiMessage(row)
+  }
+
+  // ---------------------------------------------------------------- batch
+
+  private mapBatchJob(row: Row): BatchJob {
+    const items = parseJson(row.items_json)
+    return {
+      id: text(row.id),
+      kind: row.kind as BatchJobKind,
+      status: row.status as BatchJobStatus,
+      total: numberValue(row.total),
+      done: numberValue(row.done),
+      message: text(row.message),
+      items: Array.isArray(items) ? items as BatchJobItem[] : [],
+      createdAt: text(row.created_at),
+      updatedAt: text(row.updated_at),
+    }
+  }
+
+  createBatchJob(userId: string, values: CreateBatchJobValues): BatchJob {
+    const id = randomUUID(), createdAt = nowIso()
+    this.run(`INSERT INTO batch_jobs (id, user_id, kind, status, total, done, message, input_json, items_json, created_at, updated_at)
+      VALUES (?, ?, ?, 'queued', ?, 0, ?, ?, ?, ?, ?)`,
+      [id, userId, values.kind, values.total, values.message ?? '等待处理', JSON.stringify(values.input), JSON.stringify(values.items), createdAt, createdAt])
+    const job = this.getBatchJob(userId, id)
+    if (!job) throw new Error('Failed to create batch job')
+    return job
+  }
+
+  getBatchJob(userId: string, id: string): BatchJob | null {
+    const row = this.get('SELECT * FROM batch_jobs WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapBatchJob(row) : null
+  }
+
+  getBatchJobInput(userId: string, id: string): unknown {
+    const row = this.get('SELECT input_json FROM batch_jobs WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? parseJson(row.input_json) : null
+  }
+
+  listBatchJobs(userId: string): BatchJob[] {
+    return this.all('SELECT * FROM batch_jobs WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 20', [userId])
+      .map(row => this.mapBatchJob(row))
+  }
+
+  updateBatchJob(userId: string, id: string, values: UpdateBatchJobValues): BatchJob | null {
+    const current = this.getBatchJob(userId, id)
+    if (!current) return null
+    this.run(`UPDATE batch_jobs SET status = ?, done = ?, message = ?, items_json = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.done ?? current.done, values.message ?? current.message,
+        JSON.stringify(values.items ?? current.items), nowIso(), id, userId])
+    return this.getBatchJob(userId, id)
   }
 }
 

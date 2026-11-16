@@ -335,6 +335,11 @@ export interface WechatPublishInput {
   sourceUrl?: string
 }
 
+export interface PublicationDeletion {
+  ok: true
+  remoteDeleted: boolean
+}
+
 export interface WechatPublication {
   id: string
   renderId: string
@@ -581,6 +586,102 @@ export interface BlogResolution {
 export interface BlogResolveInput {
   action: BlogResolution['action']
   articleUrl?: string
+}
+
+export interface AiSettings {
+  configured: boolean
+  baseUrl: string
+  model: string
+  temperature: number
+  hasApiKey: boolean
+  /** Where the active configuration comes from: the user's saved settings or server defaults. */
+  source?: 'user' | 'server'
+  label?: string
+}
+
+export interface AiSettingsInput {
+  baseUrl: string
+  apiKey?: string
+  model: string
+  temperature?: number
+}
+
+export interface AiToolCall {
+  id: string
+  type: 'function'
+  function: { name: string; arguments: string }
+}
+
+export interface AiMessage {
+  id: string
+  role: 'user' | 'assistant' | 'tool'
+  content: string
+  toolCalls?: AiToolCall[]
+  toolCallId?: string
+  toolName?: string
+  toolArguments?: unknown
+  toolResult?: unknown
+  createdAt: string
+}
+
+export interface AiSession {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AiSessionDetail extends AiSession {
+  messages: AiMessage[]
+}
+
+export interface AiChatResult {
+  session: AiSessionDetail
+  reply: AiMessage
+}
+
+export type BatchJobKind = 'render' | 'publish'
+export type BatchJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
+
+export interface BatchJobItem {
+  index: number
+  contentId: string
+  title: string
+  status: BatchItemStatus
+  message: string
+  renderId?: string
+  publicationId?: string
+  publicationStatus?: string
+  url?: string
+}
+
+export interface BatchJob {
+  id: string
+  kind: BatchJobKind
+  status: BatchJobStatus
+  total: number
+  done: number
+  message: string
+  items: BatchJobItem[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BatchRenderInput {
+  contentIds: string[]
+  platforms: PlatformId[]
+  options?: RenderOptions
+}
+
+export type BatchPublishPlatform = 'wechat' | 'zhihu' | 'sspai' | 'blog'
+
+export interface BatchPublishInput {
+  contentIds: string[]
+  platform: BatchPublishPlatform
+  mode: 'draft' | 'publish'
+  coverMediaId?: string
+  options?: RenderOptions
 }
 
 export interface ApiHealth {

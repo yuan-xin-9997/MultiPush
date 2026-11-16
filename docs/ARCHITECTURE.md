@@ -14,6 +14,10 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/contents  内容 CRUD、软删除、收藏、统计
   ├─ routes/media     上传（multer → DATA_DIR/uploads）
   ├─ routes/renders   调用渲染器、保存历史
+  ├─ routes/ai        AI 配置、会话、消息与工具调用
+  ├─ routes/batch     批量渲染 / 批量发布任务
+  ├─ ai.ts            OpenAI 兼容模型客户端与业务工具
+  ├─ batch.ts         顺序批量任务执行器
   ├─ renderers/*      平台规则渲染（纯函数，服务端）
   └─ db.ts            node:sqlite（WAL），单文件 DATA_DIR/multipush.sqlite
 ```
@@ -27,6 +31,9 @@ Express (single Node process, 0.0.0.0:34080)
 | `contents` | id, user_id, book_id, title, content_json, content_html, excerpt, cover_image, tags, status, favorite, word_count, image_count, video_count, deleted_at | Tiptap JSON + HTML 双存；软删除 |
 | `media` | id, user_id, filename, original_name, mime_type, size, kind | 文件在 `DATA_DIR/uploads` |
 | `renders` | id, user_id, content_id, platforms, options_json, result_json | 渲染历史；结果完整存储 |
+| `ai_settings` | user_id, encrypted_api_key, base_url, model, temperature | 每用户大模型配置；Key AES-256-GCM 加密 |
+| `ai_sessions` / `ai_messages` | id, user_id, title / session_id, role, content, tool_calls_json, tool_result_json | AI 会话、消息与工具轨迹 |
+| `batch_jobs` | id, user_id, kind, status, total, done, input_json, items_json | 批量渲染/发布任务与每项进度 |
 
 所有业务表都有 `user_id`，查询必须带当前用户条件；跨用户访问统一返回 404。
 
@@ -61,7 +68,7 @@ export interface ContentEnhancer {
 
 ## 安全
 
-- JWT Bearer（7 天），密码 bcrypt 12 rounds；注册开放，无邮箱验证。
+- JWT Bearer（7 天），密码 bcrypt 12 rounds；注册开放，无邮箱验证。AI API Key 使用独立 `.ai-session-key` 加密并按用户绑定，不返回前端。
 - 所有 SQL 使用参数绑定；tags 以 JSON 文本存储。
 - 上传白名单、大小限制、随机文件名；静态服务防目录穿越。
 - 渲染 HTML 清洗并禁止脚本；前端 iframe `sandbox=""` 预览。
@@ -70,7 +77,7 @@ export interface ContentEnhancer {
 
 ## 前端结构
 
-- 路由：登录/注册、应用壳（内容库/渲染/发布）、全屏编辑器。
+- 路由：登录/注册、应用壳（AI 创作/内容库/渲染/发布）、全屏编辑器；内容库多选后可打开批量渲染/发布弹窗。
 - 状态：`AuthContext` + 页面局部状态；无全局状态库。
 - API：`web/src/lib/api.ts` 唯一入口，401 统一清理 token。
 - 导入导出：`web/src/lib/content-io.ts` 纯浏览器解析（marked / turndown / JSZip），不经过服务器。

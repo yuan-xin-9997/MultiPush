@@ -18,6 +18,7 @@ export interface ZhihuDriver {
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: ZhihuIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'draft' | 'missing' | 'unknown'; url: string | null; message: string }>
   publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: (value: Partial<Pick<ZhihuPublication, 'message' | 'remoteId' | 'url'>>) => void, resumeDraftId?: string): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
+  deleteDraft(state: PublisherStorageState, remoteId: string): Promise<{ state: PublisherStorageState; message: string }>
   close(): Promise<void>
 }
 
@@ -149,6 +150,37 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'zhihu_check_failed', '重新核实知乎结果未完成，请稍后重试或人工核实')
+    } finally { await context.close().catch(() => {}) }
+  }
+
+  async deleteDraft(state: PublisherStorageState, remoteId: string) {
+    if (!/^\d+$/.test(remoteId)) throw new ApiError(400, 'zhihu_draft_invalid', '知乎草稿编号无效')
+    const context = await this.context(state)
+    try {
+      await this.identity(context)
+      const cookies = await context.cookies([HOME, COLUMN])
+      const headers = {
+        'x-requested-with': 'fetch',
+        'x-xsrftoken': cookies.find(cookie => cookie.name === '_xsrf')?.value || '',
+        Referer: `${COLUMN}p/${remoteId}/edit`,
+        Origin: COLUMN.slice(0, -1),
+      }
+      const publishedResponse = await context.request.get(`${COLUMN}api/articles/${remoteId}`, { headers, timeout: 15_000 })
+      if (publishedResponse.status() !== 404) {
+        const published = await zhihuResponse(publishedResponse, '检查知乎文章')
+        if (published.state === 'published' || published.is_published === true) {
+          throw new ApiError(409, 'zhihu_delete_published', '该知乎文章已经发布，不能作为草稿删除；如需删除已发布文章，请到知乎后台操作')
+        }
+      }
+      const response = await context.request.delete(`${COLUMN}api/articles/${remoteId}/draft`, { headers, timeout: 30_000 })
+      if (response.status() === 404) return { state: await context.storageState(), message: '知乎草稿已不存在，已清理本地发布记录' }
+      await zhihuResponse(response, '删除知乎草稿')
+      const verify = await context.request.get(`${COLUMN}api/articles/${remoteId}/draft`, { headers, timeout: 15_000 })
+      if (verify.status() !== 404) throw new ApiError(502, 'zhihu_draft_delete_unverified', '知乎未确认草稿已删除，请到知乎后台核对后重试')
+      return { state: await context.storageState(), message: '已删除知乎草稿' }
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'zhihu_draft_delete_failed', '删除知乎草稿未完成，请稍后重试或到知乎后台手动删除')
     } finally { await context.close().catch(() => {}) }
   }
 

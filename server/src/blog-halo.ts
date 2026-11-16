@@ -182,7 +182,7 @@ export class HaloClient {
   }
 
   async deletePost(name: string): Promise<void> {
-    await this.request(`/apis/content.halo.run/v1alpha1/posts/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    await this.request(`/apis/api.console.halo.run/v1alpha1/posts/${encodeURIComponent(name)}`, { method: 'DELETE' })
   }
 
   async uploadAttachment(image: PublisherImage): Promise<{ name: string; permalink: string }> {
@@ -229,6 +229,7 @@ export interface BlogDriver {
   checkSession(credentials: BlogCredentials): Promise<{ identity: BlogIdentity }>
   checkPublication(credentials: BlogCredentials, remoteId: string, title: string): Promise<{ status: 'published' | 'draft' | 'missing' | 'unknown'; url: string | null; message: string }>
   publish(credentials: BlogCredentials, article: BlogArticle, mode: 'draft' | 'publish', progress: (value: Partial<Pick<BlogPublication, 'message' | 'remoteId' | 'url'>>) => void, resumeId?: string): Promise<{ status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
+  deleteDraft(credentials: BlogCredentials, remoteId: string): Promise<{ message: string }>
 }
 
 export class HaloBlogDriver implements BlogDriver {
@@ -258,6 +259,30 @@ export class HaloBlogDriver implements BlogDriver {
     if (post.spec.publish && post.status?.phase === 'PUBLISHED') return { status: 'published' as const, url: permalink, message: '已重新核实：个人博客确认该文章已发布' }
     if (!post.spec.publish && (!post.status?.phase || post.status.phase === 'DRAFT')) return { status: 'draft' as const, url: `${client.baseUrl}/console/posts/${remoteId}`, message: '个人博客仍有这份草稿。请确认未通过其他记录发布，再选择“已核实未发布，允许重试”' }
     return { status: 'unknown' as const, url: permalink, message: '个人博客文章状态暂无法确认，请到后台人工核对' }
+  }
+
+  async deleteDraft(credentials: BlogCredentials, remoteId: string) {
+    const client = new HaloClient(credentials)
+    let post: HaloPost
+    try {
+      post = await client.getPost(remoteId)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return { message: '个人博客草稿已不存在，已清理本地发布记录' }
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'blog_draft_delete_failed', '读取个人博客草稿失败，请稍后重试或到博客后台手动删除')
+    }
+    if (post.spec.publish || post.status?.phase === 'PUBLISHED') {
+      throw new ApiError(409, 'blog_delete_published', '该个人博客文章已经发布，不能作为草稿删除；如需删除已发布文章，请到博客后台操作')
+    }
+    try {
+      await client.deletePost(remoteId)
+      await client.getPost(remoteId)
+      throw new ApiError(502, 'blog_draft_delete_unverified', '个人博客未确认草稿已删除，请到博客后台核对后重试')
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return { message: '已删除个人博客草稿' }
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'blog_draft_delete_failed', '删除个人博客草稿未完成，请稍后重试或到博客后台手动删除')
+    }
   }
 
   async publish(credentials: BlogCredentials, article: BlogArticle, mode: 'draft' | 'publish', progress: Parameters<BlogDriver['publish']>[3], resumeId?: string) {

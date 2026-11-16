@@ -35,6 +35,7 @@ function setup(persistent = false) {
     checkSession: vi.fn<ZhihuDriver['checkSession']>().mockResolvedValue({ state: session, identity }),
     checkPublication: vi.fn<ZhihuDriver['checkPublication']>().mockResolvedValue({ state: session, status: 'unknown', url: null, message: '暂不能自动确认，请人工核实' }),
     publish: vi.fn<ZhihuDriver['publish']>().mockImplementation(async (_state, _article, mode) => ({ state: session, status: mode === 'draft' ? 'draft' : 'published', remoteId: '123', url: `https://zhuanlan.zhihu.com/p/123${mode === 'draft' ? '/edit' : ''}`, message: '完成' })),
+    deleteDraft: vi.fn<ZhihuDriver['deleteDraft']>().mockResolvedValue({ state: session, message: '已删除知乎草稿' }),
     close: vi.fn(async () => {}),
   }
   const service = new ZhihuService(database, config, driver); services.push(service)
@@ -312,5 +313,34 @@ describe('Zhihu account lifecycle and publishing', () => {
     expect((await resolve(headers, { action: 'delete' })).status).toBe(400)
     expect((await resolve(headers, { action: 'not_published' })).status).toBe(200)
     expect((await resolve(headers, { action: 'not_published' })).status).toBe(409)
+  })
+})
+
+
+describe('Zhihu draft deletion', () => {
+  it('deletes the remote draft and local record for the owner only', async () => {
+    const { service, database, driver, alice, bob, seed } = setup()
+    seed()
+    const draft = database.createZhihuPublication(alice.id, { renderId: 'render-id', title: '待删草稿', mode: 'draft', idempotencyKey: 'draft-key' })
+    database.updateZhihuPublication(alice.id, draft.id, { status: 'draft', remoteId: '123' })
+    await expect(service.remove(bob.id, draft.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: true })
+    expect(driver.deleteDraft).toHaveBeenCalledWith(session, '123')
+    expect(database.getZhihuPublication(alice.id, draft.id)).toBeNull()
+    expect(database.getZhihuAccount(alice.id)?.status).toBe('connected')
+  })
+
+  it('rejects published records and keeps the local record when remote deletion fails', async () => {
+    const { service, database, driver, alice, seed } = setup()
+    seed()
+    const published = database.createZhihuPublication(alice.id, { renderId: 'render-id', title: '已发布', mode: 'publish', idempotencyKey: 'publish-key' })
+    database.updateZhihuPublication(alice.id, published.id, { status: 'published' })
+    await expect(service.remove(alice.id, published.id)).rejects.toMatchObject({ code: 'zhihu_delete_published' })
+
+    const draft = database.createZhihuPublication(alice.id, { renderId: 'render-id', title: '远端草稿', mode: 'draft', idempotencyKey: 'draft-key' })
+    database.updateZhihuPublication(alice.id, draft.id, { status: 'draft', remoteId: '456' })
+    driver.deleteDraft.mockRejectedValueOnce(new ApiError(502, 'zhihu_draft_delete_failed', '删除失败'))
+    await expect(service.remove(alice.id, draft.id)).rejects.toMatchObject({ code: 'zhihu_draft_delete_failed' })
+    expect(database.getZhihuPublication(alice.id, draft.id)).not.toBeNull()
   })
 })
