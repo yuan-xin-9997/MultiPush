@@ -287,11 +287,21 @@ export class PlaywrightBaijiahaoDriver implements BaijiahaoDriver {
     }
   }
 
+  /** Compact page snapshot written to journald when the editor or publish step fails. */
+  private async diagnostics(page: Page): Promise<string> {
+    const counts: string[] = []
+    for (const selector of [TITLE, BODY_FRAME, 'button']) {
+      counts.push(`${selector}=${await page.locator(selector).count().catch(() => 0)}`)
+    }
+    const body = await page.locator('body').innerText().catch(() => '')
+    return `url=${page.url()} ; ${counts.join(' ; ')} ; body=${JSON.stringify(body.replace(/\s+/g, ' ').slice(0, 240))}`
+  }
+
   async publish(state: PublisherStorageState, article: BaijiahaoArticle, progress: Parameters<BaijiahaoDriver['publish']>[2]) {
     const context = await this.context(state)
-    let submitted = false
+    let submitted = false, page: Page | null = null
     try {
-      const page = await context.newPage()
+      page = await context.newPage()
       await page.goto(EDITOR, { waitUntil: 'domcontentloaded', timeout: 90_000 })
       await this.security(page)
       if (await this.loginPromptVisible(page)) throw expired()
@@ -308,10 +318,12 @@ export class PlaywrightBaijiahaoDriver implements BaijiahaoDriver {
       await page.waitForTimeout(300)
       const typed = await title.innerText().catch(() => '')
       if (!typed.includes(article.title.slice(0, 6))) throw new ApiError(409, 'baijiahao_title_mismatch', '百家号标题未填写成功，已停止发布')
+      log('title filled')
 
       progress({ message: '正在填写百家号正文' })
       await this.fillBody(page, article)
       await this.security(page)
+      log('body filled')
 
       progress({ message: '正在提交百家号发布' })
       const responsePromise = page.waitForResponse(response => {
@@ -337,6 +349,7 @@ export class PlaywrightBaijiahaoDriver implements BaijiahaoDriver {
       }
       const data = object(await response.json().catch(() => null))
       const errno = Number(data.errno ?? data.code ?? NaN)
+      log('publish response', 'errno=' + String(errno), 'keys=' + JSON.stringify(Object.keys(data)))
       if (SESSION_ERRORS.includes(errno)) throw expired()
       if (errno !== 0) {
         const message = typeof data.errmsg === 'string' ? data.errmsg : typeof data.message === 'string' ? data.message : ''
@@ -349,6 +362,7 @@ export class PlaywrightBaijiahaoDriver implements BaijiahaoDriver {
       if (submitted && !(error instanceof ApiError && ['baijiahao_session_expired', 'baijiahao_security_check'].includes(error.code))) {
         throw new ApiError(409, 'baijiahao_result_uncertain', error instanceof ApiError ? error.message : '百家号提交后结果未确认；请到后台核对，避免重复发布')
       }
+      if (page) log('publish failed', await this.diagnostics(page).catch(() => 'diagnostics unavailable'))
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'baijiahao_preparation_failed', '百家号发布准备失败，尚未提交；请检查网络后重试')
     } finally { await context.close().catch(() => {}) }
