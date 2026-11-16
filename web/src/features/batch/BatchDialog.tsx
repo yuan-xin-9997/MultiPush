@@ -8,11 +8,12 @@ import { cn } from '@/lib/utils'
 import Modal from '@/components/Modal'
 import './batch.css'
 
-const RENDER_PLATFORMS: PlatformId[] = ['wechat', 'zhihu', 'weibo', 'sspai', 'blog', 'douyin', 'xiaohongshu']
+const RENDER_PLATFORMS: PlatformId[] = ['wechat', 'zhihu', 'weibo', 'toutiao', 'sspai', 'blog', 'douyin', 'xiaohongshu']
 const PUBLISH_PLATFORMS: Array<{ id: BatchPublishPlatform; label: string }> = [
   { id: 'wechat', label: '微信公众号（仅草稿）' },
   { id: 'zhihu', label: '知乎' },
   { id: 'weibo', label: '微博' },
+  { id: 'toutiao', label: '今日头条' },
   { id: 'sspai', label: '少数派' },
   { id: 'blog', label: '个人博客' },
 ]
@@ -53,7 +54,7 @@ export default function BatchDialog({ open, mode, contents, onClose }: BatchDial
   useEffect(() => {
     if (!publishPlatform) return
     if (publishPlatform === 'wechat') setPublishMode('draft')
-    if (publishPlatform === 'weibo') setPublishMode('publish')
+    if (publishPlatform === 'weibo' || publishPlatform === 'toutiao') setPublishMode('publish')
   }, [publishPlatform])
 
   useEffect(() => {
@@ -91,7 +92,7 @@ export default function BatchDialog({ open, mode, contents, onClose }: BatchDial
         const result = await api.batch.publish({
           contentIds: contents.map(item => item.id),
           platform: publishPlatform,
-          mode: publishPlatform === 'wechat' ? 'draft' : publishPlatform === 'weibo' ? 'publish' : publishMode,
+          mode: publishPlatform === 'wechat' ? 'draft' : publishPlatform === 'weibo' || publishPlatform === 'toutiao' ? 'publish' : publishMode,
           ...(coverMediaId ? { coverMediaId } : {}),
           options: { ...(authorName.trim() ? { authorName: authorName.trim() } : {}), includeTags, includeToc },
         })
@@ -154,7 +155,7 @@ export default function BatchDialog({ open, mode, contents, onClose }: BatchDial
                 </select>
               </label>
               <label className="batch-field"><span className="batch-label">发布方式</span>
-                <select className="input" value={publishMode} onChange={event => setPublishMode(event.target.value as 'draft' | 'publish')} disabled={publishPlatform === 'wechat' || publishPlatform === 'weibo'}>
+                <select className="input" value={publishMode} onChange={event => setPublishMode(event.target.value as 'draft' | 'publish')} disabled={publishPlatform === 'wechat' || publishPlatform === 'weibo' || publishPlatform === 'toutiao'}>
                   <option value="draft">保存草稿</option>
                   <option value="publish">正式发布</option>
                 </select>

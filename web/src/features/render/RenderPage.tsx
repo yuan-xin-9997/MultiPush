@@ -89,7 +89,7 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
 
-const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'douyin', 'sspai', 'blog']
+const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog']
 
 const DOWNLOAD_LABELS = {
   html: 'HTML 页面',
@@ -836,9 +836,9 @@ export default function RenderPage() {
         toast.success('少数派 Markdown 已复制')
         return
       }
-      if (activeRender.platform === 'blog') {
+      if (activeRender.platform === 'blog' || activeRender.platform === 'toutiao') {
         await copyText(activeRender.markdown || activeRender.text || '')
-        toast.success('个人博客 Markdown 已复制')
+        toast.success(activeRender.platform === 'toutiao' ? '今日头条 Markdown 已复制' : '个人博客 Markdown 已复制')
         return
       }
       const note = activeRender.text || activeRender.cards.flatMap((card) => card.body).join('\n')
@@ -1156,7 +1156,7 @@ export default function RenderPage() {
                 <span className="render-empty-spark render-empty-spark-two">✦</span>
               </div>
               <span className="render-empty-eyebrow">ONE SOURCE · FOUR FORMATS</span>
-              <h2>把一篇内容，变成七种发布形态</h2>
+              <h2>把一篇内容，变成八种发布形态</h2>
               <p>选择内容与平台，MultiPush 会按照每个平台的阅读习惯重新排版，生成可直接交付的素材。</p>
               <div className="render-empty-actions">
                 {selectedContent ? (
@@ -1269,6 +1269,8 @@ export default function RenderPage() {
                         ? '公众号图文'
                         : activeRender.platform === 'weibo'
                           ? '微博图文'
+                          : activeRender.platform === 'toutiao'
+                            ? '今日头条图文'
                           : activeRender.platform === 'douyin'
                             ? activeRender.videos.length > 0
                               ? '抖音视频'
@@ -1459,6 +1461,35 @@ export default function RenderPage() {
                         <Copy size={14} />
                         复制 Markdown
                       </button>
+                    </div>
+                  </div>
+                ) : activeRender.platform === 'toutiao' ? (
+                  <div className="blog-scene toutiao-scene">
+                    <div className="blog-browser-shell">
+                      <div className="blog-browser-bar">
+                        <span className="blog-brand" style={{ color: '#f04142' }}>今日头条</span>
+                        <span className="blog-browser-url"><Globe2 size={12} />toutiao.com / article / {activeRender.title.slice(0, 10)}</span>
+                        <span className="blog-browser-action"><ExternalLink size={13} /></span>
+                      </div>
+                      <div className="blog-browser-scroll">
+                        <article className="blog-article">
+                          <div className="blog-article-kicker" style={{ color: '#f04142' }}>头条号 · 图文文章</div>
+                          <h1>{activeRender.title}</h1>
+                          <div className="blog-author-row">
+                            <span className="blog-avatar" style={{ background: '#fff0f0', color: '#f04142' }}>{authorLabel.slice(0, 1)}</span>
+                            <span><strong>{authorLabel}</strong><small>发布于 {formatDate(activeRender.generatedAt)} · {activeRender.meta.readMinutes} 分钟阅读</small></span>
+                            <span className="blog-follow">关注</span>
+                          </div>
+                          <div className="blog-body" dangerouslySetInnerHTML={{ __html: activeRender.html }} />
+                          <div className="blog-foot"><span>阅读 2.1 万</span><span>点赞 386</span><span>评论 42</span></div>
+                        </article>
+                      </div>
+                    </div>
+                    <div className="blog-side-note">
+                      <span className="blog-side-icon" style={{ background: '#fff0f0', color: '#f04142' }}><PlatformGlyph platform="toutiao" size={18} /></span>
+                      <h3>今日头条图文</h3>
+                      <p>今日头条采用推荐流长文排版，标题 2–30 字，支持标题层级、引用、代码、表格和正文图片。</p>
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => void copyCurrent()}><Copy size={14} />复制 Markdown</button>
                     </div>
                   </div>
                 ) : activeRender.platform === 'blog' ? (
@@ -1704,6 +1735,7 @@ export default function RenderPage() {
                   <h2>交付与发布</h2>
                   {activeRender.platform === 'wechat' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到公众号</button> : null}
                   {activeRender.platform === 'weibo' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=weibo&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到微博</button> : null}
+                  {activeRender.platform === 'toutiao' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=toutiao&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到今日头条</button> : null}
                   {activeRender.platform === 'douyin' && renderId ? <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate(`/publish?platform=douyin&renderId=${encodeURIComponent(renderId)}`)}>发布到抖音</button> : null}
                   {activeRender.platform === 'zhihu' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=zhihu&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到知乎</button> : null}
                   {activeRender.platform === 'sspai' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=sspai&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到少数派</button> : null}
@@ -1818,7 +1850,7 @@ export default function RenderPage() {
                   </> : null}
                   {activeRender.platform === 'zhihu' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
                   {activeRender.platform === 'sspai' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
-                  {activeRender.platform === 'blog' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
+                  {activeRender.platform === 'blog' || activeRender.platform === 'toutiao' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
                   <button type="button" className="btn btn-sm" onClick={() => void copyCurrent()}>
                     <Copy size={14} />
                     {activeRender.platform === 'wechat'
@@ -1831,7 +1863,7 @@ export default function RenderPage() {
                             ? '复制微博文案'
                             : activeRender.platform === 'sspai'
                             ? '复制 Markdown'
-                            : activeRender.platform === 'blog'
+                            : activeRender.platform === 'blog' || activeRender.platform === 'toutiao'
                               ? '复制 Markdown'
                               : '复制文案'}
                   </button>
@@ -1976,7 +2008,7 @@ export default function RenderPage() {
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         title="选择内容"
-        subtitle="从内容库中选择一篇文档，渲染为七个平台的发布格式"
+        subtitle="从内容库中选择一篇文档，渲染为八个平台的发布格式"
         size="wide"
       >
         <div className="render-picker-search">

@@ -1,4 +1,4 @@
-import { AtSign, BookOpen, Globe2, Heart, MessageCircle, Music2, Newspaper } from 'lucide-react'
+import { AtSign, BookOpen, Globe2, Heart, MessageCircle, Music2, Newspaper, Rss } from 'lucide-react'
 import type { PlatformId } from '@shared/types'
 
 interface PlatformGlyphProps {
@@ -23,6 +23,9 @@ export default function PlatformGlyph({
   }
   if (platform === 'weibo') {
     return <AtSign size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
+  }
+  if (platform === 'toutiao') {
+    return <Rss size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
   }
   if (platform === 'douyin') {
     return <Music2 size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />

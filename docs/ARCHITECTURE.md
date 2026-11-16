@@ -15,6 +15,7 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/media     上传（multer → DATA_DIR/uploads）
   ├─ routes/renders   调用渲染器、保存历史
   ├─ routes/weibo     微博扫码登录、发布与核实
+  ├─ routes/toutiao   今日头条扫码登录、文章发布与核实
   ├─ routes/ai        AI 配置、会话、消息与工具调用
   ├─ routes/batch     批量渲染 / 批量发布任务
   ├─ ai.ts            OpenAI 兼容模型客户端与业务工具
@@ -33,6 +34,7 @@ Express (single Node process, 0.0.0.0:34080)
 | `media` | id, user_id, filename, original_name, mime_type, size, kind | 文件在 `DATA_DIR/uploads` |
 | `renders` | id, user_id, content_id, platforms, options_json, result_json | 渲染历史；结果完整存储 |
 | `weibo_*` | accounts / publications / resolutions | 微博会话、发布记录与人工核实 |
+| `toutiao_*` | accounts / publications / resolutions | 今日头条会话、文章发布记录与人工核实 |
 | `ai_settings` | user_id, encrypted_api_key, base_url, model, temperature | 每用户大模型配置；Key AES-256-GCM 加密 |
 | `ai_sessions` / `ai_messages` | id, user_id, title / session_id, role, content, tool_calls_json, tool_result_json | AI 会话、消息与工具轨迹 |
 | `batch_jobs` | id, user_id, kind, status, total, done, input_json, items_json | 批量渲染/发布任务与每项进度 |
@@ -105,7 +107,7 @@ Express + node:sqlite → <userData>/data/multipush.sqlite + uploads/
 - 桌面模式 `desktopMode=true`：只监听 `127.0.0.1`，校验 Host / Origin / `Sec-Fetch-Site`；注册不需要邮箱验证码，避免依赖 SMTP。
 - 主窗口 `nodeIntegration=false`、`contextIsolation=true`、`sandbox=true`；本地页面仍是普通 Web 安全模型。
 - 素材、账号、会话和发布记录全部保存在 `userData/data`，升级/卸载不自动删除。
-- 自动发布复用本机 Chrome / Edge；没有浏览器时只影响自动发布，不影响编辑、渲染和导出。微博网页登录与发布同样依赖浏览器。
+- 自动发布复用本机 Chrome / Edge；没有浏览器时只影响自动发布，不影响编辑、渲染和导出。微博、今日头条网页登录与发布同样依赖浏览器。
 - 发布由 GitHub Actions 在 Windows / macOS 构建，详见 [桌面客户端说明](DESKTOP.md)。少数派使用微信扫码登录，会话与发布记录按用户加密保存，详见 [少数派发布说明](SSPAI_PUBLISHING.md)。个人博客使用 Halo 个人令牌连接，地址与令牌按用户加密保存，通过 Halo Console API 上传附件并创建/发布文章，详见 [个人博客发布说明](BLOG_PUBLISHING.md)。
 
 ## 部署

@@ -4,6 +4,7 @@ import { renderWechat } from './wechat'
 import { renderXiaohongshu } from './xiaohongshu'
 import { renderZhihu } from './zhihu'
 import { renderWeibo } from './weibo'
+import { renderToutiao } from './toutiao'
 import { renderDouyin } from './douyin'
 import { renderSspai } from './sspai'
 import { renderBlog } from './blog'
@@ -13,6 +14,7 @@ const RENDERERS: Record<PlatformId, PlatformRenderer> = {
   xiaohongshu: renderXiaohongshu,
   zhihu: renderZhihu,
   weibo: renderWeibo,
+  toutiao: renderToutiao,
   douyin: renderDouyin,
   sspai: renderSspai,
   blog: renderBlog,

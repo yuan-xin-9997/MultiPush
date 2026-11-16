@@ -50,7 +50,7 @@ systemd multipush.service（User=jenkins）→ 0.0.0.0:34080
 | `/opt/MultiPush/JenkinsConfig/health.mjs` | 服务器端健康检查脚本 | `install` 覆盖 |
 | `/opt/MultiPush/package.json` | 应用元数据 | `install` 覆盖 |
 | `/opt/MultiPush/DEPLOYED_COMMIT` | 最近部署的 commit | 原子写入 |
-| `/opt/MultiPush/.data/` | SQLite（含 WAL/SHM）、`uploads/`、`.jwt-secret`、`.wechat-session-key`、`.weibo-session-key`、`.ai-session-key` 等平台会话与 AI 密钥 | **绝不删除、不改权限** |
+| `/opt/MultiPush/.data/` | SQLite（含 WAL/SHM）、`uploads/`、`.jwt-secret`、`.wechat-session-key`、`.weibo-session-key`、`.toutiao-session-key`、`.ai-session-key` 等平台会话与 AI 密钥 | **绝不删除、不改权限** |
 | `/opt/MultiPush/.env` | 可选环境变量 | **绝不删除、不改权限** |
 | `/opt/MultiPush/apps/` | 旧版本遗留目录（如有） | 不自动删除 |
 
@@ -92,7 +92,7 @@ sudo -u jenkins test -w /opt/MultiPush/.data && echo "data dir writable"
 
 注意：
 
-- 不要在 `/opt/MultiPush` 下执行 `npm install`，部署脚本会复制唯一外置依赖 `playwright-core`。启用公众号、微博等浏览器发布前，按 [公众号接入说明](WECHAT_PUBLISHING.md) 安装服务器浏览器并配置 `WECHAT_BROWSER_PATH`（微博可另行配置 `WEIBO_BROWSER_PATH`）。
+- 不要在 `/opt/MultiPush` 下执行 `npm install`，部署脚本会复制唯一外置依赖 `playwright-core`。启用公众号、微博、今日头条等浏览器发布前，按 [公众号接入说明](WECHAT_PUBLISHING.md) 安装服务器浏览器并配置 `WECHAT_BROWSER_PATH`（微博可配置 `WEIBO_BROWSER_PATH`，今日头条可配置 `TOUTIAO_BROWSER_PATH`）。
 - 不要对 `.data` 执行 `chmod -R 755` 或 `chown -R` 作为日常部署步骤；数据目录只允许服务用户访问。
 - 如果 `/opt/MultiPush` 已存在且属主不对，先确认没有其他应用在使用，再修正属主：
 
@@ -322,7 +322,7 @@ AI_DEFAULT_LABEL=OpenCode Go
 
 必须备份：
 
-- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`、`.wechat-session-key`、`.weibo-session-key` 等各平台会话密钥，以及 `.ai-session-key`（AI 模型 API Key 加密密钥）。
+- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`、`.wechat-session-key`、`.weibo-session-key`、`.toutiao-session-key` 等各平台会话密钥，以及 `.ai-session-key`（AI 模型 API Key 加密密钥）。
 - `/opt/MultiPush/.env`（如存在）。
 - 可选的 systemd unit 与当前 `DEPLOYED_COMMIT`，便于恢复环境。
 
@@ -535,7 +535,7 @@ esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --ext
 - Node.js 22.12+；
 - `server/dist/index.js`；
 - `web/dist/`；
-- `node_modules/playwright-core/` 及服务器 Chrome / Chromium（公众号、微博等浏览器发布）；
+- `node_modules/playwright-core/` 及服务器 Chrome / Chromium（公众号、微博、今日头条等浏览器发布）；
 - 可写的 `.data/`。
 
 生产不需要执行 `npm install` 或安装构建工具。Playwright 依赖运行时资源文件，因此单独同步，其他依赖继续打包。`package.json` 用于版本/元数据。
@@ -573,7 +573,7 @@ esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --ext
 ### 9.4 Jenkins 流水线约束
 
 - 只在 Jenkins 上执行 `npm ci`，使用 lockfile 保证可重复构建。
-- CI 不自动安装浏览器或运行真实公众号/微博端到端发布。浏览器由管理员安装；单元测试使用模拟驱动。
+- CI 不自动安装浏览器或运行真实公众号/微博/今日头条端到端发布。浏览器由管理员安装；单元测试使用模拟驱动。
 - typecheck/test 在停服之前执行；构建失败不会影响线上服务。
 - 部署阶段不停服，停服由独立阶段完成，便于日志定位。
 - 健康检查最多 30 次、每次间隔 1 秒，避免启动瞬间误判。

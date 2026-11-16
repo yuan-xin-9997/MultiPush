@@ -6,7 +6,7 @@
  * dependencies so it can be used in either environment.
  */
 
-export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'douyin' | 'sspai' | 'blog'
+export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'douyin' | 'sspai' | 'blog'
 
 export type ContentStatus = 'draft' | 'ready'
 
@@ -74,6 +74,17 @@ export const PLATFORMS: PlatformInfo[] = [
     contentTypes: ['image-text'],
     highlight: '微博图文 · 双井号话题 · 最多 9 图',
     limits: { titleMax: 64, bodyMax: 2000, imageMax: 9 },
+  },
+  {
+    id: 'toutiao',
+    name: '今日头条',
+    shortName: '头条',
+    description: '生成今日头条图文排版，支持复制富文本、下载 HTML/Markdown，或连接头条号直接发布。',
+    color: '#f04142',
+    softColor: '#fff0f0',
+    contentTypes: ['image-text'],
+    highlight: '头条图文 · 推荐流长文 · 直接发布',
+    limits: { titleMax: 30, bodyMax: 50000, imageMax: 100 },
   },
   {
     id: 'douyin',
@@ -504,6 +515,51 @@ export interface WeiboResolveInput {
   articleUrl?: string
 }
 
+export interface ToutiaoAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface ToutiaoLogin {
+  id: string
+  status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'
+  qrCode: string | null
+  message: string
+  expiresAt: string
+}
+
+export interface ToutiaoPublishInput {
+  renderId: string
+}
+
+export interface ToutiaoPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'published' | 'failed' | 'uncertain'
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+  resolutions?: ToutiaoResolution[]
+}
+
+export interface ToutiaoResolution {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
+}
+
+export interface ToutiaoResolveInput {
+  action: ToutiaoResolution['action']
+  articleUrl?: string
+}
+
 export interface DouyinAccount {
   status: 'disconnected' | 'connected' | 'expired'
   name: string | null
@@ -730,7 +786,7 @@ export interface BatchRenderInput {
   options?: RenderOptions
 }
 
-export type BatchPublishPlatform = 'wechat' | 'zhihu' | 'weibo' | 'sspai' | 'blog'
+export type BatchPublishPlatform = 'wechat' | 'zhihu' | 'weibo' | 'toutiao' | 'sspai' | 'blog'
 
 export interface BatchPublishInput {
   contentIds: string[]
@@ -755,4 +811,4 @@ export interface ApiErrorBody {
   issues?: Array<{ path: string; message: string }>
 }
 
-export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'douyin', 'sspai', 'blog']
+export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog']

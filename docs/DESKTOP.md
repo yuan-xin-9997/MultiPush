@@ -62,6 +62,7 @@ data/
   .sspai-session-key     少数派会话加密密钥
   .blog-session-key      个人博客令牌加密密钥
   .weibo-session-key     微博会话加密密钥
+  .toutiao-session-key   今日头条会话加密密钥
   .ai-session-key        AI 模型 API Key 加密密钥
 ```
 

@@ -16,6 +16,7 @@ import type { ZhihuService } from './zhihu'
 import type { SspaiService } from './sspai'
 import type { BlogService } from './blog'
 import type { WeiboService } from './weibo'
+import type { ToutiaoService } from './toutiao'
 
 const MAX_RENDER_ITEMS = 30
 const MAX_PUBLISH_ITEMS = 10
@@ -44,6 +45,7 @@ export class BatchService {
     private readonly sspai: SspaiService,
     private readonly blog: BlogService,
     private readonly weibo: WeiboService,
+    private readonly toutiao: ToutiaoService,
   ) {}
 
   private assertIdle(userId: string): void {
@@ -89,6 +91,7 @@ export class BatchService {
     if (contentIds.length > MAX_PUBLISH_ITEMS) throw new ApiError(400, 'batch_too_large', `一次最多批量发布 ${MAX_PUBLISH_ITEMS} 篇内容`)
     if (input.platform === 'wechat' && input.mode !== 'draft') throw new ApiError(400, 'batch_wechat_mode', '公众号批量发布仅支持保存草稿；正式发表请在发布管理中逐篇完成')
     if (input.platform === 'weibo' && input.mode !== 'publish') throw new ApiError(400, 'batch_weibo_mode', '微博批量发布不支持草稿模式')
+    if (input.platform === 'toutiao' && input.mode !== 'publish') throw new ApiError(400, 'batch_toutiao_mode', '今日头条批量发布不支持草稿模式')
     if (input.platform === 'wechat' && !input.coverMediaId) {
       const missing = contentIds.filter(id => {
         const content = this.database.getContentDetail(userId, id)
@@ -294,6 +297,8 @@ export class BatchService {
         return this.blog.publish(userId, { renderId, mode, ...(coverMediaId ? { coverMediaId } : {}) }, baseUrl)
       case 'weibo':
         return this.weibo.publish(userId, { renderId }, baseUrl)
+      case 'toutiao':
+        return this.toutiao.publish(userId, { renderId }, baseUrl)
       default:
         throw new ApiError(400, 'batch_platform_unsupported', '该平台暂不支持批量发布')
     }
@@ -322,6 +327,7 @@ export class BatchService {
       case 'sspai': return this.database.getSspaiPublication(userId, id)
       case 'blog': return this.database.getBlogPublication(userId, id)
       case 'weibo': return this.database.getWeiboPublication(userId, id)
+      case 'toutiao': return this.database.getToutiaoPublication(userId, id)
       default: return null
     }
   }

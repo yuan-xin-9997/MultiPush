@@ -25,6 +25,11 @@ import type {
   WechatLogin,
   WechatPublication,
   WechatPublishInput,
+  ToutiaoAccount,
+  ToutiaoLogin,
+  ToutiaoPublication,
+  ToutiaoPublishInput,
+  ToutiaoResolveInput,
   WeiboAccount,
   WeiboLogin,
   WeiboPublication,
@@ -264,6 +269,15 @@ export const api = {
     publish: (input: ZhihuPublishInput) => request<{ publication: ZhihuPublication }>('/api/zhihu/publications', { method: 'POST', body: JSON.stringify(input) }),
     deletePublication: (id: string) => request<PublicationDeletion>(`/api/zhihu/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
+  toutiao: {
+    resolve: (id: string, input: ToutiaoResolveInput) => request<{ publication: ToutiaoPublication }>(`/api/toutiao/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: ToutiaoAccount }>('/api/toutiao/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: ToutiaoLogin }>('/api/toutiao/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: ToutiaoLogin }>(`/api/toutiao/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/toutiao/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: ToutiaoPublication[] }>('/api/toutiao/publications', { cache: 'no-store' }),
+    publish: (input: ToutiaoPublishInput) => request<{ publication: ToutiaoPublication }>('/api/toutiao/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
   weibo: {
     resolve: (id: string, input: WeiboResolveInput) => request<{ publication: WeiboPublication }>(`/api/weibo/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
     account: () => request<{ account: WeiboAccount }>('/api/weibo/account', { cache: 'no-store' }),
@@ -344,7 +358,7 @@ export const api = {
 }
 
 export function isPlatformId(value: string): value is PlatformId {
-  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'douyin' || value === 'sspai' || value === 'blog'
+  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'toutiao' || value === 'douyin' || value === 'sspai' || value === 'blog'
 }
 
 /** Make an uploaded relative URL absolute for previews / rendering. */

@@ -26,12 +26,13 @@ import type { SspaiService } from './sspai'
 import type { BlogService } from './blog'
 import type { DouyinService } from './douyin'
 import type { WeiboService } from './weibo'
+import type { ToutiaoService } from './toutiao'
 
 const MAX_TOOL_ROUNDS = 8
 const MAX_HISTORY_MESSAGES = 80
 const MAX_TOOL_RESULT_CHARS = 60_000
 const PROVIDER_TIMEOUT_MS = 120_000
-const PLATFORM_IDS = new Set<PlatformId>(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'douyin', 'sspai', 'blog'])
+const PLATFORM_IDS = new Set<PlatformId>(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog'])
 
 type JsonObject = Record<string, unknown>
 
@@ -265,7 +266,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           contentId: { type: 'string' },
-          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 7 },
+          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 8 },
           options: { type: 'object', description: '渲染选项，如 authorName、includeTags、includeToc、cardStyle、themeColor' },
         },
         required: ['contentId', 'platforms'],
@@ -280,7 +281,7 @@ export const AI_TOOLS: ToolDefinition[] = [
       description: '读取渲染记录中指定平台的标题、正文、Markdown、警告等信息。',
       parameters: {
         type: 'object',
-        properties: { renderId: { type: 'string' }, platform: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'douyin', 'sspai', 'blog'] } },
+        properties: { renderId: { type: 'string' }, platform: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog'] } },
         required: ['renderId'],
         additionalProperties: false,
       },
@@ -299,7 +300,7 @@ export const AI_TOOLS: ToolDefinition[] = [
     function: {
       name: 'list_publications',
       description: '读取当前用户的发布记录和平台连接状态，可按平台过滤。',
-      parameters: { type: 'object', properties: { platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'sspai', 'blog', 'douyin', 'xiaohongshu'] } }, additionalProperties: false },
+      parameters: { type: 'object', properties: { platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'sspai', 'blog', 'douyin', 'xiaohongshu'] } }, additionalProperties: false },
     },
   },
   {
@@ -311,7 +312,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           renderId: { type: 'string' },
-          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'douyin', 'sspai', 'blog'] },
+          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog'] },
           mode: { type: 'string', enum: ['draft', 'publish'] },
           coverMediaId: { type: 'string', description: '封面素材 ID，公众号必填' },
           imageMediaIds: { type: 'array', items: { type: 'string' }, description: '抖音图文素材 ID' },
@@ -330,7 +331,7 @@ export const AI_TOOLS: ToolDefinition[] = [
       parameters: {
         type: 'object',
         properties: {
-          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'sspai', 'blog'] },
+          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'sspai', 'blog'] },
           publicationId: { type: 'string' },
         },
         required: ['platform', 'publicationId'],
@@ -347,7 +348,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           contentIds: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 30 },
-          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 7 },
+          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 8 },
           options: { type: 'object' },
         },
         required: ['contentIds', 'platforms'],
@@ -364,7 +365,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           contentIds: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 10 },
-          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'sspai', 'blog'] },
+          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'sspai', 'blog'] },
           mode: { type: 'string', enum: ['draft', 'publish'] },
           coverMediaId: { type: 'string', description: '统一封面素材 ID，公众号必填' },
         },
@@ -396,6 +397,7 @@ export class AiService {
     private readonly blog: BlogService,
     private readonly douyin: DouyinService,
     private readonly weibo: WeiboService,
+    private readonly toutiao: ToutiaoService,
     private readonly batch: BatchService,
   ) {
     this.key = loadPublisherKey(config.dataDir, 'ai')
@@ -655,6 +657,7 @@ export class AiService {
       sspai: read(this.database.getSspaiAccount(userId)),
       blog: read(this.database.getBlogAccount(userId)),
       weibo: read(this.database.getWeiboAccount(userId)),
+      toutiao: read(this.database.getToutiaoAccount(userId)),
       douyin: read(this.database.getDouyinAccount(userId)),
       xiaohongshu: { status: 'disabled', name: null },
     }
@@ -793,6 +796,7 @@ export class AiService {
       sspai: this.database.listSspaiPublications(userId).map(item => ({ ...item, platform: 'sspai' })),
       blog: this.database.listBlogPublications(userId).map(item => ({ ...item, platform: 'blog' })),
       weibo: this.database.listWeiboPublications(userId).map(item => ({ ...item, platform: 'weibo' })),
+      toutiao: this.database.listToutiaoPublications(userId).map(item => ({ ...item, platform: 'toutiao' })),
       douyin: this.database.listDouyinPublications(userId).map(item => ({ ...item, platform: 'douyin' })),
       xiaohongshu: this.database.listXhsPublications(userId).map(item => ({ ...item, platform: 'xiaohongshu' })),
     }
@@ -827,6 +831,7 @@ export class AiService {
     if (target === 'sspai') return { publication: await this.sspai.publish(userId, { renderId, mode, ...(coverMediaId ? { coverMediaId } : {}) }) }
     if (target === 'blog') return { publication: await this.blog.publish(userId, { renderId, mode, ...(coverMediaId ? { coverMediaId } : {}) }, baseUrl) }
     if (target === 'weibo') return { publication: await this.weibo.publish(userId, { renderId }, baseUrl) }
+    if (target === 'toutiao') return { publication: await this.toutiao.publish(userId, { renderId }, baseUrl) }
     if (target === 'douyin') {
       const imageMediaIds = stringArrayArg(args, 'imageMediaIds')
       const videoMediaId = stringArg(args, 'videoMediaId')
@@ -857,7 +862,7 @@ export class AiService {
 
   private batchPublish(userId: string, args: JsonObject) {
     const target = stringArg(args, 'platform', true)!
-    if (!['wechat', 'zhihu', 'weibo', 'sspai', 'blog'].includes(target)) throw new ApiError(400, 'ai_batch_platform', '批量发布仅支持微信公众号、知乎、微博、少数派和个人博客')
+    if (!['wechat', 'zhihu', 'weibo', 'toutiao', 'sspai', 'blog'].includes(target)) throw new ApiError(400, 'ai_batch_platform', '批量发布仅支持微信公众号、知乎、微博、今日头条、少数派和个人博客')
     const input: BatchPublishInput = {
       contentIds: stringArrayArg(args, 'contentIds', true),
       platform: target as BatchPublishInput['platform'],

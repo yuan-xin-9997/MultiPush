@@ -10,6 +10,7 @@ import type { SspaiService } from '../src/sspai'
 import type { WechatService } from '../src/wechat'
 import type { ZhihuService } from '../src/zhihu'
 import type { WeiboService } from '../src/weibo'
+import type { ToutiaoService } from '../src/toutiao'
 
 const cleanups: Array<() => Promise<void> | void> = []
 
@@ -36,7 +37,8 @@ function setup() {
   const sspai = { publish: vi.fn() } as unknown as SspaiService
   const blog = { publish: vi.fn() } as unknown as BlogService
   const weibo = { publish: vi.fn() } as unknown as WeiboService
-  const service = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo)
+  const toutiao = { publish: vi.fn() } as unknown as ToutiaoService
+  const service = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao)
   cleanups.push(async () => { await service.close(); database.close(); rmSync(directory, { recursive: true, force: true }) })
   return { directory, config, uploadsDir: config.uploadsDir, database, user, content, service, wechat }
 }
