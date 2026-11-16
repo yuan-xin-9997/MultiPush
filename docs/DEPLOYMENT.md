@@ -92,7 +92,7 @@ sudo -u jenkins test -w /opt/MultiPush/.data && echo "data dir writable"
 
 注意：
 
-- 不要在 `/opt/MultiPush` 下执行 `npm install`，部署脚本会复制唯一外置依赖 `playwright-core`。启用公众号、微博、今日头条等浏览器发布前，按 [公众号接入说明](WECHAT_PUBLISHING.md) 安装服务器浏览器并配置 `WECHAT_BROWSER_PATH`（微博可配置 `WEIBO_BROWSER_PATH`，今日头条可配置 `TOUTIAO_BROWSER_PATH`）。
+- 不要在 `/opt/MultiPush` 下执行 `npm install`，部署脚本会复制唯一外置依赖 `playwright-core`。启用公众号、微博、今日头条等浏览器发布前，按 [公众号接入说明](WECHAT_PUBLISHING.md) 安装服务器浏览器并配置 `WECHAT_BROWSER_PATH`（微博可配置 `WEIBO_BROWSER_PATH`，今日头条可配置 `TOUTIAO_BROWSER_PATH`，百家号可配置 `BAIJIAHAO_BROWSER_PATH`）。
 - 不要对 `.data` 执行 `chmod -R 755` 或 `chown -R` 作为日常部署步骤；数据目录只允许服务用户访问。
 - 如果 `/opt/MultiPush` 已存在且属主不对，先确认没有其他应用在使用，再修正属主：
 

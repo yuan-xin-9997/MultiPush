@@ -6,7 +6,7 @@
  * dependencies so it can be used in either environment.
  */
 
-export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'douyin' | 'sspai' | 'blog'
+export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douyin' | 'sspai' | 'blog'
 
 export type ContentStatus = 'draft' | 'ready'
 
@@ -84,6 +84,17 @@ export const PLATFORMS: PlatformInfo[] = [
     softColor: '#fff0f0',
     contentTypes: ['image-text'],
     highlight: '头条图文 · 推荐流长文 · 直接发布',
+    limits: { titleMax: 30, bodyMax: 50000, imageMax: 100 },
+  },
+  {
+    id: 'baijiahao',
+    name: '百家号',
+    shortName: '百家号',
+    description: '生成百家号图文排版，支持复制富文本、下载 HTML/Markdown，或连接百家号直接发布。',
+    color: '#2932e1',
+    softColor: '#eef0ff',
+    contentTypes: ['image-text'],
+    highlight: '百度百家号 · 图文长文 · 直接发布',
     limits: { titleMax: 30, bodyMax: 50000, imageMax: 100 },
   },
   {
@@ -560,6 +571,51 @@ export interface ToutiaoResolveInput {
   articleUrl?: string
 }
 
+export interface BaijiahaoAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface BaijiahaoLogin {
+  id: string
+  status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'
+  qrCode: string | null
+  message: string
+  expiresAt: string
+}
+
+export interface BaijiahaoPublishInput {
+  renderId: string
+}
+
+export interface BaijiahaoPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'published' | 'failed' | 'uncertain'
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+  resolutions?: BaijiahaoResolution[]
+}
+
+export interface BaijiahaoResolution {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
+}
+
+export interface BaijiahaoResolveInput {
+  action: BaijiahaoResolution['action']
+  articleUrl?: string
+}
+
 export interface DouyinAccount {
   status: 'disconnected' | 'connected' | 'expired'
   name: string | null
@@ -811,4 +867,4 @@ export interface ApiErrorBody {
   issues?: Array<{ path: string; message: string }>
 }
 
-export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog']
+export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douyin', 'sspai', 'blog']

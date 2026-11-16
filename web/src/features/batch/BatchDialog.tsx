@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import Modal from '@/components/Modal'
 import './batch.css'
 
-const RENDER_PLATFORMS: PlatformId[] = ['wechat', 'zhihu', 'weibo', 'toutiao', 'sspai', 'blog', 'douyin', 'xiaohongshu']
+const RENDER_PLATFORMS: PlatformId[] = ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'sspai', 'blog', 'douyin', 'xiaohongshu']
 const PUBLISH_PLATFORMS: Array<{ id: BatchPublishPlatform; label: string }> = [
   { id: 'wechat', label: '微信公众号（仅草稿）' },
   { id: 'zhihu', label: '知乎' },

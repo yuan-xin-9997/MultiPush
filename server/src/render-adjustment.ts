@@ -37,7 +37,7 @@ export async function adjustPlatformRender(current: PlatformRender, input: Platf
   result.warnings = result.warnings.filter((warning) => !/标题.*字|正文.*字|截断/.test(warning))
   const base = safeFilename(input.title)
   result.downloads = [{ filename: `${base}.html`, kind: 'html', mimeType: 'text/html;charset=utf-8', content: buildHtmlDocument({ title: input.title, html: result.html, themeColor: result.themeColor, authorName: result.authorName }) }]
-  if (current.platform === 'zhihu' || current.platform === 'sspai' || current.platform === 'blog' || current.platform === 'toutiao') {
+  if (current.platform === 'zhihu' || current.platform === 'sspai' || current.platform === 'blog' || current.platform === 'toutiao' || current.platform === 'baijiahao') {
     result.markdown = `# ${input.title}\n\n${htmlToMarkdown(result.html)}`
     result.downloads.push({ filename: `${base}.md`, kind: 'markdown', mimeType: 'text/markdown;charset=utf-8', content: result.markdown })
   }

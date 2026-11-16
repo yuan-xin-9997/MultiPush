@@ -89,7 +89,7 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
 
-const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog']
+const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douyin', 'sspai', 'blog']
 
 const DOWNLOAD_LABELS = {
   html: 'HTML 页面',
@@ -836,9 +836,9 @@ export default function RenderPage() {
         toast.success('少数派 Markdown 已复制')
         return
       }
-      if (activeRender.platform === 'blog' || activeRender.platform === 'toutiao') {
+      if (activeRender.platform === 'blog' || activeRender.platform === 'toutiao' || activeRender.platform === 'baijiahao') {
         await copyText(activeRender.markdown || activeRender.text || '')
-        toast.success(activeRender.platform === 'toutiao' ? '今日头条 Markdown 已复制' : '个人博客 Markdown 已复制')
+        toast.success(activeRender.platform === 'toutiao' ? '今日头条 Markdown 已复制' : activeRender.platform === 'baijiahao' ? '百家号 Markdown 已复制' : '个人博客 Markdown 已复制')
         return
       }
       const note = activeRender.text || activeRender.cards.flatMap((card) => card.body).join('\n')
@@ -1492,6 +1492,35 @@ export default function RenderPage() {
                       <button type="button" className="btn btn-sm btn-primary" onClick={() => void copyCurrent()}><Copy size={14} />复制 Markdown</button>
                     </div>
                   </div>
+                ) : activeRender.platform === 'baijiahao' ? (
+                  <div className="blog-scene baijiahao-scene">
+                    <div className="blog-browser-shell">
+                      <div className="blog-browser-bar">
+                        <span className="blog-brand" style={{ color: '#2932e1' }}>百家号</span>
+                        <span className="blog-browser-url"><Globe2 size={12} />baijiahao.baidu.com / s / {activeRender.title.slice(0, 10)}</span>
+                        <span className="blog-browser-action"><ExternalLink size={13} /></span>
+                      </div>
+                      <div className="blog-browser-scroll">
+                        <article className="blog-article">
+                          <div className="blog-article-kicker" style={{ color: '#2932e1' }}>百家号 · 图文文章</div>
+                          <h1>{activeRender.title}</h1>
+                          <div className="blog-author-row">
+                            <span className="blog-avatar" style={{ background: '#eef0ff', color: '#2932e1' }}>{authorLabel.slice(0, 1)}</span>
+                            <span><strong>{authorLabel}</strong><small>发布于 {formatDate(activeRender.generatedAt)} · {activeRender.meta.readMinutes} 分钟阅读</small></span>
+                            <span className="blog-follow">关注</span>
+                          </div>
+                          <div className="blog-body" dangerouslySetInnerHTML={{ __html: activeRender.html }} />
+                          <div className="blog-foot"><span>阅读 2.1 万</span><span>点赞 386</span><span>评论 42</span></div>
+                        </article>
+                      </div>
+                    </div>
+                    <div className="blog-side-note">
+                      <span className="blog-side-icon" style={{ background: '#eef0ff', color: '#2932e1' }}><PlatformGlyph platform="baijiahao" size={18} /></span>
+                      <h3>百家号图文</h3>
+                      <p>百家号采用推荐流长文排版，标题 2–30 字，支持标题层级、引用、代码、表格和正文图片。</p>
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => void copyCurrent()}><Copy size={14} />复制 Markdown</button>
+                    </div>
+                  </div>
                 ) : activeRender.platform === 'blog' ? (
                   <div className="blog-scene">
                     <div className="blog-browser-shell">
@@ -1736,6 +1765,7 @@ export default function RenderPage() {
                   {activeRender.platform === 'wechat' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到公众号</button> : null}
                   {activeRender.platform === 'weibo' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=weibo&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到微博</button> : null}
                   {activeRender.platform === 'toutiao' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=toutiao&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到今日头条</button> : null}
+                  {activeRender.platform === 'baijiahao' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=baijiahao&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到百家号</button> : null}
                   {activeRender.platform === 'douyin' && renderId ? <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate(`/publish?platform=douyin&renderId=${encodeURIComponent(renderId)}`)}>发布到抖音</button> : null}
                   {activeRender.platform === 'zhihu' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=zhihu&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到知乎</button> : null}
                   {activeRender.platform === 'sspai' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=sspai&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到少数派</button> : null}
@@ -1850,12 +1880,12 @@ export default function RenderPage() {
                   </> : null}
                   {activeRender.platform === 'zhihu' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
                   {activeRender.platform === 'sspai' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
-                  {activeRender.platform === 'blog' || activeRender.platform === 'toutiao' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
+                  {activeRender.platform === 'blog' || activeRender.platform === 'toutiao' || activeRender.platform === 'baijiahao' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
                   <button type="button" className="btn btn-sm" onClick={() => void copyCurrent()}>
                     <Copy size={14} />
                     {activeRender.platform === 'wechat'
                       ? '复制富文本'
-                      : activeRender.platform === 'zhihu'
+                      : activeRender.platform === 'zhihu' || activeRender.platform === 'baijiahao'
                         ? '复制 Markdown'
                         : activeRender.platform === 'douyin'
                           ? '复制抖音文案'

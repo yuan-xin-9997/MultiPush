@@ -39,7 +39,7 @@ function content(overrides: Partial<ContentDetail> = {}): ContentDetail {
 
 const options: RenderOptions = { cardStyle: 'clean', includeTags: true }
 
-function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
+function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
   return {
     content: content(overrides),
     platforms,
@@ -76,6 +76,16 @@ describe('renderPlatforms', () => {
     expect(result.markdown).toContain('# 一次创作，多平台发布')
     expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown'])
     expect(result.downloads[0].filename).toContain('今日头条')
+  })
+
+  it('renders a Baijiahao graphic article with Markdown and HTML downloads', async () => {
+    const [result] = await renderPlatforms(input(['baijiahao']))
+    expect(result.platform).toBe('baijiahao')
+    expect(result.previewMode).toBe('article')
+    expect(result.title).toBe('一次创作，多平台发布')
+    expect(result.markdown).toContain('# 一次创作，多平台发布')
+    expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown'])
+    expect(result.downloads[0].filename).toContain('百家号')
   })
 
   it('renders a Weibo caption with double-hash topics and text downloads', async () => {

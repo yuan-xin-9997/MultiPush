@@ -112,7 +112,7 @@ export const favoriteBodySchema = z.object({
   favorite: z.boolean(),
 })
 
-const platformSchema = z.enum(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'douyin', 'sspai', 'blog'])
+const platformSchema = z.enum(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douyin', 'sspai', 'blog'])
 const mediaUrlSchema = z.string().max(2048).refine((value) => /^(https?:\/\/|\/uploads\/|data:image\/(png|jpeg|webp|gif);base64,)/i.test(value), '图片地址无效')
 export const renderPlatformParamsSchema = z.object({ id: z.string().max(100), platform: platformSchema })
 export const platformAdjustmentSchema = z.object({

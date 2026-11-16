@@ -30,6 +30,9 @@ import { createWeiboRouter } from './routes/weibo'
 import { ToutiaoService } from './toutiao'
 import { PlaywrightToutiaoDriver, type ToutiaoDriver } from './toutiao-browser'
 import { createToutiaoRouter } from './routes/toutiao'
+import { BaijiahaoService } from './baijiahao'
+import { PlaywrightBaijiahaoDriver, type BaijiahaoDriver } from './baijiahao-browser'
+import { createBaijiahaoRouter } from './routes/baijiahao'
 import { SspaiService } from './sspai'
 import { PlaywrightSspaiDriver, type SspaiDriver } from './sspai-browser'
 import { createSspaiRouter } from './routes/sspai'
@@ -123,7 +126,7 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
@@ -133,6 +136,8 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.weibo = weibo
   const toutiao = new ToutiaoService(database, config, toutiaoDriver ?? new PlaywrightToutiaoDriver())
   app.locals.toutiao = toutiao
+  const baijiahao = new BaijiahaoService(database, config, baijiahaoDriver ?? new PlaywrightBaijiahaoDriver())
+  app.locals.baijiahao = baijiahao
   database.clearXhsAccounts()
   const douyin = new DouyinService(database, config, douyinDriver ?? new PlaywrightDouyinDriver())
   app.locals.douyin = douyin
@@ -168,6 +173,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))
   app.use('/api/weibo', requireAuth, createWeiboRouter(weibo))
   app.use('/api/toutiao', requireAuth, createToutiaoRouter(toutiao))
+  app.use('/api/baijiahao', requireAuth, createBaijiahaoRouter(baijiahao))
   app.use('/api/sspai', requireAuth, createSspaiRouter(sspai))
   app.use('/api/blog', requireAuth, createBlogRouter(blog))
   app.use('/api/ai', requireAuth, createAiRouter(ai))

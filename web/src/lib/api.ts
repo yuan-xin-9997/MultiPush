@@ -29,6 +29,11 @@ import type {
   ToutiaoLogin,
   ToutiaoPublication,
   ToutiaoPublishInput,
+  BaijiahaoAccount,
+  BaijiahaoLogin,
+  BaijiahaoPublication,
+  BaijiahaoPublishInput,
+  BaijiahaoResolveInput,
   ToutiaoResolveInput,
   WeiboAccount,
   WeiboLogin,
@@ -278,6 +283,15 @@ export const api = {
     listPublications: () => request<{ publications: ToutiaoPublication[] }>('/api/toutiao/publications', { cache: 'no-store' }),
     publish: (input: ToutiaoPublishInput) => request<{ publication: ToutiaoPublication }>('/api/toutiao/publications', { method: 'POST', body: JSON.stringify(input) }),
   },
+  baijiahao: {
+    resolve: (id: string, input: BaijiahaoResolveInput) => request<{ publication: BaijiahaoPublication }>(`/api/baijiahao/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: BaijiahaoAccount }>('/api/baijiahao/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: BaijiahaoLogin }>('/api/baijiahao/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: BaijiahaoLogin }>(`/api/baijiahao/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/baijiahao/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: BaijiahaoPublication[] }>('/api/baijiahao/publications', { cache: 'no-store' }),
+    publish: (input: BaijiahaoPublishInput) => request<{ publication: BaijiahaoPublication }>('/api/baijiahao/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
   weibo: {
     resolve: (id: string, input: WeiboResolveInput) => request<{ publication: WeiboPublication }>(`/api/weibo/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
     account: () => request<{ account: WeiboAccount }>('/api/weibo/account', { cache: 'no-store' }),
@@ -358,7 +372,7 @@ export const api = {
 }
 
 export function isPlatformId(value: string): value is PlatformId {
-  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'toutiao' || value === 'douyin' || value === 'sspai' || value === 'blog'
+  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'toutiao' || value === 'baijiahao' || value === 'douyin' || value === 'sspai' || value === 'blog'
 }
 
 /** Make an uploaded relative URL absolute for previews / rendering. */
