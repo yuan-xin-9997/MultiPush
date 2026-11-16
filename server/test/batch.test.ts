@@ -9,6 +9,7 @@ import { openDatabase, type Database } from '../src/db'
 import type { SspaiService } from '../src/sspai'
 import type { WechatService } from '../src/wechat'
 import type { ZhihuService } from '../src/zhihu'
+import type { WeiboService } from '../src/weibo'
 
 const cleanups: Array<() => Promise<void> | void> = []
 
@@ -34,7 +35,8 @@ function setup() {
   const zhihu = { publish: vi.fn() } as unknown as ZhihuService
   const sspai = { publish: vi.fn() } as unknown as SspaiService
   const blog = { publish: vi.fn() } as unknown as BlogService
-  const service = new BatchService(database, config, wechat, zhihu, sspai, blog)
+  const weibo = { publish: vi.fn() } as unknown as WeiboService
+  const service = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo)
   cleanups.push(async () => { await service.close(); database.close(); rmSync(directory, { recursive: true, force: true }) })
   return { directory, config, uploadsDir: config.uploadsDir, database, user, content, service, wechat }
 }

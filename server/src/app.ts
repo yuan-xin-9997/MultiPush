@@ -24,6 +24,9 @@ import { createWechatRouter } from './routes/wechat'
 import { ZhihuService } from './zhihu'
 import { PlaywrightZhihuDriver, type ZhihuDriver } from './zhihu-browser'
 import { createZhihuRouter } from './routes/zhihu'
+import { WeiboService } from './weibo'
+import { PlaywrightWeiboDriver, type WeiboDriver } from './weibo-browser'
+import { createWeiboRouter } from './routes/weibo'
 import { SspaiService } from './sspai'
 import { PlaywrightSspaiDriver, type SspaiDriver } from './sspai-browser'
 import { createSspaiRouter } from './routes/sspai'
@@ -117,12 +120,14 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
   const zhihu = new ZhihuService(database, config, zhihuDriver ?? new PlaywrightZhihuDriver())
   app.locals.zhihu = zhihu
+  const weibo = new WeiboService(database, config, weiboDriver ?? new PlaywrightWeiboDriver())
+  app.locals.weibo = weibo
   database.clearXhsAccounts()
   const douyin = new DouyinService(database, config, douyinDriver ?? new PlaywrightDouyinDriver())
   app.locals.douyin = douyin
@@ -130,9 +135,9 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.sspai = sspai
   const blog = new BlogService(database, config, blogDriver ?? new HaloBlogDriver())
   app.locals.blog = blog
-  const batch = new BatchService(database, config, wechat, zhihu, sspai, blog)
+  const batch = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo)
   app.locals.batch = batch
-  const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, batch)
+  const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, batch)
   app.locals.ai = ai
   app.disable('x-powered-by')
   app.use(securityHeaders)
@@ -156,6 +161,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/douyin', requireAuth, createDouyinRouter(douyin))
   app.use('/api/xiaohongshu', requireAuth, createXhsRouter(database))
   app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))
+  app.use('/api/weibo', requireAuth, createWeiboRouter(weibo))
   app.use('/api/sspai', requireAuth, createSspaiRouter(sspai))
   app.use('/api/blog', requireAuth, createBlogRouter(blog))
   app.use('/api/ai', requireAuth, createAiRouter(ai))

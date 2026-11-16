@@ -14,6 +14,7 @@ import XhsPublishPage from './XhsPublishPage'
 import ZhihuPublishPage from './ZhihuPublishPage'
 import SspaiPublishPage from './SspaiPublishPage'
 import BlogPublishPage from './BlogPublishPage'
+import WeiboPublishPage from './WeiboPublishPage'
 
 const STATUS_LABELS: Record<WechatPublication['status'], string> = {
   running: '处理中', draft: '已保存草稿', awaiting_confirmation: '等待微信确认', published: '已发表', failed: '失败', uncertain: '结果待核实',
@@ -308,6 +309,7 @@ function WechatPublishPage() {
 
 export default function PublishPage() {
   const [params, setParams] = useSearchParams()
-  const platform = params.get('platform') === 'douyin' ? 'douyin' : params.get('platform') === 'xiaohongshu' ? 'xiaohongshu' : params.get('platform') === 'zhihu' ? 'zhihu' : params.get('platform') === 'sspai' ? 'sspai' : params.get('platform') === 'blog' ? 'blog' : 'wechat'
-  return <><nav className="publish-platform-tabs" aria-label="选择发布平台">{(['wechat', 'zhihu', 'sspai', 'blog', 'xiaohongshu', 'douyin'] as const).map(value => <button key={value} type="button" className={`btn ${platform === value ? 'btn-primary' : ''}`} aria-current={platform === value ? 'page' : undefined} onClick={() => { if (value !== platform) setParams({ platform: value }) }}>{value === 'wechat' ? '微信公众号' : value === 'zhihu' ? '知乎' : value === 'sspai' ? '少数派' : value === 'blog' ? '个人博客' : value === 'douyin' ? '抖音' : '小红书（手动发布）'}</button>)}</nav>{platform === 'douyin' ? <DouyinPublishPage /> : platform === 'xiaohongshu' ? <XhsPublishPage /> : platform === 'zhihu' ? <ZhihuPublishPage /> : platform === 'sspai' ? <SspaiPublishPage /> : platform === 'blog' ? <BlogPublishPage /> : <WechatPublishPage />}</>
+  const raw = params.get('platform')
+  const platform = raw === 'douyin' ? 'douyin' : raw === 'xiaohongshu' ? 'xiaohongshu' : raw === 'zhihu' ? 'zhihu' : raw === 'weibo' ? 'weibo' : raw === 'sspai' ? 'sspai' : raw === 'blog' ? 'blog' : 'wechat'
+  return <><nav className="publish-platform-tabs" aria-label="选择发布平台">{(['wechat', 'zhihu', 'weibo', 'sspai', 'blog', 'xiaohongshu', 'douyin'] as const).map(value => <button key={value} type="button" className={`btn ${platform === value ? 'btn-primary' : ''}`} aria-current={platform === value ? 'page' : undefined} onClick={() => { if (value !== platform) setParams({ platform: value }) }}>{value === 'wechat' ? '微信公众号' : value === 'zhihu' ? '知乎' : value === 'weibo' ? '微博' : value === 'sspai' ? '少数派' : value === 'blog' ? '个人博客' : value === 'douyin' ? '抖音' : '小红书（手动发布）'}</button>)}</nav>{platform === 'douyin' ? <DouyinPublishPage /> : platform === 'xiaohongshu' ? <XhsPublishPage /> : platform === 'zhihu' ? <ZhihuPublishPage /> : platform === 'weibo' ? <WeiboPublishPage /> : platform === 'sspai' ? <SspaiPublishPage /> : platform === 'blog' ? <BlogPublishPage /> : <WechatPublishPage />}</>
 }

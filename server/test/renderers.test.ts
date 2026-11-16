@@ -39,7 +39,7 @@ function content(overrides: Partial<ContentDetail> = {}): ContentDetail {
 
 const options: RenderOptions = { cardStyle: 'clean', includeTags: true }
 
-function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
+function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
   return {
     content: content(overrides),
     platforms,
@@ -66,6 +66,17 @@ describe('renderPlatforms', () => {
     expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown'])
     expect(result.downloads[0].filename).toContain('少数派')
     expect(result.warnings).toEqual([])
+  })
+
+  it('renders a Weibo caption with double-hash topics and text downloads', async () => {
+    const [result] = await renderPlatforms(input(['weibo']))
+    expect(result.platform).toBe('weibo')
+    expect(result.previewMode).toBe('vertical')
+    expect(result.captionBody).toContain('这是')
+    expect(result.text).toContain('#内容创作#')
+    expect(result.text).toContain('#效率#')
+    expect(result.downloads.map((download) => download.kind)).toEqual(['text', 'html', 'json'])
+    expect(result.downloads[0].filename).toContain('微博')
   })
 
   it('renders personal blog article with Markdown and HTML downloads', async () => {

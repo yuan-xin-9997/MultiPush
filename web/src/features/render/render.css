@@ -841,6 +841,7 @@
 .sspai-scene,
 .blog-scene,
 .xhs-scene,
+.weibo-scene,
 .douyin-scene {
   display: flex;
   align-items: flex-start;
@@ -3395,6 +3396,7 @@
   .sspai-side-note,
   .blog-side-note,
   .xhs-side-stack,
+  .weibo-side-note,
   .douyin-side-note {
     display: none;
   }
@@ -3690,3 +3692,44 @@
 .render-export-report ul:empty { display: none; }
 .render-export-report ul { padding-left: 18px; max-height: 200px; overflow: auto; }
 .render-export-report small { display: block; margin-top: 8px; color: #697586; }
+
+
+/* ---------- Weibo feed scene ---------- */
+.weibo-feed-shell {
+  width: 620px;
+  max-width: 100%;
+  height: min(720px, calc(100vh - 265px));
+  min-height: 540px;
+  flex: 0 0 auto;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f5f6f7;
+  box-shadow: 0 22px 50px rgba(31, 35, 41, 0.12);
+}
+.weibo-topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: #fff; border-bottom: 1px solid #ececec; font-size: 14px; font-weight: 700; color: #ff8200; }
+.weibo-topbar-search { color: var(--muted-2); font-size: 18px; }
+.weibo-card { margin: 10px; padding: 16px; border-radius: 12px; background: #fff; }
+.weibo-author-row { display: flex; align-items: center; gap: 9px; }
+.weibo-avatar { display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: #fff1e2; color: #ff8200; font-weight: 700; }
+.weibo-author-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.weibo-author-meta strong { font-size: 13px; color: #ff8200; }
+.weibo-author-meta small { color: var(--muted-2); font-size: 10px; }
+.weibo-follow { padding: 3px 10px; border: 1px solid #ffd6a8; border-radius: 999px; color: #ff8200; font-size: 10px; }
+.weibo-post-title { margin: 14px 0 8px; font-size: 17px; line-height: 1.5; color: #1f2329; }
+.weibo-post-body { white-space: pre-wrap; color: #1f2329; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.weibo-image-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.weibo-image-grid img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: #f3f3f3; }
+.weibo-image-grid.count-1 { grid-template-columns: minmax(0, 360px); }
+.weibo-image-grid.count-1 img { aspect-ratio: 4 / 3; }
+.weibo-image-grid.count-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.weibo-topics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.weibo-topics span { color: #ff8200; font-size: 12px; }
+.weibo-actions { display: flex; justify-content: space-around; margin-top: 14px; padding-top: 11px; border-top: 1px solid #f0f0f0; color: var(--muted); font-size: 11px; }
+.weibo-side-note { width: 228px; flex: 0 0 auto; padding-top: 22px; }
+.weibo-side-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 11px; background: #fff1e2; color: #ff8200; }
+.weibo-side-note h3 { margin-top: 12px; color: var(--ink); font-size: 12.5px; font-weight: 650; }
+.weibo-side-note p { margin-top: 6px; color: var(--muted); font-size: 10.5px; line-height: 1.7; }
+.weibo-side-note .btn { margin-top: 13px; }
+@media (max-width: 1100px) { .weibo-feed-shell { width: 100%; } }
+@media (max-width: 600px) { .weibo-feed-shell { height: auto; min-height: 420px; } .weibo-card { margin: 8px; padding: 13px; } }

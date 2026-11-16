@@ -4,6 +4,7 @@ import { toPng } from 'html-to-image'
 import {
   ArrowLeft,
   ArrowRight,
+  AtSign,
   BookOpen,
   Bookmark,
   Check,
@@ -88,7 +89,7 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
 
-const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'douyin', 'sspai', 'blog']
+const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'douyin', 'sspai', 'blog']
 
 const DOWNLOAD_LABELS = {
   html: 'HTML 页面',
@@ -302,6 +303,44 @@ function DouyinScene({ render, author, exporting, onCopy }: DouyinSceneProps) {
           <Copy size={14} />
           复制抖音文案
         </button>
+      </div>
+    </div>
+  )
+}
+
+interface WeiboSceneProps {
+  render: PlatformRender
+  author: string
+  exporting: boolean
+  onCopy: () => void
+}
+
+/** Weibo feed mockup: author row, caption, optional 1–9 image grid and action bar. */
+function WeiboScene({ render, author, exporting, onCopy }: WeiboSceneProps) {
+  const images = render.assets.filter((asset) => asset.kind === 'image').slice(0, 9)
+  const body = render.captionBody ?? (render.text ?? '').split(/\r?\n/).filter(line => line.trim() && line.trim() !== render.title.trim() && !/^#\S+#(?:\s+#\S+#)*$/.test(line.trim())).join('\n')
+  return (
+    <div className="weibo-scene">
+      <div className="weibo-feed-shell">
+        <div className="weibo-topbar"><span>微博</span><span className="weibo-topbar-search">⌕</span></div>
+        <article className="weibo-card">
+          <div className="weibo-author-row">
+            <span className="weibo-avatar">{author.slice(0, 1)}</span>
+            <span className="weibo-author-meta"><strong>{author}</strong><small>刚刚 · 来自微博网页版</small></span>
+            <span className="weibo-follow">关注</span>
+          </div>
+          <h3 className="weibo-post-title">{render.title}</h3>
+          <p className="weibo-post-body">{body || '正文内容会显示在这里。'}</p>
+          {images.length ? <div className={`weibo-image-grid count-${Math.min(images.length, 9)}`}>{images.map((image, index) => <img key={`${image.url}-${index}`} src={absoluteUrl(image.url)} alt="" />)}</div> : null}
+          <div className="weibo-topics">{render.meta.tags.slice(0, 5).map(tag => <span key={tag}>#{tag}#</span>)}</div>
+          <div className="weibo-actions"><span>转发</span><span>评论</span><span>赞</span></div>
+        </article>
+      </div>
+      <div className="weibo-side-note">
+        <span className="weibo-side-icon"><AtSign size={18} /></span>
+        <h3>微博图文</h3>
+        <p>微博以短图文流展示：标题作为首行，正文和 #话题# 保留，最多上传 9 张图片。</p>
+        <button type="button" className="btn btn-sm btn-primary" onClick={onCopy} disabled={exporting}><Copy size={14} />复制微博文案</button>
       </div>
     </div>
   )
@@ -1117,7 +1156,7 @@ export default function RenderPage() {
                 <span className="render-empty-spark render-empty-spark-two">✦</span>
               </div>
               <span className="render-empty-eyebrow">ONE SOURCE · FOUR FORMATS</span>
-              <h2>把一篇内容，变成六种发布形态</h2>
+              <h2>把一篇内容，变成七种发布形态</h2>
               <p>选择内容与平台，MultiPush 会按照每个平台的阅读习惯重新排版，生成可直接交付的素材。</p>
               <div className="render-empty-actions">
                 {selectedContent ? (
@@ -1228,10 +1267,12 @@ export default function RenderPage() {
                       {activeRender.previewMode === 'article' ? <FileText size={13} /> : <Video size={13} />}
                       {activeRender.platform === 'wechat'
                         ? '公众号图文'
-                        : activeRender.platform === 'douyin'
-                          ? activeRender.videos.length > 0
-                            ? '抖音视频'
-                            : '抖音图文'
+                        : activeRender.platform === 'weibo'
+                          ? '微博图文'
+                          : activeRender.platform === 'douyin'
+                            ? activeRender.videos.length > 0
+                              ? '抖音视频'
+                              : '抖音图文'
                           : activeRender.platform === 'sspai'
                             ? '少数派 Matrix 文章'
                             : activeRender.platform === 'blog'
@@ -1255,7 +1296,14 @@ export default function RenderPage() {
                   </div>
                 ) : null}
 
-                {activeRender.platform === 'douyin' ? (
+                {activeRender.platform === 'weibo' ? (
+                  <WeiboScene
+                    render={activeRender}
+                    author={authorLabel}
+                    exporting={Boolean(exporting)}
+                    onCopy={() => void copyCurrent()}
+                  />
+                ) : activeRender.platform === 'douyin' ? (
                   <DouyinScene
                     render={activeRender}
                     author={authorLabel}
@@ -1655,6 +1703,7 @@ export default function RenderPage() {
                   </span>
                   <h2>交付与发布</h2>
                   {activeRender.platform === 'wechat' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到公众号</button> : null}
+                  {activeRender.platform === 'weibo' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=weibo&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到微博</button> : null}
                   {activeRender.platform === 'douyin' && renderId ? <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate(`/publish?platform=douyin&renderId=${encodeURIComponent(renderId)}`)}>发布到抖音</button> : null}
                   {activeRender.platform === 'zhihu' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=zhihu&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到知乎</button> : null}
                   {activeRender.platform === 'sspai' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=sspai&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到少数派</button> : null}
@@ -1763,7 +1812,7 @@ export default function RenderPage() {
                 </div>
                 <div className="render-quick-actions">
                   <button className="btn btn-sm" onClick={() => void copyPart('title')}>复制标题</button>
-                  {activeRender.platform === 'xiaohongshu' || activeRender.platform === 'douyin' ? <>
+                  {activeRender.platform === 'xiaohongshu' || activeRender.platform === 'douyin' || activeRender.platform === 'weibo' ? <>
                     <button className="btn btn-sm" onClick={() => void copyPart('body')}>复制正文</button>
                     <button className="btn btn-sm" onClick={() => void copyPart('tags')}>复制话题</button>
                   </> : null}
@@ -1778,7 +1827,9 @@ export default function RenderPage() {
                         ? '复制 Markdown'
                         : activeRender.platform === 'douyin'
                           ? '复制抖音文案'
-                          : activeRender.platform === 'sspai'
+                          : activeRender.platform === 'weibo'
+                            ? '复制微博文案'
+                            : activeRender.platform === 'sspai'
                             ? '复制 Markdown'
                             : activeRender.platform === 'blog'
                               ? '复制 Markdown'
@@ -1925,7 +1976,7 @@ export default function RenderPage() {
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         title="选择内容"
-        subtitle="从内容库中选择一篇文档，渲染为六个平台的发布格式"
+        subtitle="从内容库中选择一篇文档，渲染为七个平台的发布格式"
         size="wide"
       >
         <div className="render-picker-search">

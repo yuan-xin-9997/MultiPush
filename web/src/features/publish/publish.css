@@ -100,3 +100,9 @@
 
 .publish-delete-button { margin-left: 6px; color: #bb3733; }
 .publish-delete-button:hover { border-color: #f4cecc; background: var(--danger-soft); }
+
+.weibo-publish-page .publish-account-icon { font-size: 28px; font-weight: 700; color: #ff8200; background: #fff1e2; }
+.weibo-publish-preview { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.weibo-publish-preview h3 { font-size: 17px; line-height: 1.5; }
+.weibo-publish-preview p { white-space: pre-wrap; color: var(--ink); font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.weibo-publish-preview img { display: block; width: 100%; max-height: 240px; object-fit: cover; border-radius: 8px; }

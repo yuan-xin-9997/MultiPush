@@ -25,6 +25,11 @@ import type {
   WechatLogin,
   WechatPublication,
   WechatPublishInput,
+  WeiboAccount,
+  WeiboLogin,
+  WeiboPublication,
+  WeiboPublishInput,
+  WeiboResolveInput,
   XhsAccount,
   DouyinAccount, DouyinLogin, DouyinPublication, DouyinPublishInput, DouyinResolveInput,
   XhsLogin,
@@ -259,6 +264,15 @@ export const api = {
     publish: (input: ZhihuPublishInput) => request<{ publication: ZhihuPublication }>('/api/zhihu/publications', { method: 'POST', body: JSON.stringify(input) }),
     deletePublication: (id: string) => request<PublicationDeletion>(`/api/zhihu/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
+  weibo: {
+    resolve: (id: string, input: WeiboResolveInput) => request<{ publication: WeiboPublication }>(`/api/weibo/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: WeiboAccount }>('/api/weibo/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: WeiboLogin }>('/api/weibo/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: WeiboLogin }>(`/api/weibo/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/weibo/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: WeiboPublication[] }>('/api/weibo/publications', { cache: 'no-store' }),
+    publish: (input: WeiboPublishInput) => request<{ publication: WeiboPublication }>('/api/weibo/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
   xiaohongshu: {
     resolve: (id: string, input: XhsResolveInput) => request<{ publication: XhsPublication }>(`/api/xiaohongshu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
     account: () => request<{ account: XhsAccount }>('/api/xiaohongshu/account', { cache: 'no-store' }),
@@ -330,7 +344,7 @@ export const api = {
 }
 
 export function isPlatformId(value: string): value is PlatformId {
-  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'douyin' || value === 'sspai' || value === 'blog'
+  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'douyin' || value === 'sspai' || value === 'blog'
 }
 
 /** Make an uploaded relative URL absolute for previews / rendering. */

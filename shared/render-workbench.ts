@@ -82,7 +82,7 @@ export interface PublishCheck { label: string; detail: string; ok: boolean; acti
 
 export function publishChecks(render: PlatformRender, stale = false): PublishCheck[] {
   const limits = getPlatformInfo(render.platform).limits
-  const short = render.platform === 'xiaohongshu' || render.platform === 'douyin'
+  const short = render.platform === 'xiaohongshu' || render.platform === 'douyin' || render.platform === 'weibo'
   // Caption text includes the title and hashtags that are copied together.
   const bodyLength = Array.from(render.text ?? '').length
   const titleLength = Array.from(render.title).length

@@ -13,9 +13,10 @@ export async function adjustPlatformRender(current: PlatformRender, input: Platf
   result = { ...result, title: input.title, generatedAt: current.generatedAt, sourceUpdatedAt: current.sourceUpdatedAt, authorName: current.authorName, editedAt: new Date().toISOString() }
   const tags = normalizeTags(input.tags)
   result.meta = { ...result.meta, tags, titleLength: charLength(input.title) }
-  if (current.platform === 'xiaohongshu' || current.platform === 'douyin') {
+  if (current.platform === 'xiaohongshu' || current.platform === 'douyin' || current.platform === 'weibo') {
     result.captionBody = input.body ?? getCaptionBody(current)
-    result.text = [input.title, result.captionBody, tags.map((tag) => `#${tag}`).join(' ')].filter(Boolean).join('\n\n')
+    const hashtags = current.platform === 'weibo' ? tags.slice(0, 5).map((tag) => `#${tag}#`).join(' ') : tags.map((tag) => `#${tag}`).join(' ')
+    result.text = [input.title, result.captionBody, hashtags].filter(Boolean).join('\n\n')
     result.meta = { ...result.meta, wordCount: charLength(result.captionBody), readMinutes: Math.max(1, Math.ceil(charLength(result.captionBody) / 350)), summary: result.captionBody.slice(0, 120) }
   }
   if (current.platform === 'xiaohongshu') {
@@ -41,9 +42,9 @@ export async function adjustPlatformRender(current: PlatformRender, input: Platf
     result.downloads.push({ filename: `${base}.md`, kind: 'markdown', mimeType: 'text/markdown;charset=utf-8', content: result.markdown })
   }
   if (result.text) result.downloads.push({ filename: `${base}-文案.txt`, kind: 'text', mimeType: 'text/plain;charset=utf-8', content: result.text })
-  if (current.platform === 'xiaohongshu' || current.platform === 'douyin') {
+  if (current.platform === 'xiaohongshu' || current.platform === 'douyin' || current.platform === 'weibo') {
     const { downloads: _downloads, ...note } = result
-    result.downloads.push({ filename: `${base}-笔记.json`, kind: 'json', mimeType: 'application/json;charset=utf-8', content: JSON.stringify(note, null, 2) })
+    result.downloads.push({ filename: `${base}${current.platform === 'weibo' ? '-微博' : '-笔记'}.json`, kind: 'json', mimeType: 'application/json;charset=utf-8', content: JSON.stringify(note, null, 2) })
   }
   return result
 }

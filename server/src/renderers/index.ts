@@ -3,6 +3,7 @@ import type { PlatformRenderer, RenderInput } from './types'
 import { renderWechat } from './wechat'
 import { renderXiaohongshu } from './xiaohongshu'
 import { renderZhihu } from './zhihu'
+import { renderWeibo } from './weibo'
 import { renderDouyin } from './douyin'
 import { renderSspai } from './sspai'
 import { renderBlog } from './blog'
@@ -11,6 +12,7 @@ const RENDERERS: Record<PlatformId, PlatformRenderer> = {
   wechat: renderWechat,
   xiaohongshu: renderXiaohongshu,
   zhihu: renderZhihu,
+  weibo: renderWeibo,
   douyin: renderDouyin,
   sspai: renderSspai,
   blog: renderBlog,
