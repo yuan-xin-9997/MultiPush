@@ -45,8 +45,8 @@ const ZHIHU_STYLES: Record<string, string> = {
   img: 'display:block;max-width:100%;height:auto;border-radius:8px;margin:22px auto;',
   'figure img': 'display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;',
   video: 'display:block;width:100%;border-radius:8px;margin:22px 0;background:#000;',
-  figure: 'margin:22px 0;',
-  figcaption: 'margin-top:8px;text-align:center;color:#8a94a6;font-size:13px;line-height:1.6;',
+  figure: 'margin:20px 0;',
+  figcaption: 'margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;',
   hr: 'border:none;border-top:1px solid #e8ebf0;margin:30px 0;',
 }
 

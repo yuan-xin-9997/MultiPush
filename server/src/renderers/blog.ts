@@ -41,10 +41,10 @@ const BLOG_STYLES: Record<string, string> = {
   table: 'width:100%;border-collapse:collapse;font-size:15px;line-height:1.7;min-width:520px;border-spacing:0;',
   th: 'border:1px solid #e7e5e4;background-color:#fafaf9;padding:10px 12px;text-align:left;font-weight:600;vertical-align:top;',
   td: 'border:1px solid #e7e5e4;padding:10px 12px;text-align:left;vertical-align:top;',
-  img: 'display:block;max-width:100%;height:auto;border-radius:10px;margin:24px auto;',
-  'figure img': 'display:block;max-width:100%;height:auto;border-radius:10px;margin:0 auto;',
-  figure: 'margin:24px 0;',
-  figcaption: 'margin-top:8px;text-align:center;color:#78716c;font-size:13px;line-height:1.6;',
+  img: 'display:block;max-width:100%;height:auto;border-radius:8px;margin:24px auto;',
+  'figure img': 'display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;',
+  figure: 'margin:20px 0;',
+  figcaption: 'margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;',
   hr: 'border:none;border-top:1px solid #e7e5e4;margin:32px 0;',
 }
 

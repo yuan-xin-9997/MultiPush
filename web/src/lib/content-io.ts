@@ -3,6 +3,7 @@ import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
 import JSZip from 'jszip'
 import type { ContentDetail, ContentInput, RichTextJson } from '@shared/types'
+import { isFigureCaptionText } from '@shared/figure-caption'
 import { downloadBlob, downloadText, safeFilename } from '@/lib/utils'
 
 export type ExportFormat = 'markdown' | 'html' | 'json'
@@ -56,6 +57,106 @@ function filenameTitle(filename: string): string {
   return filename.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || '导入文档'
 }
 
+function isBlankImportSpacer(element: Element): boolean {
+  if (element.tagName === 'BR') return true
+  if (!['P', 'DIV', 'SECTION'].includes(element.tagName)) return false
+  if ((element.textContent || '').replace(/[\u200b\u200c\u200d\ufeff\s]/g, '').length > 0) return false
+  return !element.querySelector('img,video,audio,iframe,svg,table,hr,figure')
+}
+
+function isCaptionElement(element: Element): boolean {
+  if (element.tagName !== 'P' && element.tagName !== 'DIV') return false
+  if (element.querySelector('img,video,audio,iframe,svg,table,hr,figure')) return false
+  return isFigureCaptionText(element.textContent || '')
+}
+
+function previousBlockHasImage(block: Element): boolean {
+  let previous = block.previousElementSibling
+  while (previous && isBlankImportSpacer(previous)) previous = previous.previousElementSibling
+  if (!previous) return false
+  if (previous.tagName === 'IMG') return true
+  if (!['P', 'DIV', 'SECTION'].includes(previous.tagName)) return false
+  return Boolean(previous.querySelector('img'))
+    && (previous.textContent || '').replace(/[\u200b\u200c\u200d\ufeff\s]/g, '').length === 0
+}
+
+function appendCaptionContent(figcaption: HTMLElement, caption: Element): void {
+  const children = Array.from(caption.childNodes).filter(
+    (child) => child.nodeType !== Node.TEXT_NODE || Boolean(child.textContent?.trim()),
+  )
+  const only = children.length === 1 && children[0].nodeType === Node.ELEMENT_NODE
+    && ['EM', 'I'].includes((children[0] as Element).tagName)
+  if (only) {
+    for (const child of Array.from(children[0].childNodes)) figcaption.appendChild(child)
+  } else {
+    for (const child of Array.from(caption.childNodes)) figcaption.appendChild(child)
+  }
+}
+
+/**
+ * Merge one image block followed by one `图：…` paragraph into figure/figcaption.
+ * Runs after Markdown/HTML import and before the editor parses the fragment, so
+ * both contentHtml and contentJson are created from the same canonical shape.
+ *
+ * Only adjacent nodes are considered; multiple images, non-caption paragraphs
+ * and orphan captions are left exactly as they were.
+ */
+export function groupImageCaptions(html: string): string {
+  if (!html || !/<img\b/i.test(html)) return html
+  const document = new DOMParser().parseFromString(html, 'text/html')
+  const root = document.body
+
+  for (const image of Array.from(root.querySelectorAll('img'))) {
+    if (image.closest('figure')) continue
+    const parent = image.parentElement
+    let block: Element = image
+    if (
+      parent
+      && ['P', 'DIV', 'SECTION'].includes(parent.tagName)
+      && parent.querySelectorAll('img').length === 1
+      && (parent.textContent || '').replace(/[\u200b\u200c\u200d\ufeff\s]/g, '').length === 0
+      && !parent.querySelector('video,audio,iframe,svg,table,hr,figure')
+    ) {
+      block = parent
+    }
+
+    // Two images sharing one caption are intentionally left untouched.
+    if (previousBlockHasImage(block)) continue
+    let next: Element | null = block.nextElementSibling
+    const spacers: Element[] = []
+    while (next && isBlankImportSpacer(next)) {
+      spacers.push(next)
+      next = next.nextElementSibling
+    }
+    if (!next || !isCaptionElement(next)) continue
+
+    const caption = next
+    // Drop formatting-only whitespace between the two blocks; it would leave a
+    // stray newline next to the figure after the source paragraphs disappear.
+    let sibling = block.nextSibling
+    while (sibling && sibling !== caption) {
+      const following = sibling.nextSibling
+      if (sibling.nodeType === Node.TEXT_NODE && !sibling.textContent?.trim()) sibling.remove()
+      sibling = following
+    }
+    const figure = document.createElement('figure')
+    if (block === image) {
+      image.replaceWith(figure)
+      figure.appendChild(image)
+    } else {
+      block.replaceWith(figure)
+      figure.appendChild(image)
+    }
+    const figcaption = document.createElement('figcaption')
+    appendCaptionContent(figcaption, caption)
+    figure.appendChild(figcaption)
+    for (const spacer of spacers) spacer.remove()
+    caption.remove()
+  }
+
+  return root.innerHTML
+}
+
 function stripLeadingDuplicateTitle(html: string, title: string): string {
   const document = new DOMParser().parseFromString(html, 'text/html')
   const firstHeading = document.body.querySelector('h1')
@@ -78,7 +179,7 @@ function normalizeJsonDoc(value: unknown): ContentInput | null {
   if (!rawHtml && !isRichTextJson(item.contentJson)) return null
   return {
     title,
-    contentHtml: sanitizeImportedHtml(rawHtml),
+    contentHtml: groupImageCaptions(sanitizeImportedHtml(rawHtml)),
     contentJson,
     excerpt: typeof item.excerpt === 'string' ? item.excerpt : htmlToPlainText(rawHtml).slice(0, 160),
     tags,
@@ -121,7 +222,7 @@ export async function parseImportFile(file: File): Promise<ContentInput[]> {
     const pageTitle = source.querySelector('title')?.textContent?.trim()
     const heading = source.querySelector('h1')?.textContent?.trim()
     const resolvedTitle = pageTitle || heading || title
-    const cleaned = sanitizeImportedHtml(source.body.innerHTML)
+    const cleaned = groupImageCaptions(sanitizeImportedHtml(source.body.innerHTML))
     const html = stripLeadingDuplicateTitle(cleaned, resolvedTitle)
     return [
       {
@@ -142,7 +243,7 @@ export async function parseImportFile(file: File): Promise<ContentInput[]> {
           .map((paragraph) => `<p>${paragraph.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, '<br>')}</p>`)
           .join('\n')
       : String(await marked.parse(text))
-    const cleaned = sanitizeImportedHtml(source)
+    const cleaned = groupImageCaptions(sanitizeImportedHtml(source))
     const heading = new DOMParser().parseFromString(cleaned, 'text/html').querySelector('h1')?.textContent?.trim()
     const resolvedTitle = heading || title
     const html = stripLeadingDuplicateTitle(cleaned, resolvedTitle)

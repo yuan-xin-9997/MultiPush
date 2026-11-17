@@ -11,6 +11,9 @@ import type { WechatService } from '../src/wechat'
 import type { ZhihuService } from '../src/zhihu'
 import type { WeiboService } from '../src/weibo'
 import type { ToutiaoService } from '../src/toutiao'
+import type { DoubanService } from '../src/douban'
+import type { JuejinService } from '../src/juejin'
+import type { JianshuService } from '../src/jianshu'
 
 const cleanups: Array<() => Promise<void> | void> = []
 
@@ -38,9 +41,18 @@ function setup() {
   const blog = { publish: vi.fn() } as unknown as BlogService
   const weibo = { publish: vi.fn() } as unknown as WeiboService
   const toutiao = { publish: vi.fn() } as unknown as ToutiaoService
-  const service = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao)
+  const douban = {
+    publish: vi.fn(async (userId: string, input: { renderId: string; mode?: 'draft' | 'publish' }) => {
+      const publication = database.createDoubanPublication(userId, { renderId: input.renderId, title: '批量文章', mode: input.mode === 'draft' ? 'draft' : 'publish', idempotencyKey: `batch-douban-${Math.random()}` })
+      database.updateDoubanPublication(userId, publication.id, input.mode === 'draft' ? { status: 'draft', message: '豆瓣本地草稿' } : { status: 'published', message: '豆瓣日记已发布', remoteId: '987654321', url: 'https://www.douban.com/note/987654321/' })
+      return database.getDoubanPublication(userId, publication.id)!
+    }),
+  } as unknown as DoubanService
+  const juejin = { publish: vi.fn() } as unknown as JuejinService
+  const jianshu = { publish: vi.fn() } as unknown as JianshuService
+  const service = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao, douban, juejin, jianshu)
   cleanups.push(async () => { await service.close(); database.close(); rmSync(directory, { recursive: true, force: true }) })
-  return { directory, config, uploadsDir: config.uploadsDir, database, user, content, service, wechat }
+  return { directory, config, uploadsDir: config.uploadsDir, database, user, content, service, wechat, douban }
 }
 
 afterEach(() => { for (const cleanup of cleanups.splice(0)) void cleanup() })
@@ -59,6 +71,16 @@ describe('Batch render and publish', () => {
     expect(done.items[0]).toMatchObject({ status: 'done', contentId: content.id })
     expect(done.items[0].renderId).toBeTruthy()
     expect(database.listRenders(user.id)).toHaveLength(1)
+  })
+
+  it('publishes a batch to Douban in draft or publish mode', async () => {
+    const { database, user, content, service, douban } = setup()
+    const job = service.createPublishJob(user.id, { contentIds: [content.id], platform: 'douban', mode: 'draft' }, 'http://127.0.0.1:34080')
+    const done = await wait(service, user.id, job.id)
+    expect(done).toMatchObject({ status: 'completed', total: 1, done: 1 })
+    expect(done.items[0]).toMatchObject({ status: 'done', publicationStatus: 'draft' })
+    expect(douban.publish).toHaveBeenCalledWith(user.id, expect.objectContaining({ renderId: expect.any(String), mode: 'draft' }))
+    expect(database.listDoubanPublications(user.id)).toHaveLength(1)
   })
 
   it('waits for each publication to finish and records the platform result', async () => {

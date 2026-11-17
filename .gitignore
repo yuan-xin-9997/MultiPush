@@ -16,3 +16,6 @@ artifacts/
 desktop/release/
 desktop/server/
 desktop/web-dist/
+
+# Generated publisher session encryption keys (must stay local)
+**/.*-session-key

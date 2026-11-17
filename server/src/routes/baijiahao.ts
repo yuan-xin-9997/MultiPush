@@ -5,7 +5,7 @@ import { asyncHandler } from '../errors'
 import { parseInput } from '../validation'
 import type { BaijiahaoService } from '../baijiahao'
 
-const schema = z.object({ renderId: z.uuid() }).strict()
+const schema = z.object({ renderId: z.uuid(), mode: z.enum(['draft', 'publish']).optional() }).strict()
 const resolveSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('check') }).strict(),
   z.object({ action: z.literal('not_published') }).strict(),

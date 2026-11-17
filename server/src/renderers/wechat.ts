@@ -3,6 +3,7 @@ import { getPlatformInfo } from '../../../shared/types'
 import type { PlatformRender } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
 import { normalizeArticleLists as normalizeWechatLists } from './article-normalization'
+import { isFigureCaptionText } from '../../../shared/figure-caption'
 export { normalizeArticleLists as normalizeWechatLists } from './article-normalization'
 import {
   ARTICLE_WRAPPER_STYLE,
@@ -23,13 +24,37 @@ function setWechatMargins(element: ReturnType<CheerioAPI>, overrides: { top?: st
   sides[0] = overrides.top ?? sides[0]
   sides[2] = overrides.bottom ?? sides[2]
   // Native editors need one margin declaration rather than shorthand/longhand overrides.
-  const style = (element.attr('style') || '').split(';').filter(part => !/^\s*margin(?:-(?:top|right|bottom|left))?\s*:/i.test(part)).join(';')
-  element.attr('style', style).css('margin', sides.join(' '))
+  const style = (element.attr('style') || '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part && !/^margin(?:-(?:top|right|bottom|left))?\s*:/i.test(part))
+    .join(';')
+  const [topValue, rightValue, bottomValue, leftValue] = sides
+  let serialized = sides.join(' ')
+  if (rightValue === leftValue) {
+    serialized = topValue === bottomValue
+      ? topValue === rightValue ? topValue : `${topValue} ${rightValue}`
+      : `${topValue} ${rightValue} ${bottomValue}`
+  }
+  element.attr('style', `${style ? `${style};` : ''}margin:${serialized};`)
 }
 
 export function normalizeWechatCaptions($: CheerioAPI): void {
+  // Canonical figure: one outer margin, zero image margin, an 8px caption gap.
+  $('figure').each((_, node) => {
+    const figure = $(node)
+    const image = figure.children('img').first()
+    const caption = figure.children('figcaption').first()
+    if (!image.length) return
+    setWechatMargins(figure, { top: '20px', bottom: '20px' })
+    setWechatMargins(image, { top: '0', bottom: '0' })
+    if (caption.length) setWechatMargins(caption, { top: '8px' })
+  })
+
+  // Compatibility for a platform adjustment that still contains legacy p+p.
   $('img').each((_, node) => {
     const image = $(node)
+    if (image.closest('figure').length) return
     const parent = image.closest('p,section')
     const block = parent.length && parent.find('img').length === 1 && !parent.text().trim()
       && !parent.find('video,audio,iframe,table,hr').length ? parent : image
@@ -39,7 +64,9 @@ export function normalizeWechatCaptions($: CheerioAPI): void {
       spacers.push(caption)
       caption = caption.next()
     }
-    if (!caption.is('figcaption') && !(caption.is('p,section') && /^(?:图\s*[0-9一二三四五六七八九十百]+|fig(?:ure)?\.?\s*\d+)(?:\s|[:：.．、-]|$)/i.test(caption.text().trim()))) return
+    const captionText = caption.text().trim()
+    if (!caption.is('figcaption') && !(caption.is('p,section') && (isFigureCaptionText(captionText)
+      || /^(?:图\s*[0-9一二三四五六七八九十百]+|fig(?:ure)?\.?\s*\d+)(?:\s|[:：.．、-]|$)/i.test(captionText)))) return
     // Image and paragraph margins must not add up to a blank line before a caption.
     for (const spacer of spacers) spacer.remove()
     setWechatMargins(image, { bottom: '0' })
@@ -80,6 +107,7 @@ const WECHAT_STYLES: Record<string, string> = {
   th: 'border:1px solid #d9e7de;background-color:#f0faf4;padding:10px 12px;text-align:left;font-weight:600;vertical-align:top;',
   td: 'border:1px solid #e5e7eb;padding:10px 12px;text-align:left;vertical-align:top;',
   img: 'display:block;max-width:100%;height:auto;border-radius:8px;margin:20px auto;',
+  'figure img': 'display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;',
   video:
     'display:block;width:100%;max-width:100%;height:auto;border-radius:8px;margin:20px 0;background-color:#000;',
   figure: 'margin:20px 0;',

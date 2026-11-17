@@ -17,6 +17,9 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/weibo     微博扫码登录、发布与核实
   ├─ routes/toutiao   今日头条扫码登录、文章发布与核实
   ├─ routes/baijiahao 百家号扫码登录、文章发布与核实
+  ├─ routes/douban    豆瓣日记扫码登录、图片转存、发布与核实
+  ├─ routes/juejin    掘金扫码登录、草稿/文章发布与核实
+  ├─ routes/jianshu   简书 Cookie 连接、草稿/文章发布与核实
   ├─ routes/ai        AI 配置、会话、消息与工具调用
   ├─ routes/batch     批量渲染 / 批量发布任务
   ├─ ai.ts            OpenAI 兼容模型客户端与业务工具
@@ -37,6 +40,9 @@ Express (single Node process, 0.0.0.0:34080)
 | `weibo_*` | accounts / publications / resolutions | 微博会话、发布记录与人工核实 |
 | `toutiao_*` | accounts / publications / resolutions | 今日头条会话、文章发布记录与人工核实 |
 | `baijiahao_*` | accounts / publications / resolutions | 百家号会话、文章发布记录与人工核实 |
+| `douban_*` | accounts / publications / resolutions | 豆瓣会话、日记发布记录与人工核实 |
+| `juejin_*` | accounts / publications / resolutions | 掘金会话、草稿/文章发布记录与人工核实 |
+| `jianshu_*` | accounts / publications / resolutions | 简书会话、草稿/文章发布记录与人工核实 |
 | `ai_settings` | user_id, encrypted_api_key, base_url, model, temperature | 每用户大模型配置；Key AES-256-GCM 加密 |
 | `ai_sessions` / `ai_messages` | id, user_id, title / session_id, role, content, tool_calls_json, tool_result_json | AI 会话、消息与工具轨迹 |
 | `batch_jobs` | id, user_id, kind, status, total, done, input_json, items_json | 批量渲染/发布任务与每项进度 |
@@ -48,7 +54,7 @@ Express (single Node process, 0.0.0.0:34080)
 1. `POST /api/renders` 校验平台列表和内容归属。
 2. 读取 `ContentDetail`（Tiptap JSON + HTML）与用户显示名。
 3. 构造 `RenderInput`：`content`、`platforms`、`options`、`authorName`、`baseUrl`。
-4. `renderPlatforms()` 分派到 `wechat.ts` / `xiaohongshu.ts` / `zhihu.ts` / `douyin.ts` / `sspai.ts` / `blog.ts`：
+4. `renderPlatforms()` 分派到 `wechat.ts` / `xiaohongshu.ts` / `zhihu.ts` / `weibo.ts` / `toutiao.ts` / `baijiahao.ts` / `douban.ts` / `juejin.ts` / `jianshu.ts` / `douyin.ts` / `sspai.ts` / `blog.ts`：
    - HTML 清洗（sanitize-html），相对媒体 URL 转绝对；
    - 提取图片/视频、纯文本、字数、标签；
    - 按平台规则排版，生成 `PlatformRender`（HTML、Markdown、文案、卡片数据、下载内容、警告）。

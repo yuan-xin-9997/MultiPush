@@ -5,7 +5,7 @@ import { asyncHandler } from '../errors'
 import { parseInput } from '../validation'
 import type { DouyinService } from '../douyin'
 
-const schema = z.object({ renderId: z.uuid(), mode: z.literal('publish'), imageMediaIds: z.array(z.uuid()).min(1).max(35).optional(), videoMediaId: z.uuid().optional() }).strict()
+const schema = z.object({ renderId: z.uuid(), mode: z.enum(['draft', 'publish']), imageMediaIds: z.array(z.uuid()).min(1).max(35).optional(), videoMediaId: z.uuid().optional() }).strict()
 const resolveSchema = z.discriminatedUnion('action', [z.object({ action: z.literal('check') }).strict(), z.object({ action: z.literal('not_published') }).strict(), z.object({ action: z.literal('published'), articleUrl: z.string().trim().min(1).max(2048) }).strict()])
 
 export function createDouyinRouter(service: DouyinService): Router {

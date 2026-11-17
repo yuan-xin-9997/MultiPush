@@ -3670,6 +3670,9 @@
 .render-article-editor { border: 1px solid #dfe3e8; border-radius: 8px; padding: 18px; max-height: 460px; overflow: auto; line-height: 1.8; }
 .render-article-editor .tiptap { min-height: 200px; outline: none; }
 .render-article-editor img, .render-article-editor video { max-width: 100%; }
+.render-article-editor figure { margin: 20px 0; }
+.render-article-editor figure img { margin: 0 auto; }
+.render-article-editor figcaption { margin-top: 8px; text-align: center; color: #8a8f99; font-size: 13px; line-height: 1.6; }
 .render-article-editor table { border-collapse: collapse; width: 100%; }
 .render-article-editor th, .render-article-editor td { border: 1px solid #ddd; padding: 6px; }
 .render-card-editor { display: grid; gap: 12px; min-width: 0; }

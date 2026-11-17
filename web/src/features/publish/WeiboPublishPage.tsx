@@ -27,7 +27,8 @@ export default function WeiboPublishPage() {
   const [submitting, setSubmitting] = useState(false)
   const [refreshing, setRefreshing] = useState(true)
   const [error, setError] = useState('')
-  const [confirmation, setConfirmation] = useState<'publish' | 'disconnect' | null>(null)
+  const [mode, setMode] = useState<'draft' | 'publish'>('publish')
+  const [confirmation, setConfirmation] = useState<'draft' | 'publish' | 'disconnect' | null>(null)
   const [resolveItem, setResolveItem] = useState<WeiboPublication | null>(null)
   const [resolveChoice, setResolveChoice] = useState<'not_published' | 'published' | null>(null)
   const [resolveUrl, setResolveUrl] = useState('')
@@ -117,7 +118,7 @@ export default function WeiboPublishPage() {
     if (!record || !ready) return
     setSubmitting(true); setError('')
     try {
-      const result = await api.weibo.publish({ renderId: record.id })
+      const result = await api.weibo.publish({ renderId: record.id, mode })
       if (!mounted.current) return
       setPublications(current => [result.publication, ...current.filter(item => item.id !== result.publication.id)])
       setConfirmation(null)
@@ -161,8 +162,10 @@ export default function WeiboPublishPage() {
       {recordLoading ? <p className="publish-muted"><LoaderCircle size={15} className="spin" />正在读取排版…</p> : article ? <>
         <div className="publish-article-title"><FileText size={16} /><strong>{article.title}</strong><button type="button" className="btn btn-sm" onClick={() => navigate(`/render?renderId=${encodeURIComponent(selectedId)}`)}>检查排版<ArrowRight size={13} /></button></div>
         <p className="publish-warning">微博会以图文形式发布：标题作为首行，正文保留，标签转换为 #话题#，最多上传 9 张图片。发布前请确认内容没有超过微博限制。</p>
+        <div className="publish-mode-switch" role="group" aria-label="发布方式"><button type="button" className={`btn ${mode === 'draft' ? 'btn-primary' : ''}`} disabled={busy} onClick={() => setMode('draft')}>保存草稿</button><button type="button" className={`btn ${mode === 'publish' ? 'btn-primary' : ''}`} disabled={busy} onClick={() => setMode('publish')}>直接发布</button></div>
+        <p className="publish-warning"><ShieldCheck size={14} /> 微博网页端没有草稿箱，草稿会保存在 MultiPush 本地，可在渲染页复制文案/图片后到微博手动发布。</p>
         {uncertain ? <div className="publish-warning"><p>这篇内容有结果待核实的微博任务。请先核实发布结果，再决定是否重新提交。</p><button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(publications.find(item => item.renderId === selectedId && item.status === 'uncertain')!)}>核实结果</button></div> : null}
-        <div className="publish-submit-actions"><button type="button" className="btn btn-primary" disabled={!ready} onClick={() => setConfirmation('publish')}>{submitting || processing ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}发布到微博</button></div>
+        <div className="publish-submit-actions"><button type="button" className="btn btn-primary" disabled={!ready} onClick={() => setConfirmation(mode)}>{submitting || processing ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}{mode === 'draft' ? '保存微博草稿' : '发布到微博'}</button></div>
         <p className="publish-form-hint" role="status">{account?.status !== 'connected' ? '请先扫码连接微博。' : busy ? '任务正在处理，请在下方查看进度。' : '发布后内容会公开显示在你的微博主页。'}</p>
       </> : null}
     </section><aside className="publish-panel publish-preview-panel"><div className="publish-section-head"><h2>微博预览</h2><p>以微博实际展示和审核结果为准。</p></div>{article ? <div className="weibo-publish-preview"><h3>{article.title}</h3><p>{article.captionBody ?? article.text}</p>{article.assets.filter(item => item.kind === 'image').slice(0, 9).map(item => <img key={item.url} src={absoluteUrl(item.url)} alt="" />)}</div> : <div className="publish-empty"><p>选择内容后预览微博文案</p></div>}</aside></div>
@@ -181,7 +184,7 @@ export default function WeiboPublishPage() {
       {resolveBusy ? <p className="publish-muted"><LoaderCircle size={15} className="spin" />正在保存核实结果…</p> : null}
       {resolveError ? <p className="publish-failure-message" role="alert">{resolveError}</p> : null}
     </Modal>
-    <ConfirmDialog open={confirmation === 'publish'} title="发布到微博？" description={<><strong>{article?.title}</strong><p>将发布至「{account?.name || '已连接微博账号'}」，内容会公开显示在你的微博主页。</p></>} confirmLabel="确认发布到微博" tone="primary" loading={submitting} onConfirm={() => publish()} onClose={() => setConfirmation(null)} />
+    <ConfirmDialog open={confirmation === 'draft' || confirmation === 'publish'} title={confirmation === 'draft' ? '保存微博草稿？' : '发布到微博？'} description={<><strong>{article?.title}</strong><p>{confirmation === 'draft' ? '微博网页端没有草稿箱，草稿将保存在 MultiPush，供后续复制或导出使用。' : `将发布至「${account?.name || '已连接微博账号'}」，内容会公开显示在你的微博主页。`}</p></>} confirmLabel={confirmation === 'draft' ? '保存本地草稿' : '确认发布到微博'} tone="primary" loading={submitting} onConfirm={() => publish()} onClose={() => setConfirmation(null)} />
     <ConfirmDialog open={confirmation === 'disconnect'} title="断开微博连接？" description="删除系统保存的微博登录状态，下次发布需要重新扫码。微博上的内容保持不变。" confirmLabel="断开连接" loading={submitting} onConfirm={disconnect} onClose={() => setConfirmation(null)} />
   </div>
 }

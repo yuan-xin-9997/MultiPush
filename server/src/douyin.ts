@@ -163,11 +163,11 @@ export class DouyinService {
       try { buffer = await readFile(path.join(this.config.uploadsDir, media.filename)) }
       catch { throw new ApiError(400, 'douyin_video_invalid', '视频文件丢失，请重新上传') }
       if (buffer.length > 200 * 1024 * 1024 || buffer.subarray(4, 8).toString() !== 'ftyp') throw new ApiError(400, 'douyin_video_invalid', '无效的 MP4 视频')
-      return { title, body, images, video: { name: media.filename, mimeType: media.mimeType, buffer } }
+      return { title, body, mode: input.mode === 'draft' ? 'draft' : 'publish', images, video: { name: media.filename, mimeType: media.mimeType, buffer } }
     }
     if (!input.imageMediaIds?.length || input.imageMediaIds.length > 35) throw new ApiError(400, 'douyin_images_invalid', '请选择 1–35 张图片或一个视频')
     for (const [index, id] of input.imageMediaIds.entries()) images.set(String(index), await this.image(userId, id))
-    return { title, body, images }
+    return { title, body, mode: input.mode === 'draft' ? 'draft' : 'publish', images }
   }
 
   list(userId: string): DouyinPublication[] { return this.database.listDouyinPublications(userId) }

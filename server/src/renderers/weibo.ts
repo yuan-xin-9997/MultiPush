@@ -43,6 +43,7 @@ const WEIBO_STYLES: Record<string, string> = {
   th: 'border:1px solid #eadfd2;background-color:#fff7ec;padding:10px 12px;text-align:left;font-weight:600;vertical-align:top;',
   td: 'border:1px solid #ececec;padding:10px 12px;text-align:left;vertical-align:top;',
   img: 'display:block;max-width:100%;height:auto;border-radius:10px;margin:20px auto;',
+  'figure img': 'display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;',
   figure: 'margin:20px 0;',
   figcaption: 'margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;',
   hr: 'border:none;border-top:1px solid #ececec;margin:28px 0;',

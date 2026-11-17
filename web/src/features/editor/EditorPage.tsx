@@ -67,12 +67,13 @@ import { toast } from 'sonner'
 import type { Book, ContentDetail, ContentStatus, RichTextJson } from '@shared/types'
 import { api, absoluteUrl } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
-import { exportContentFile, type ExportFormat } from '@/lib/content-io'
+import { exportContentFile, groupImageCaptions, type ExportFormat } from '@/lib/content-io'
 import { cn, formatDateTime, safeFilename } from '@/lib/utils'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Dropdown from '@/components/Dropdown'
 import Logo from '@/components/Logo'
 import Modal from '@/components/Modal'
+import { Figure, FigureCaption, NormalizeFigureCaptions, normalizeEditorFigures } from './figure'
 import './editor.css'
 
 const TEXT_COLORS = [
@@ -422,6 +423,9 @@ export default function EditorPage() {
       }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Image.configure({ inline: false, allowBase64: true }),
+      Figure,
+      FigureCaption,
+      NormalizeFigureCaptions,
       Table.configure({ resizable: true }),
       TableRow,
       TableHeader,
@@ -455,6 +459,11 @@ export default function EditorPage() {
         const kind = files[0].type.startsWith('video/') ? 'video' : 'image'
         void uploadFiles(files, kind)
         return true
+      },
+      transformPastedHTML(html) {
+        // Pasting rich HTML from another editor must create the same figure as
+        // Markdown import, otherwise the next save degrades it again.
+        return groupImageCaptions(html)
       },
       handleDrop(view, event, _slice, moved) {
         if (moved) return false
@@ -773,7 +782,7 @@ export default function EditorPage() {
       } else {
         setSaveState('unsaved')
       }
-      setContent((current) => (current ? { ...current, ...updated, contentJson: current.contentJson, contentHtml: current.contentHtml } : current))
+      setContent((current) => (current ? { ...current, ...updated } : current))
       return !stillDirty
     } catch (error) {
       setSaveState('error')
@@ -863,9 +872,25 @@ export default function EditorPage() {
   useEffect(() => {
     if (!editor || !content || content.id !== id) return
     if (initializedIdRef.current === content.id) return
-    const canUseJson = jsonHasContent(content.contentJson)
-    const initial = canUseJson ? content.contentJson : content.contentHtml || '<p></p>'
-    editor.commands.setContent(initial, false)
+    // A stale JSON snapshot must never win over the HTML an API client just
+    // wrote. The backend also exposes contentJsonStale, and the checksum
+    // fallback covers older databases.
+    const canUseJson = jsonHasContent(content.contentJson) && content.contentJsonStale !== true
+    const initial = canUseJson
+      ? content.contentJson
+      : groupImageCaptions(content.contentHtml || '<p></p>')
+    // Loading a legacy document is not a user edit: suppress the update
+    // handlers while setContent/normalization run, otherwise simply opening
+    // an article would auto-save it and invalidate existing render records.
+    readyRef.current = false
+    try {
+      editor.commands.setContent(initial, false)
+      // The Tiptap create event is emitted on the next tick; normalize now so
+      // the first rendered document is already canonical.
+      normalizeEditorFigures(editor)
+    } finally {
+      readyRef.current = true
+    }
     initializedIdRef.current = content.id
     initializedContentRef.current = true
     syncOutline(editor)

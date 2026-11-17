@@ -1,0 +1,142 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`figure rendering snapshots > renders blog as figure + figcaption with an 8px gap 1`] = `
+{
+  "captionsInsideParagraphs": 0,
+  "count": 3,
+  "figures": [
+    {
+      "caption": {
+        "style": "margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;",
+        "text": "图：我的器材：）",
+      },
+      "figureStyle": "margin:20px 0;",
+      "image": {
+        "alt": "器材",
+        "src": "https://example.com/uploads/one.png",
+        "style": "display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;",
+      },
+    },
+    {
+      "caption": {
+        "style": "margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;",
+        "text": "图 2：书房",
+      },
+      "figureStyle": "margin:20px 0;",
+      "image": {
+        "alt": "书房",
+        "src": "https://example.com/uploads/two.png",
+        "style": "display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;",
+      },
+    },
+    {
+      "caption": {
+        "style": "margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;",
+        "text": "图:机架与灯",
+      },
+      "figureStyle": "margin:20px 0;",
+      "image": {
+        "alt": "机架",
+        "src": "https://example.com/uploads/three.png",
+        "style": "display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;",
+      },
+    },
+  ],
+  "paragraphsInsideFigures": 0,
+  "platform": "blog",
+}
+`;
+
+exports[`figure rendering snapshots > renders wechat as figure + figcaption with an 8px gap 1`] = `
+{
+  "captionsInsideParagraphs": 0,
+  "count": 3,
+  "figures": [
+    {
+      "caption": {
+        "style": "text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;margin:8px 0 0;",
+        "text": "图：我的器材：）",
+      },
+      "figureStyle": "margin:20px 0;",
+      "image": {
+        "alt": "器材",
+        "src": "https://example.com/uploads/one.png",
+        "style": "display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;",
+      },
+    },
+    {
+      "caption": {
+        "style": "text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;margin:8px 0 0;",
+        "text": "图 2：书房",
+      },
+      "figureStyle": "margin:20px 0;",
+      "image": {
+        "alt": "书房",
+        "src": "https://example.com/uploads/two.png",
+        "style": "display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;",
+      },
+    },
+    {
+      "caption": {
+        "style": "text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;margin:8px 0 0;",
+        "text": "图:机架与灯",
+      },
+      "figureStyle": "margin:20px 0;",
+      "image": {
+        "alt": "机架",
+        "src": "https://example.com/uploads/three.png",
+        "style": "display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;",
+      },
+    },
+  ],
+  "paragraphsInsideFigures": 0,
+  "platform": "wechat",
+}
+`;
+
+exports[`figure rendering snapshots > renders zhihu as figure + figcaption with an 8px gap 1`] = `
+{
+  "captionsInsideParagraphs": 0,
+  "count": 3,
+  "figures": [
+    {
+      "caption": {
+        "style": "margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;",
+        "text": "图：我的器材：）",
+      },
+      "figureStyle": "margin:20px 0;",
+      "image": {
+        "alt": "器材",
+        "src": "https://example.com/uploads/one.png",
+        "style": "display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;",
+      },
+    },
+    {
+      "caption": {
+        "style": "margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;",
+        "text": "图 2：书房",
+      },
+      "figureStyle": "margin:20px 0;",
+      "image": {
+        "alt": "书房",
+        "src": "https://example.com/uploads/two.png",
+        "style": "display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;",
+      },
+    },
+    {
+      "caption": {
+        "style": "margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;",
+        "text": "图:机架与灯",
+      },
+      "figureStyle": "margin:20px 0;",
+      "image": {
+        "alt": "机架",
+        "src": "https://example.com/uploads/three.png",
+        "style": "display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;",
+      },
+    },
+  ],
+  "paragraphsInsideFigures": 0,
+  "platform": "zhihu",
+}
+`;

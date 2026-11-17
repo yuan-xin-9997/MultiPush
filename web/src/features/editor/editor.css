@@ -687,6 +687,22 @@
   border-top: 1px solid var(--line);
 }
 
+.editor-prose figure {
+  margin: 24px 0;
+}
+
+.editor-prose figure img {
+  margin: 0 auto;
+}
+
+.editor-prose figcaption {
+  margin-top: 8px;
+  text-align: center;
+  color: #8a8f99;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .editor-prose img {
   display: block;
   max-width: 100%;

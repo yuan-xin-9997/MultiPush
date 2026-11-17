@@ -89,6 +89,15 @@ describe('Weibo publishing', () => {
     expect(driver.publish).toHaveBeenCalledTimes(1)
   })
 
+  it('saves a local draft without calling the Weibo driver', async () => {
+    const { service, alice, driver, image, article } = setup()
+    image()
+    const render = await article()
+    const publication = await service.publish(alice.id, { renderId: render.id, mode: 'draft' }, 'http://127.0.0.1:34080')
+    expect(service.get(alice.id, publication.id)).toMatchObject({ status: 'draft', mode: 'draft' })
+    expect(driver.publish).not.toHaveBeenCalled()
+  })
+
   it('rejects cross-user renders and blocks new publishes while a result is uncertain', async () => {
     const { service, alice, bob, driver, image, article } = setup()
     image()

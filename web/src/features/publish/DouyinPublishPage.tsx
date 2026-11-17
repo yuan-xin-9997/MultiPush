@@ -20,6 +20,7 @@ export default function DouyinPublishPage() {
   const [loginOpen, setLoginOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [mode, setMode] = useState<'draft' | 'publish'>('publish')
   const [confirm, setConfirm] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DouyinPublication | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
@@ -88,7 +89,7 @@ export default function DouyinPublishPage() {
     setBusy(true); setError(''); setConfirm(false)
     try {
       const input = media[0].kind === 'video' ? { videoMediaId: media[0].id } : { imageMediaIds: media.map(item => item.id) }
-      const result = await api.douyin.publish({ renderId: selectedId, mode: 'publish', ...input })
+      const result = await api.douyin.publish({ renderId: selectedId, mode, ...input })
       setPublications(current => [result.publication, ...current.filter(item => item.id !== result.publication.id)])
     } catch (cause) { setError(getErrorMessage(cause)) }
     finally { setBusy(false) }
@@ -118,12 +119,13 @@ export default function DouyinPublishPage() {
     <section className="publish-account"><div className="publish-account-copy"><h2>{account?.name || '抖音账号'}</h2><p>{account?.status === 'connected' ? '已连接，登录会话已加密保存，服务重启后可复用。' : account?.status === 'expired' ? '登录已过期，请重新扫码。' : '使用抖音 App 扫描官方二维码并确认登录。'}</p></div><button className="btn btn-primary" disabled={locked} onClick={() => void connect()}>扫码连接抖音</button>{account?.status === 'connected' ? <button className="btn" disabled={locked} onClick={async () => { setBusy(true); try { await api.douyin.disconnect(); await refresh() } catch (cause) { setError(getErrorMessage(cause)) } finally { setBusy(false) } }}>断开连接</button> : null}</section>
     <section className="publish-panel"><h2>准备发布</h2><label className="publish-field">选择抖音排版<select className="input" disabled={locked} value={selectedId} onChange={event => setParams({ platform: 'douyin', renderId: event.target.value })}><option value="">请选择内容</option>{renders.map(item => <option key={item.id} value={item.id}>{item.contentTitle}</option>)}</select></label><Link to="/render">前往渲染工作台</Link>
       {article ? <><h3>{article.title}</h3><p className="publish-muted">标题最多 30 字；正文与话题最多 1000 字。请在渲染工作台调整后保存。</p><pre style={{ whiteSpace: 'pre-wrap' }}>{article.text}</pre><label className="publish-field">作品素材（一个 MP4 视频，或按顺序选择 1–35 张图片）<input type="file" multiple accept="video/mp4,image/png,image/jpeg,image/webp,image/gif" disabled={locked} onChange={event => { void upload(Array.from(event.target.files || [])); event.target.value = '' }} /></label><p>{media.length ? `已准备 ${media.length} 个素材` : '请选择要发布的素材'}</p>{media.length ? <ol>{media.map(item => <li key={item.id}>{item.originalName || item.id}</li>)}</ol> : null}</> : null}
+      <div className="publish-mode-switch" role="group" aria-label="发布方式"><button type="button" className={`btn ${mode === 'draft' ? 'btn-primary' : ''}`} disabled={locked} onClick={() => setMode('draft')}>保存草稿</button><button type="button" className={`btn ${mode === 'publish' ? 'btn-primary' : ''}`} disabled={locked} onClick={() => setMode('publish')}>直接发布</button></div>
       <p className="publish-warning">遇到安全验证会停止；结果待核实时请先检查抖音后台，系统不会自动重发。发布后仍需平台审核。</p>
-      <button className="btn btn-primary" disabled={!ready} onClick={() => setConfirm(true)}>{locked ? '正在处理…' : '发布到抖音'}</button>
+      <button className="btn btn-primary" disabled={!ready} onClick={() => setConfirm(true)}>{locked ? '正在处理…' : mode === 'draft' ? '保存到抖音草稿箱' : '发布到抖音'}</button>
     </section>
-    <section className="publish-panel"><h2>发布记录</h2>{!publications.length ? <p>暂无发布记录</p> : publications.map(item => <div key={item.id} className="publish-record"><strong>{item.title}</strong><p>{labels[item.status]} · {item.message}</p><small>{formatDateTime(item.createdAt)}</small>{item.url && /^https:\/\/www\.douyin\.com\/video\/\d{10,30}$/.test(item.url) ? <a href={item.url} target="_blank" rel="noreferrer">查看作品</a> : null}{item.status === 'uncertain' ? <div><button className="btn" disabled={locked} onClick={() => void resolve(item, true)}>已核实发布成功</button><button className="btn" disabled={locked} onClick={() => void resolve(item, false)}>已核实未发布</button></div> : null}{['failed', 'draft'].includes(item.status) ? <button className="btn" disabled={locked || deleteBusy} onClick={() => setDeleteTarget(item)}>删除记录</button> : null}</div>)}</section>
+    <section className="publish-panel"><h2>发布记录</h2>{!publications.length ? <p>暂无发布记录</p> : publications.map(item => <div key={item.id} className="publish-record"><strong>{item.title}</strong><p>{labels[item.status]} · {item.message}</p><small>{formatDateTime(item.createdAt)}</small>{(item.url && /^https:\/\/www\.douyin\.com\/video\/\d{10,30}$/.test(item.url)) || item.status === 'draft' ? <a href={item.url ?? 'https://creator.douyin.com/creator-micro/content/upload'} target="_blank" rel="noreferrer">{item.status === 'draft' ? '打开草稿箱' : '查看作品'}</a> : null}{item.status === 'uncertain' ? <div><button className="btn" disabled={locked} onClick={() => void resolve(item, true)}>已核实发布成功</button><button className="btn" disabled={locked} onClick={() => void resolve(item, false)}>已核实未发布</button></div> : null}{['failed', 'draft'].includes(item.status) ? <button className="btn" disabled={locked || deleteBusy} onClick={() => setDeleteTarget(item)}>删除记录</button> : null}</div>)}</section>
     <Modal open={loginOpen} onClose={() => setLoginOpen(false)} title="扫码连接抖音"><p>{login?.message || '正在获取官方二维码…'}</p>{login?.qrCode ? <img src={login.qrCode} alt="抖音官方登录二维码" style={{ width: 260, maxWidth: '100%' }} /> : null}<button className="btn" disabled={locked} onClick={() => void connect()}>重新获取二维码</button></Modal>
-    <ConfirmDialog open={confirm} title="确认发布到抖音" description="将所选素材和上方文案提交到当前抖音账号，提交后进入平台审核。" confirmLabel="确认发布" tone="primary" onConfirm={() => void publish()} onClose={() => setConfirm(false)} />
-    <ConfirmDialog open={!!deleteTarget} title="删除抖音发布记录？" description={<><strong>{deleteTarget?.title}</strong><p>抖音当前只支持直接发布，没有草稿箱；此操作只删除本系统里这条失败的发布记录，不会删除已经发布的作品。</p></>} confirmLabel="删除记录" loading={deleteBusy} onConfirm={deletePublication} onClose={() => setDeleteTarget(null)} />
+    <ConfirmDialog open={confirm} title={mode === 'draft' ? '确认保存抖音草稿' : '确认发布到抖音'} description={mode === 'draft' ? '将所选素材和上方文案保存到当前抖音账号的草稿箱，不会提交审核。' : '将所选素材和上方文案提交到当前抖音账号，提交后进入平台审核。'} confirmLabel={mode === 'draft' ? '确认保存草稿' : '确认发布'} tone="primary" onConfirm={() => void publish()} onClose={() => setConfirm(false)} />
+    <ConfirmDialog open={!!deleteTarget} title="删除抖音发布记录？" description={<><strong>{deleteTarget?.title}</strong><p>此操作只删除本系统里这条失败/草稿发布记录，不会删除抖音草稿箱或已经发布的作品。</p></>} confirmLabel="删除记录" loading={deleteBusy} onConfirm={deletePublication} onClose={() => setDeleteTarget(null)} />
   </div>
 }

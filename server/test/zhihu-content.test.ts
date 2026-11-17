@@ -20,7 +20,7 @@ describe('Zhihu native article formatting', () => {
     const html = prepareZhihuContent(source), $ = load(html)
     expect($('figure').length).toBe(1)
     expect($('figure > img').length).toBe(1)
-    expect($('figure > figcaption em').text()).toBe('图 1：说明')
+    expect($('figure > figcaption').text()).toBe('图 1：说明')
     expect($('figure').next().is('ul')).toBe(true)
     expect($('li').length).toBe(3)
     expect($('ol').attr('start')).toBe('3')

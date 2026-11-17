@@ -1,6 +1,7 @@
 import { load } from 'cheerio'
 import { ApiError } from './errors'
 import { normalizeArticleLists } from './renderers/article-normalization'
+import { normalizeFigureCaptions } from './renderers/figure-captions'
 
 export function zhihuImageUrl(value: unknown): string | null {
   try {
@@ -14,6 +15,7 @@ export function prepareZhihuContent(html: string): string {
   const $ = load(html, null, false)
   $('script,noscript,style,meta,link').remove()
   normalizeArticleLists($)
+  normalizeFigureCaptions($)
   $('section').each((_, node) => { node.name = 'div' })
   $('img').each((_, node) => {
     const image = $(node)

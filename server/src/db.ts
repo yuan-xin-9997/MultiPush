@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { contentHtmlHash, jsonHasContent } from './tiptap-html'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -33,6 +34,12 @@ import type {
   ToutiaoResolution,
   BaijiahaoPublication,
   BaijiahaoResolution,
+  DoubanPublication,
+  DoubanResolution,
+  JuejinPublication,
+  JuejinResolution,
+  JianshuPublication,
+  JianshuResolution,
   AiMessage,
   AiSession,
   AiToolCall,
@@ -158,6 +165,9 @@ export interface ContentWriteValues {
   wordCount: number
   imageCount: number
   videoCount: number
+  /** Leave unset to hash contentHtml; set explicitly to preserve the mismatch. */
+  contentHtmlHash?: string
+  contentJsonStale?: boolean
 }
 
 export interface ContentListOptions {
@@ -232,6 +242,27 @@ export interface CreateBatchJobValues {
 
 export type UpdateBatchJobValues = Partial<Pick<BatchJob, 'status' | 'done' | 'message' | 'items'>>
 
+export interface CreateDoubanPublicationValues {
+  renderId: string
+  title: string
+  mode: DoubanPublication['mode']
+  idempotencyKey: string
+}
+
+export interface CreateJuejinPublicationValues {
+  renderId: string
+  title: string
+  mode: JuejinPublication['mode']
+  idempotencyKey: string
+}
+
+export interface CreateJianshuPublicationValues {
+  renderId: string
+  title: string
+  mode: JianshuPublication['mode']
+  idempotencyKey: string
+}
+
 export interface CreateWechatPublicationValues {
   renderId: string
   title: string
@@ -299,6 +330,8 @@ export class Database {
         excerpt TEXT NOT NULL DEFAULT '',
         content_json TEXT NOT NULL DEFAULT '{}',
         content_html TEXT NOT NULL DEFAULT '',
+        content_html_hash TEXT,
+        content_json_stale INTEGER NOT NULL DEFAULT 0,
         cover_image TEXT,
         tags_json TEXT NOT NULL DEFAULT '[]',
         status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'ready')),
@@ -687,8 +720,112 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_baijiahao_resolutions_publication ON baijiahao_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 13;
+      CREATE TABLE IF NOT EXISTS douban_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_session TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS douban_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'publish',
+        status TEXT NOT NULL CHECK (status IN ('running', 'draft', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_douban_publications_user_created ON douban_publications(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS douban_publication_resolutions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL REFERENCES douban_publications(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN ('check', 'not_published', 'published')),
+        message TEXT NOT NULL,
+        article_url TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_douban_resolutions_publication ON douban_publication_resolutions(publication_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS juejin_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_session TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS juejin_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('draft', 'publish')),
+        status TEXT NOT NULL CHECK (status IN ('running', 'draft', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_juejin_publications_user_created ON juejin_publications(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS juejin_publication_resolutions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL REFERENCES juejin_publications(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN ('check', 'not_published', 'published')),
+        message TEXT NOT NULL,
+        article_url TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_juejin_resolutions_publication ON juejin_publication_resolutions(publication_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS jianshu_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_session TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS jianshu_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('draft', 'publish')),
+        status TEXT NOT NULL CHECK (status IN ('running', 'draft', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_jianshu_publications_user_created ON jianshu_publications(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS jianshu_publication_resolutions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL REFERENCES jianshu_publications(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN ('check', 'not_published', 'published')),
+        message TEXT NOT NULL,
+        article_url TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_jianshu_resolutions_publication ON jianshu_publication_resolutions(publication_id, created_at DESC);
+      PRAGMA user_version = 17;
     `)
+    this.ensureContentSyncColumns()
+    this.ensureDoubanPublicationColumns()
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     this.run(`UPDATE douyin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先核实抖音发布结果，避免重复发布。', nowIso()])
     // Never resend an operation that may already have reached WeChat before a restart.
@@ -707,8 +844,42 @@ export class Database {
       ['服务已重启，请先核对今日头条发布结果，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE baijiahao_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
       ['服务已重启，请先核对百家号发布结果，系统不会自动重复发布。', nowIso()])
+
+    this.run(`UPDATE douban_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
+      ['服务已重启，请先核对豆瓣日记发布结果，系统不会自动重复发布。', nowIso()])
+    this.run(`UPDATE juejin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
+      ['服务已重启，请先核对掘金草稿与文章发布结果，系统不会自动重复发布。', nowIso()])
+    this.run(`UPDATE jianshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
+      ['服务已重启，请先核对简书草稿与文章发布结果，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE batch_jobs SET status = 'failed', message = ?, updated_at = ? WHERE status IN ('queued', 'running')`,
       ['服务已重启，批量任务已中断，请重新提交。', nowIso()])
+  }
+
+  /** Older Douban tables had no draft mode; add it without rewriting rows. */
+  private ensureDoubanPublicationColumns(): void {
+    const columns = new Set(this.all('PRAGMA table_info(douban_publications)').map((row) => text(row.name)))
+    if (!columns.has('mode')) this.database.exec("ALTER TABLE douban_publications ADD COLUMN mode TEXT NOT NULL DEFAULT 'publish'")
+  }
+
+  /** Additive migration: older databases keep working and are backfilled once. */
+  private ensureContentSyncColumns(): void {
+    const columns = new Set(
+      this.all('PRAGMA table_info(contents)').map((row) => text(row.name)),
+    )
+    if (!columns.has('content_html_hash')) {
+      this.database.exec('ALTER TABLE contents ADD COLUMN content_html_hash TEXT')
+    }
+    if (!columns.has('content_json_stale')) {
+      this.database.exec('ALTER TABLE contents ADD COLUMN content_json_stale INTEGER NOT NULL DEFAULT 0')
+    }
+    const missing = this.all('SELECT id, content_html FROM contents WHERE content_html_hash IS NULL OR content_html_hash = ?', [''])
+    if (missing.length > 0) {
+      this.transaction(() => {
+        for (const row of missing) {
+          this.run('UPDATE contents SET content_html_hash = ? WHERE id = ?', [contentHtmlHash(text(row.content_html)), text(row.id)])
+        }
+      })
+    }
   }
 
   private all(sql: string, params: SqlValue[] = []): Row[] {
@@ -943,10 +1114,23 @@ export class Database {
   }
 
   private mapContentDetail(row: Row): ContentDetail {
+    const contentHtml = text(row.content_html)
+    const contentJson = parseContentJson(row.content_json)
+    const storedHash = nullableText(row.content_html_hash)
+    const currentHash = contentHtmlHash(contentHtml)
+    const jsonEmpty = !jsonHasContent(contentJson)
+    // A JSON document is stale when it had content but the HTML no longer
+    // matches the checksum captured at the last synchronous save, or when the
+    // JSON is empty while HTML carries the article (legacy imports).
+    const stale = numberValue(row.content_json_stale) === 1
+      || (jsonEmpty ? contentHtml.trim().length > 0 : storedHash !== null && storedHash !== currentHash)
+      || (!jsonEmpty && storedHash === null)
     return {
       ...this.mapContentSummary(row),
-      contentJson: parseContentJson(row.content_json),
-      contentHtml: text(row.content_html),
+      contentJson,
+      contentHtml,
+      contentJsonStale: stale,
+      contentHtmlHash: storedHash ?? currentHash,
     }
   }
 
@@ -1025,9 +1209,9 @@ export class Database {
     const createdAt = nowIso()
     this.run(
       `INSERT INTO contents
-        (id, user_id, book_id, title, excerpt, content_json, content_html, cover_image, tags_json, status,
-         favorite, word_count, image_count, video_count, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        (id, user_id, book_id, title, excerpt, content_json, content_html, content_html_hash, content_json_stale,
+         cover_image, tags_json, status, favorite, word_count, image_count, video_count, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
       [
         id,
         userId,
@@ -1036,6 +1220,8 @@ export class Database {
         values.excerpt,
         JSON.stringify(values.contentJson ?? {}),
         values.contentHtml,
+        values.contentHtmlHash ?? contentHtmlHash(values.contentHtml),
+        values.contentJsonStale ? 1 : 0,
         values.coverImage,
         JSON.stringify(values.tags),
         values.status,
@@ -1055,8 +1241,9 @@ export class Database {
   updateContent(userId: string, contentId: string, values: ContentWriteValues): ContentDetail | null {
     const changes = this.run(
       `UPDATE contents SET
-        book_id = ?, title = ?, excerpt = ?, content_json = ?, content_html = ?, cover_image = ?,
-        tags_json = ?, status = ?, favorite = ?, word_count = ?, image_count = ?, video_count = ?, updated_at = ?
+        book_id = ?, title = ?, excerpt = ?, content_json = ?, content_html = ?, content_html_hash = ?,
+        content_json_stale = ?, cover_image = ?, tags_json = ?, status = ?, favorite = ?, word_count = ?,
+        image_count = ?, video_count = ?, updated_at = ?
        WHERE id = ? AND user_id = ?`,
       [
         values.bookId,
@@ -1064,6 +1251,8 @@ export class Database {
         values.excerpt,
         JSON.stringify(values.contentJson ?? {}),
         values.contentHtml,
+        values.contentHtmlHash ?? contentHtmlHash(values.contentHtml),
+        values.contentJsonStale ? 1 : 0,
         values.coverImage,
         JSON.stringify(values.tags),
         values.status,
@@ -1882,6 +2071,213 @@ export class Database {
       if (!current || !['uncertain', 'running'].includes(current.status)) return null
       this.run('INSERT INTO baijiahao_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
       return this.updateBaijiahaoPublication(userId, id, values)
+    })
+  }
+
+  getDoubanAccount(userId: string): ZhihuAccountSession | null {
+    const row = this.get('SELECT * FROM douban_accounts WHERE user_id = ?', [userId])
+    return row ? { encryptedSession: text(row.encrypted_session), accountId: text(row.account_id), name: nullableText(row.name), status: row.status === 'expired' ? 'expired' : 'connected', checkedAt: text(row.checked_at) } : null
+  }
+
+  saveDoubanAccount(userId: string, values: ZhihuAccountSession): void {
+    this.run(`INSERT INTO douban_accounts (user_id, encrypted_session, account_id, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET encrypted_session = excluded.encrypted_session,
+      account_id = excluded.account_id, name = excluded.name, status = excluded.status, checked_at = excluded.checked_at`,
+      [userId, values.encryptedSession, values.accountId, values.name, values.status, values.checkedAt])
+  }
+
+  deleteDoubanAccount(userId: string): void { this.run('DELETE FROM douban_accounts WHERE user_id = ?', [userId]) }
+
+  private mapDoubanPublication(row: Row): DoubanPublication {
+    const resolutions: DoubanResolution[] = this.all('SELECT * FROM douban_publication_resolutions WHERE publication_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 10', [text(row.id), text(row.user_id)])
+      .map(r => ({ id: text(r.id), action: r.action as DoubanResolution['action'], message: text(r.message), articleUrl: nullableText(r.article_url), createdAt: text(r.created_at) }))
+    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: (row.mode === 'draft' ? 'draft' : 'publish') as DoubanPublication['mode'], status: row.status as DoubanPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at), resolutions }
+  }
+
+  createDoubanPublication(userId: string, values: CreateDoubanPublicationValues): DoubanPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO douban_publications (id, user_id, render_id, title, mode, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?) ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+      [randomUUID(), userId, values.renderId, values.title, values.mode, '正在准备豆瓣日记发布', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findDoubanPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create Douban publication')
+    return publication
+  }
+
+  getDoubanPublication(userId: string, id: string): DoubanPublication | null {
+    const row = this.get('SELECT * FROM douban_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapDoubanPublication(row) : null
+  }
+
+  findDoubanPublication(userId: string, key: string): DoubanPublication | null {
+    const row = this.get('SELECT * FROM douban_publications WHERE user_id = ? AND idempotency_key = ?', [userId, key])
+    return row ? this.mapDoubanPublication(row) : null
+  }
+
+  hasUncertainDoubanPublication(userId: string): boolean {
+    return !!this.get("SELECT id FROM douban_publications WHERE user_id = ? AND status = 'uncertain' LIMIT 1", [userId])
+  }
+
+  listDoubanPublications(userId: string): DoubanPublication[] {
+    return this.all('SELECT * FROM douban_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapDoubanPublication(row))
+  }
+
+  updateDoubanPublication(userId: string, id: string, values: Partial<Pick<DoubanPublication, 'status' | 'message' | 'url' | 'remoteId'>>): DoubanPublication | null {
+    const current = this.getDoubanPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE douban_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getDoubanPublication(userId, id)
+  }
+
+  deleteDoubanPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM douban_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
+  resolveDoubanPublication(userId: string, id: string, action: DoubanResolution['action'], values: Pick<DoubanPublication, 'status' | 'message' | 'url' | 'remoteId'>): DoubanPublication | null {
+    return this.transaction(() => {
+      const current = this.getDoubanPublication(userId, id)
+      if (!current || !['uncertain', 'running'].includes(current.status)) return null
+      this.run('INSERT INTO douban_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
+      return this.updateDoubanPublication(userId, id, values)
+    })
+  }
+
+  getJuejinAccount(userId: string): ZhihuAccountSession | null {
+    const row = this.get('SELECT * FROM juejin_accounts WHERE user_id = ?', [userId])
+    return row ? { encryptedSession: text(row.encrypted_session), accountId: text(row.account_id), name: nullableText(row.name), status: row.status === 'expired' ? 'expired' : 'connected', checkedAt: text(row.checked_at) } : null
+  }
+
+  saveJuejinAccount(userId: string, values: ZhihuAccountSession): void {
+    this.run(`INSERT INTO juejin_accounts (user_id, encrypted_session, account_id, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET encrypted_session = excluded.encrypted_session,
+      account_id = excluded.account_id, name = excluded.name, status = excluded.status, checked_at = excluded.checked_at`,
+      [userId, values.encryptedSession, values.accountId, values.name, values.status, values.checkedAt])
+  }
+
+  deleteJuejinAccount(userId: string): void { this.run('DELETE FROM juejin_accounts WHERE user_id = ?', [userId]) }
+
+  private mapJuejinPublication(row: Row): JuejinPublication {
+    const resolutions: JuejinResolution[] = this.all('SELECT * FROM juejin_publication_resolutions WHERE publication_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 10', [text(row.id), text(row.user_id)])
+      .map(r => ({ id: text(r.id), action: r.action as JuejinResolution['action'], message: text(r.message), articleUrl: nullableText(r.article_url), createdAt: text(r.created_at) }))
+    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as JuejinPublication['mode'], status: row.status as JuejinPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at), resolutions }
+  }
+
+  createJuejinPublication(userId: string, values: CreateJuejinPublicationValues): JuejinPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO juejin_publications (id, user_id, render_id, title, mode, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?) ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+      [randomUUID(), userId, values.renderId, values.title, values.mode, '正在准备掘金发布', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findJuejinPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create Juejin publication')
+    return publication
+  }
+
+  getJuejinPublication(userId: string, id: string): JuejinPublication | null {
+    const row = this.get('SELECT * FROM juejin_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapJuejinPublication(row) : null
+  }
+
+  findJuejinPublication(userId: string, key: string): JuejinPublication | null {
+    const row = this.get('SELECT * FROM juejin_publications WHERE user_id = ? AND idempotency_key = ?', [userId, key])
+    return row ? this.mapJuejinPublication(row) : null
+  }
+
+  hasUncertainJuejinPublication(userId: string): boolean {
+    return !!this.get("SELECT id FROM juejin_publications WHERE user_id = ? AND status = 'uncertain' LIMIT 1", [userId])
+  }
+
+  listJuejinPublications(userId: string): JuejinPublication[] {
+    return this.all('SELECT * FROM juejin_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapJuejinPublication(row))
+  }
+
+  updateJuejinPublication(userId: string, id: string, values: Partial<Pick<JuejinPublication, 'status' | 'message' | 'url' | 'remoteId'>>): JuejinPublication | null {
+    const current = this.getJuejinPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE juejin_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getJuejinPublication(userId, id)
+  }
+
+  deleteJuejinPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM juejin_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
+  resolveJuejinPublication(userId: string, id: string, action: JuejinResolution['action'], values: Pick<JuejinPublication, 'status' | 'message' | 'url' | 'remoteId'>): JuejinPublication | null {
+    return this.transaction(() => {
+      const current = this.getJuejinPublication(userId, id)
+      if (!current || !['uncertain', 'running'].includes(current.status)) return null
+      this.run('INSERT INTO juejin_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
+      return this.updateJuejinPublication(userId, id, values)
+    })
+  }
+
+  getJianshuAccount(userId: string): ZhihuAccountSession | null {
+    const row = this.get('SELECT * FROM jianshu_accounts WHERE user_id = ?', [userId])
+    return row ? { encryptedSession: text(row.encrypted_session), accountId: text(row.account_id), name: nullableText(row.name), status: row.status === 'expired' ? 'expired' : 'connected', checkedAt: text(row.checked_at) } : null
+  }
+
+  saveJianshuAccount(userId: string, values: ZhihuAccountSession): void {
+    this.run(`INSERT INTO jianshu_accounts (user_id, encrypted_session, account_id, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET encrypted_session = excluded.encrypted_session,
+      account_id = excluded.account_id, name = excluded.name, status = excluded.status, checked_at = excluded.checked_at`,
+      [userId, values.encryptedSession, values.accountId, values.name, values.status, values.checkedAt])
+  }
+
+  deleteJianshuAccount(userId: string): void { this.run('DELETE FROM jianshu_accounts WHERE user_id = ?', [userId]) }
+
+  private mapJianshuPublication(row: Row): JianshuPublication {
+    const resolutions: JianshuResolution[] = this.all('SELECT * FROM jianshu_publication_resolutions WHERE publication_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 10', [text(row.id), text(row.user_id)])
+      .map(r => ({ id: text(r.id), action: r.action as JianshuResolution['action'], message: text(r.message), articleUrl: nullableText(r.article_url), createdAt: text(r.created_at) }))
+    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as JianshuPublication['mode'], status: row.status as JianshuPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at), resolutions }
+  }
+
+  createJianshuPublication(userId: string, values: CreateJianshuPublicationValues): JianshuPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO jianshu_publications (id, user_id, render_id, title, mode, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?) ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+      [randomUUID(), userId, values.renderId, values.title, values.mode, '正在准备简书发布', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findJianshuPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create Jianshu publication')
+    return publication
+  }
+
+  getJianshuPublication(userId: string, id: string): JianshuPublication | null {
+    const row = this.get('SELECT * FROM jianshu_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapJianshuPublication(row) : null
+  }
+
+  findJianshuPublication(userId: string, key: string): JianshuPublication | null {
+    const row = this.get('SELECT * FROM jianshu_publications WHERE user_id = ? AND idempotency_key = ?', [userId, key])
+    return row ? this.mapJianshuPublication(row) : null
+  }
+
+  hasUncertainJianshuPublication(userId: string): boolean {
+    return !!this.get("SELECT id FROM jianshu_publications WHERE user_id = ? AND status = 'uncertain' LIMIT 1", [userId])
+  }
+
+  listJianshuPublications(userId: string): JianshuPublication[] {
+    return this.all('SELECT * FROM jianshu_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapJianshuPublication(row))
+  }
+
+  updateJianshuPublication(userId: string, id: string, values: Partial<Pick<JianshuPublication, 'status' | 'message' | 'url' | 'remoteId'>>): JianshuPublication | null {
+    const current = this.getJianshuPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE jianshu_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getJianshuPublication(userId, id)
+  }
+
+  deleteJianshuPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM jianshu_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
+  resolveJianshuPublication(userId: string, id: string, action: JianshuResolution['action'], values: Pick<JianshuPublication, 'status' | 'message' | 'url' | 'remoteId'>): JianshuPublication | null {
+    return this.transaction(() => {
+      const current = this.getJianshuPublication(userId, id)
+      if (!current || !['uncertain', 'running'].includes(current.status)) return null
+      this.run('INSERT INTO jianshu_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
+      return this.updateJianshuPublication(userId, id, values)
     })
   }
 

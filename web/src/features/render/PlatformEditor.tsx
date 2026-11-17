@@ -22,6 +22,7 @@ import { getErrorMessage } from '@/lib/errors'
 import Modal from '@/components/Modal'
 import XhsCardView from './XhsCardView'
 import type { CardStyle } from './types'
+import { Figure, FigureCaption } from '@/features/editor/figure'
 
 const Video = Node.create({
   name: 'video', group: 'block', atom: true,
@@ -54,10 +55,10 @@ export default function PlatformEditor({ render, style, onClose, onSave }: Props
   const [uploading, setUploading] = useState(false)
   const changed = useRef(false)
   const cardText = useRef<HTMLTextAreaElement>(null)
-  const article = render.platform === 'wechat' || render.platform === 'zhihu' || render.platform === 'sspai' || render.platform === 'blog' || render.platform === 'toutiao' || render.platform === 'baijiahao'
+  const article = render.platform === 'wechat' || render.platform === 'zhihu' || render.platform === 'sspai' || render.platform === 'blog' || render.platform === 'toutiao' || render.platform === 'baijiahao' || render.platform === 'douban' || render.platform === 'juejin' || render.platform === 'jianshu'
   const editor = useEditor({
     extensions: [StarterKit, Image, Link.configure({ openOnClick: false }), Table, TableRow, TableCell, TableHeader,
-      Underline, TextStyle, Color, Highlight.configure({ multicolor: true }), TextAlign.configure({ types: ['heading', 'paragraph'] }), TaskList, TaskItem.configure({ nested: true }), Video],
+      Underline, TextStyle, Color, Highlight.configure({ multicolor: true }), TextAlign.configure({ types: ['heading', 'paragraph'] }), TaskList, TaskItem.configure({ nested: true }), Video, Figure, FigureCaption],
     content: article ? editableArticle(render.html) : '', onUpdate: () => { changed.current = true },
   })
   const card = cards[index]

@@ -33,6 +33,15 @@ import { createToutiaoRouter } from './routes/toutiao'
 import { BaijiahaoService } from './baijiahao'
 import { PlaywrightBaijiahaoDriver, type BaijiahaoDriver } from './baijiahao-browser'
 import { createBaijiahaoRouter } from './routes/baijiahao'
+import { DoubanService } from './douban'
+import { PlaywrightDoubanDriver, type DoubanDriver } from './douban-browser'
+import { createDoubanRouter } from './routes/douban'
+import { JuejinService } from './juejin'
+import { PlaywrightJuejinDriver, type JuejinDriver } from './juejin-browser'
+import { createJuejinRouter } from './routes/juejin'
+import { JianshuService } from './jianshu'
+import { PlaywrightJianshuDriver, type JianshuDriver } from './jianshu-browser'
+import { createJianshuRouter } from './routes/jianshu'
 import { SspaiService } from './sspai'
 import { PlaywrightSspaiDriver, type SspaiDriver } from './sspai-browser'
 import { createSspaiRouter } from './routes/sspai'
@@ -126,7 +135,7 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver, doubanDriver?: DoubanDriver, juejinDriver?: JuejinDriver, jianshuDriver?: JianshuDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
@@ -138,6 +147,12 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.toutiao = toutiao
   const baijiahao = new BaijiahaoService(database, config, baijiahaoDriver ?? new PlaywrightBaijiahaoDriver())
   app.locals.baijiahao = baijiahao
+  const douban = new DoubanService(database, config, doubanDriver ?? new PlaywrightDoubanDriver())
+  app.locals.douban = douban
+  const juejin = new JuejinService(database, config, juejinDriver ?? new PlaywrightJuejinDriver())
+  app.locals.juejin = juejin
+  const jianshu = new JianshuService(database, config, jianshuDriver ?? new PlaywrightJianshuDriver())
+  app.locals.jianshu = jianshu
   database.clearXhsAccounts()
   const douyin = new DouyinService(database, config, douyinDriver ?? new PlaywrightDouyinDriver())
   app.locals.douyin = douyin
@@ -145,9 +160,9 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.sspai = sspai
   const blog = new BlogService(database, config, blogDriver ?? new HaloBlogDriver())
   app.locals.blog = blog
-  const batch = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao)
+  const batch = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao, douban, juejin, jianshu)
   app.locals.batch = batch
-  const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, batch)
+  const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, batch)
   app.locals.ai = ai
   app.disable('x-powered-by')
   app.use(securityHeaders)
@@ -174,6 +189,9 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/weibo', requireAuth, createWeiboRouter(weibo))
   app.use('/api/toutiao', requireAuth, createToutiaoRouter(toutiao))
   app.use('/api/baijiahao', requireAuth, createBaijiahaoRouter(baijiahao))
+  app.use('/api/douban', requireAuth, createDoubanRouter(douban))
+  app.use('/api/juejin', requireAuth, createJuejinRouter(juejin))
+  app.use('/api/jianshu', requireAuth, createJianshuRouter(jianshu))
   app.use('/api/sspai', requireAuth, createSspaiRouter(sspai))
   app.use('/api/blog', requireAuth, createBlogRouter(blog))
   app.use('/api/ai', requireAuth, createAiRouter(ai))

@@ -34,6 +34,21 @@ import type {
   BaijiahaoPublication,
   BaijiahaoPublishInput,
   BaijiahaoResolveInput,
+  DoubanAccount,
+  DoubanLogin,
+  DoubanPublication,
+  DoubanPublishInput,
+  DoubanResolveInput,
+  JuejinAccount,
+  JuejinLogin,
+  JuejinPublication,
+  JuejinPublishInput,
+  JuejinResolveInput,
+  JianshuAccount,
+  JianshuConnectInput,
+  JianshuPublication,
+  JianshuPublishInput,
+  JianshuResolveInput,
   ToutiaoResolveInput,
   WeiboAccount,
   WeiboLogin,
@@ -292,6 +307,32 @@ export const api = {
     listPublications: () => request<{ publications: BaijiahaoPublication[] }>('/api/baijiahao/publications', { cache: 'no-store' }),
     publish: (input: BaijiahaoPublishInput) => request<{ publication: BaijiahaoPublication }>('/api/baijiahao/publications', { method: 'POST', body: JSON.stringify(input) }),
   },
+  douban: {
+    resolve: (id: string, input: DoubanResolveInput) => request<{ publication: DoubanPublication }>(`/api/douban/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: DoubanAccount }>('/api/douban/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: DoubanLogin }>('/api/douban/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: DoubanLogin }>(`/api/douban/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/douban/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: DoubanPublication[] }>('/api/douban/publications', { cache: 'no-store' }),
+    publish: (input: DoubanPublishInput) => request<{ publication: DoubanPublication }>('/api/douban/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
+  juejin: {
+    resolve: (id: string, input: JuejinResolveInput) => request<{ publication: JuejinPublication }>(`/api/juejin/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: JuejinAccount }>('/api/juejin/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: JuejinLogin }>('/api/juejin/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: JuejinLogin }>(`/api/juejin/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/juejin/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: JuejinPublication[] }>('/api/juejin/publications', { cache: 'no-store' }),
+    publish: (input: JuejinPublishInput) => request<{ publication: JuejinPublication }>('/api/juejin/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
+  jianshu: {
+    resolve: (id: string, input: JianshuResolveInput) => request<{ publication: JianshuPublication }>(`/api/jianshu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: JianshuAccount }>('/api/jianshu/account', { cache: 'no-store' }),
+    connect: (input: JianshuConnectInput) => request<{ account: JianshuAccount }>('/api/jianshu/connect', { method: 'POST', body: JSON.stringify(input) }),
+    disconnect: () => request<{ ok: true }>('/api/jianshu/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: JianshuPublication[] }>('/api/jianshu/publications', { cache: 'no-store' }),
+    publish: (input: JianshuPublishInput) => request<{ publication: JianshuPublication }>('/api/jianshu/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
   weibo: {
     resolve: (id: string, input: WeiboResolveInput) => request<{ publication: WeiboPublication }>(`/api/weibo/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
     account: () => request<{ account: WeiboAccount }>('/api/weibo/account', { cache: 'no-store' }),
@@ -372,7 +413,7 @@ export const api = {
 }
 
 export function isPlatformId(value: string): value is PlatformId {
-  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'toutiao' || value === 'baijiahao' || value === 'douyin' || value === 'sspai' || value === 'blog'
+  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'toutiao' || value === 'baijiahao' || value === 'douban' || value === 'juejin' || value === 'jianshu' || value === 'douyin' || value === 'sspai' || value === 'blog'
 }
 
 /** Make an uploaded relative URL absolute for previews / rendering. */

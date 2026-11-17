@@ -17,6 +17,9 @@ import type { SspaiService } from './sspai'
 import type { BlogService } from './blog'
 import type { WeiboService } from './weibo'
 import type { ToutiaoService } from './toutiao'
+import type { DoubanService } from './douban'
+import type { JuejinService } from './juejin'
+import type { JianshuService } from './jianshu'
 
 const MAX_RENDER_ITEMS = 30
 const MAX_PUBLISH_ITEMS = 10
@@ -46,6 +49,9 @@ export class BatchService {
     private readonly blog: BlogService,
     private readonly weibo: WeiboService,
     private readonly toutiao: ToutiaoService,
+    private readonly douban: DoubanService,
+    private readonly juejin: JuejinService,
+    private readonly jianshu: JianshuService,
   ) {}
 
   private assertIdle(userId: string): void {
@@ -90,8 +96,8 @@ export class BatchService {
     if (!contentIds.length) throw new ApiError(400, 'batch_empty', '请选择要批量发布的内容')
     if (contentIds.length > MAX_PUBLISH_ITEMS) throw new ApiError(400, 'batch_too_large', `一次最多批量发布 ${MAX_PUBLISH_ITEMS} 篇内容`)
     if (input.platform === 'wechat' && input.mode !== 'draft') throw new ApiError(400, 'batch_wechat_mode', '公众号批量发布仅支持保存草稿；正式发表请在发布管理中逐篇完成')
-    if (input.platform === 'weibo' && input.mode !== 'publish') throw new ApiError(400, 'batch_weibo_mode', '微博批量发布不支持草稿模式')
-    if (input.platform === 'toutiao' && input.mode !== 'publish') throw new ApiError(400, 'batch_toutiao_mode', '今日头条批量发布不支持草稿模式')
+    if (input.platform === 'juejin' && !['draft', 'publish'].includes(input.mode)) throw new ApiError(400, 'batch_juejin_mode', '掘金批量发布需要选择草稿或发布模式')
+    if (input.platform === 'jianshu' && !['draft', 'publish'].includes(input.mode)) throw new ApiError(400, 'batch_jianshu_mode', '简书批量发布需要选择草稿或发布模式')
     if (input.platform === 'wechat' && !input.coverMediaId) {
       const missing = contentIds.filter(id => {
         const content = this.database.getContentDetail(userId, id)
@@ -296,9 +302,15 @@ export class BatchService {
       case 'blog':
         return this.blog.publish(userId, { renderId, mode, ...(coverMediaId ? { coverMediaId } : {}) }, baseUrl)
       case 'weibo':
-        return this.weibo.publish(userId, { renderId }, baseUrl)
+        return this.weibo.publish(userId, { renderId, mode }, baseUrl)
       case 'toutiao':
-        return this.toutiao.publish(userId, { renderId }, baseUrl)
+        return this.toutiao.publish(userId, { renderId, mode }, baseUrl)
+      case 'douban':
+        return this.douban.publish(userId, { renderId, mode })
+      case 'juejin':
+        return this.juejin.publish(userId, { renderId, mode })
+      case 'jianshu':
+        return this.jianshu.publish(userId, { renderId, mode })
       default:
         throw new ApiError(400, 'batch_platform_unsupported', '该平台暂不支持批量发布')
     }
@@ -328,6 +340,9 @@ export class BatchService {
       case 'blog': return this.database.getBlogPublication(userId, id)
       case 'weibo': return this.database.getWeiboPublication(userId, id)
       case 'toutiao': return this.database.getToutiaoPublication(userId, id)
+      case 'douban': return this.database.getDoubanPublication(userId, id)
+      case 'juejin': return this.database.getJuejinPublication(userId, id)
+      case 'jianshu': return this.database.getJianshuPublication(userId, id)
       default: return null
     }
   }

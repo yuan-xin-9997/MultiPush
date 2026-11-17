@@ -8,7 +8,8 @@
     "start": "node dist/index.js",
     "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --external:playwright-core --outfile=dist/index.js --log-level=info",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "normalize:figures": "tsx ../scripts/normalize-figures.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

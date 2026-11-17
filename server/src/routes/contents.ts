@@ -3,6 +3,7 @@ import type { ContentWriteValues } from '../db'
 import type { ContentDetail, ContentInput } from '../../../shared/types'
 import { currentUser } from '../auth'
 import { defaultContentTitle, deriveContentMetrics, normalizeTags } from '../content-utils'
+import { contentHtmlHash, tiptapJsonToHtml } from '../tiptap-html'
 import type { Database } from '../db'
 import { asyncHandler, notFound } from '../errors'
 import {
@@ -20,8 +21,11 @@ function resolveBookId(database: Database, userId: string, bookId: string | null
 }
 
 function createValues(database: Database, userId: string, input: ContentInput): ContentWriteValues {
-  const contentHtml = input.contentHtml ?? ''
   const contentJson = input.contentJson ?? {}
+  // API clients may send only one representation. JSON is the structured
+  // source when HTML is absent; HTML without JSON is kept and flagged stale by
+  // the database so the editor never prefers an old JSON snapshot.
+  const contentHtml = input.contentHtml ?? (input.contentJson !== undefined ? tiptapJsonToHtml(contentJson) : '')
   const metrics = deriveContentMetrics({
     contentHtml,
     contentJson,
@@ -32,6 +36,8 @@ function createValues(database: Database, userId: string, input: ContentInput): 
     bookId: input.bookId ? resolveBookId(database, userId, input.bookId) : null,
     contentJson,
     contentHtml,
+    contentHtmlHash: contentHtmlHash(contentHtml),
+    contentJsonStale: input.contentHtml !== undefined && input.contentJson === undefined && contentHtml.trim().length > 0,
     excerpt: metrics.excerpt,
     coverImage: input.coverImage ?? null,
     tags: normalizeTags(input.tags),
@@ -49,9 +55,29 @@ function updateValues(
   current: ContentDetail,
   input: ContentInput,
 ): ContentWriteValues {
-  const contentHtml = input.contentHtml !== undefined ? input.contentHtml : current.contentHtml
-  const contentJson = input.contentJson !== undefined ? input.contentJson : current.contentJson
-  const contentChanged = input.contentHtml !== undefined || input.contentJson !== undefined
+  const hasHtml = input.contentHtml !== undefined
+  const hasJson = input.contentJson !== undefined
+  let contentHtml = hasHtml ? input.contentHtml! : current.contentHtml
+  const contentJson = hasJson ? input.contentJson! : current.contentJson
+  let contentHtmlHashValue = current.contentHtmlHash ?? contentHtmlHash(current.contentHtml)
+  let contentJsonStale = current.contentJsonStale === true
+  if (hasJson && !hasHtml) {
+    // A JSON-only PATCH is authoritative; rebuild the HTML used by renderers
+    // instead of leaving them on a stale body.
+    contentHtml = tiptapJsonToHtml(contentJson)
+    contentHtmlHashValue = contentHtmlHash(contentHtml)
+    contentJsonStale = false
+  } else if (hasHtml && !hasJson) {
+    if (contentHtml !== current.contentHtml) {
+      // Keep the previous checksum so GET can detect the mismatch even after
+      // a process restart; the explicit flag is an additional safety net.
+      contentJsonStale = true
+    }
+  } else if (hasHtml && hasJson) {
+    contentHtmlHashValue = contentHtmlHash(contentHtml)
+    contentJsonStale = false
+  }
+  const contentChanged = hasHtml || hasJson
   const metrics =
     contentChanged || input.excerpt !== undefined
       ? deriveContentMetrics({
@@ -76,6 +102,8 @@ function updateValues(
         : current.bookId,
     contentJson,
     contentHtml,
+    contentHtmlHash: contentHtmlHashValue,
+    contentJsonStale,
     excerpt: metrics.excerpt,
     coverImage: input.coverImage !== undefined ? input.coverImage : current.coverImage,
     tags: input.tags !== undefined ? normalizeTags(input.tags) : current.tags,
@@ -181,6 +209,8 @@ export function createContentsRouter(database: Database): Router {
         bookId: original.bookId,
         contentJson: original.contentJson,
         contentHtml: original.contentHtml,
+        contentHtmlHash: original.contentHtmlHash,
+        contentJsonStale: original.contentJsonStale,
         excerpt: original.excerpt,
         coverImage: original.coverImage,
         tags: original.tags,

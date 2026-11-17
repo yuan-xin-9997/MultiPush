@@ -6,6 +6,9 @@ import { renderZhihu } from './zhihu'
 import { renderWeibo } from './weibo'
 import { renderToutiao } from './toutiao'
 import { renderBaijiahao } from './baijiahao'
+import { renderDouban } from './douban'
+import { renderJuejin } from './juejin'
+import { renderJianshu } from './jianshu'
 import { renderDouyin } from './douyin'
 import { renderSspai } from './sspai'
 import { renderBlog } from './blog'
@@ -17,6 +20,9 @@ const RENDERERS: Record<PlatformId, PlatformRenderer> = {
   weibo: renderWeibo,
   toutiao: renderToutiao,
   baijiahao: renderBaijiahao,
+  douban: renderDouban,
+  juejin: renderJuejin,
+  jianshu: renderJianshu,
   douyin: renderDouyin,
   sspai: renderSspai,
   blog: renderBlog,

@@ -6,7 +6,7 @@ import { publisherExecutablePath } from './wechat-browser'
 import { ApiError } from './errors'
 
 export interface DouyinIdentity { accountId: string; name: string }
-export interface DouyinArticle { title: string; body: string; images: Map<string, PublisherImage>; video?: PublisherImage }
+export interface DouyinArticle { title: string; body: string; mode: 'draft' | 'publish'; images: Map<string, PublisherImage>; video?: PublisherImage }
 export interface DouyinLoginAttempt {
   poll(): Promise<{ status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'; qrCode: string | null; message: string; state?: PublisherStorageState; identity?: DouyinIdentity }>
   close(): Promise<void>
@@ -15,7 +15,7 @@ export interface DouyinDriver {
   beginLogin(): Promise<DouyinLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: DouyinIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'unknown'; url: null; message: string }>
-  publish(state: PublisherStorageState, article: DouyinArticle, progress: (value: Partial<Pick<DouyinPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'published'; remoteId: string | null; url: string | null; message: string }>
+  publish(state: PublisherStorageState, article: DouyinArticle, progress: (value: Partial<Pick<DouyinPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string | null; url: string | null; message: string }>
   close(): Promise<void>
 }
 
@@ -116,6 +116,23 @@ export class PlaywrightDouyinDriver implements DouyinDriver {
       await body.press('Escape')
       if (await title.inputValue() !== article.title || (await body.innerText()).replace(/\r/g, '').trim() !== article.body.replace(/\r/g, '').trim()) throw new ApiError(409, 'douyin_content_mismatch', '抖音编辑器内容不一致，已停止提交')
       await this.security(page)
+      if (article.mode === 'draft') {
+        progress({ message: '正在保存抖音草稿' })
+        const draft = page.getByRole('button', { name: /存草稿|保存草稿/ }).first()
+        if (!await draft.count()) throw new ApiError(502, 'douyin_draft_unavailable', '抖音创作者中心没有找到存草稿按钮，平台页面可能已改版；请使用复制文案手动保存')
+        const draftResponse = page.waitForResponse(response => {
+          const url = new URL(response.url())
+          return url.hostname === 'creator.douyin.com' && /draft/i.test(url.pathname) && response.request().method() === 'POST'
+        }, { timeout: 20_000 }).catch(() => null)
+        await draft.click()
+        const saved = await draftResponse
+        await page.waitForTimeout(1_000)
+        const bodyText = await page.locator('body').innerText().catch(() => '')
+        if (!(saved?.ok() || /草稿保存成功|已保存草稿|保存成功/.test(bodyText))) {
+          throw new ApiError(409, 'douyin_draft_unconfirmed', '抖音草稿保存请求已发出，但未确认成功；请到创作者中心草稿箱核对')
+        }
+        return { state: await context.storageState(), status: 'draft' as const, remoteId: null, url: UPLOAD, message: '已保存到抖音创作者中心草稿箱' }
+      }
       const button = page.getByRole('button', { name: '发布', exact: true })
       await button.waitFor({ state: 'visible' })
       if (!await button.isEnabled()) throw new ApiError(409, 'douyin_publish_disabled', '发布按钮不可用，请检查素材、封面与账号权限')

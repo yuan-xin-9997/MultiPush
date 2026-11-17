@@ -157,7 +157,7 @@ export class ToutiaoService {
     if (Buffer.byteLength(render.html) > 1024 * 1024) throw new ApiError(400, 'toutiao_body_size', '正文 HTML 不能超过 1 MB')
     const $ = load(render.html, null, false)
     if ($('video,audio,iframe,svg').length || render.videos.length) throw new ApiError(400, 'toutiao_media_unsupported', '今日头条发布支持图文，请先移除视频、音频、嵌入内容或 SVG')
-    return { title, html: render.html, text: render.text, images: [] }
+    return { title, html: render.html, text: render.text, mode: input.mode === 'draft' ? 'draft' : 'publish', images: [] }
   }
 
   list(userId: string): ToutiaoPublication[] { return this.database.listToutiaoPublications(userId) }
@@ -218,10 +218,10 @@ export class ToutiaoService {
       const checked = await this.driver.checkSession(this.state(userId))
       this.save(userId, checked.state, checked.identity)
       const article = await this.article(userId, input)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: article.mode }))
       const idempotencyKey = hash.digest('hex'), previous = this.database.findToutiaoPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
-      const publication = previous ?? this.database.createToutiaoPublication(userId, { renderId: input.renderId, title: article.title, mode: 'publish', idempotencyKey })
+      const publication = previous ?? this.database.createToutiaoPublication(userId, { renderId: input.renderId, title: article.title, mode: article.mode, idempotencyKey })
       this.database.updateToutiaoPublication(userId, publication.id, { status: 'running', message: '正在准备今日头条正文' })
       const task = this.run(userId, publication.id, checked.state, article, checked.identity)
       this.jobs.set(publication.id, task)
@@ -243,7 +243,7 @@ export class ToutiaoService {
     try {
       const result = await this.driver.publish(state, article, progress => { this.database.updateToutiaoPublication(userId, id, progress) })
       this.save(userId, result.state, identity)
-      this.database.updateToutiaoPublication(userId, id, { status: 'published', message: result.message, url: result.url, remoteId: result.remoteId })
+      this.database.updateToutiaoPublication(userId, id, { status: result.status, message: result.message, url: result.url, remoteId: result.remoteId })
     } catch (error) {
       this.expire(userId, error)
       const code = error instanceof ApiError ? error.code : ''

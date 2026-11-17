@@ -7,6 +7,9 @@ import type { BlogService } from '../src/blog'
 import type { DouyinService } from '../src/douyin'
 import type { WeiboService } from '../src/weibo'
 import type { ToutiaoService } from '../src/toutiao'
+import type { DoubanService } from '../src/douban'
+import type { JuejinService } from '../src/juejin'
+import type { JianshuService } from '../src/jianshu'
 import type { SspaiService } from '../src/sspai'
 import type { WechatService } from '../src/wechat'
 import type { ZhihuService } from '../src/zhihu'
@@ -34,11 +37,14 @@ function setup(defaults?: { apiKey: string; baseUrl: string; model: string; labe
   const douyin = { publish: vi.fn() } as unknown as DouyinService
   const weibo = { publish: vi.fn() } as unknown as WeiboService
   const toutiao = { publish: vi.fn() } as unknown as ToutiaoService
+  const douban = { publish: vi.fn() } as unknown as DoubanService
+  const juejin = { publish: vi.fn() } as unknown as JuejinService
+  const jianshu = { publish: vi.fn() } as unknown as JianshuService
   const batch = {} as BatchService
-  const service = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, batch)
+  const service = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, batch)
   const session = service.createSession(user.id)
   cleanups.push(() => { database.close(); rmSync(directory, { recursive: true, force: true }) })
-  return { directory, config, database, user, service, session, wechat, zhihu, sspai, blog, douyin, weibo, toutiao }
+  return { directory, config, database, user, service, session, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu }
 }
 
 afterEach(() => {

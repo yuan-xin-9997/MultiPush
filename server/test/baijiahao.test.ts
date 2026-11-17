@@ -26,7 +26,9 @@ function setup() {
     beginLogin: vi.fn<BaijiahaoDriver['beginLogin']>().mockResolvedValue(attempt),
     checkSession: vi.fn<BaijiahaoDriver['checkSession']>().mockResolvedValue({ state, identity }),
     checkPublication: vi.fn<BaijiahaoDriver['checkPublication']>().mockResolvedValue({ state, status: 'published', url: 'https://baijiahao.baidu.com/s?id=5000000000000001', message: '已发布' }),
-    publish: vi.fn<BaijiahaoDriver['publish']>().mockResolvedValue({ state, status: 'published', remoteId: '5000000000000001', url: 'https://baijiahao.baidu.com/s?id=5000000000000001', message: '百家号文章已发布' }),
+    publish: vi.fn<BaijiahaoDriver['publish']>().mockImplementation(async (_state, article) => article.mode === 'draft'
+      ? { state, status: 'draft' as const, remoteId: '', url: 'https://baijiahao.baidu.com/builder/rc/edit?type=news', message: '草稿已保存' }
+      : { state, status: 'published' as const, remoteId: '5000000000000001', url: 'https://baijiahao.baidu.com/s?id=5000000000000001', message: '百家号文章已发布' }),
     close: vi.fn(async () => {}),
   }
   const service = new BaijiahaoService(database, config, driver)
@@ -66,6 +68,14 @@ describe('Baijiahao publishing', () => {
     expect(driver.publish.mock.calls[0][1].html).toContain('正文内容')
     expect((await service.publish(alice.id, input, 'http://127.0.0.1:34080')).id).toBe(publication.id)
     expect(driver.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates a baijiahao draft without publishing', async () => {
+    const { service, alice, driver, article } = setup()
+    const render = await article()
+    const publication = await service.publish(alice.id, { renderId: render.id, mode: 'draft' }, 'http://127.0.0.1:34080')
+    expect(await finish(service, alice.id, publication.id)).toMatchObject({ status: 'draft', url: 'https://baijiahao.baidu.com/builder/rc/edit?type=news' })
+    expect(driver.publish.mock.calls[0][1]).toMatchObject({ mode: 'draft' })
   })
 
   it('rejects cross-user renders and blocks new publishes while a result is uncertain', async () => {

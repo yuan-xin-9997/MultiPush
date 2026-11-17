@@ -12,6 +12,7 @@ import type {
   RenderOptions,
 } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
+import { normalizeFigureCaptions } from './figure-captions'
 
 export const DEFAULT_TITLE = '无标题文档'
 
@@ -582,6 +583,11 @@ function normalizeContentHtml(rawHtml: string, baseUrl: string): NormalizedConte
 
   const $ = cheerio.load(`<div data-mp-clean-root="1">${sanitized}</div>`, null, false)
   const $root = $('[data-mp-clean-root="1"]').first()
+
+  // Legacy documents often store the image and caption as two adjacent
+  // paragraphs. Normalize before styles and media collection so every platform
+  // sees one figure, and publishing never relies on a platform to guess.
+  normalizeFigureCaptions($)
 
   $root.find('img').each((_, element) => {
     const $element = $(element)

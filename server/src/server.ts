@@ -70,6 +70,9 @@ export async function startMultiPushServer(overrides: ConfigOverrides = {}): Pro
     try { await app.locals.weibo.close() } catch { /* ignore */ }
     try { await app.locals.toutiao.close() } catch { /* ignore */ }
     try { await app.locals.baijiahao.close() } catch { /* ignore */ }
+    try { await app.locals.douban.close() } catch { /* ignore */ }
+    try { await app.locals.juejin.close() } catch { /* ignore */ }
+    try { await app.locals.jianshu.close() } catch { /* ignore */ }
     try { await app.locals.sspai.close() } catch { /* ignore */ }
     try { await app.locals.blog.close() } catch { /* ignore */ }
     try { await app.locals.batch.close() } catch { /* ignore */ }

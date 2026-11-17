@@ -249,11 +249,16 @@ export class WeiboService {
       const checked = await this.driver.checkSession(this.state(userId))
       this.save(userId, checked.state, checked.identity)
       const article = await this.article(userId, input, baseUrl)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, text: article.text }))
+      const mode = input.mode === 'draft' ? 'draft' : 'publish'
+      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, text: article.text, mode }))
       for (const image of article.images) hash.update(image.buffer)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findWeiboPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
-      const publication = previous ?? this.database.createWeiboPublication(userId, { renderId: input.renderId, title: article.title, mode: 'publish', idempotencyKey })
+      const publication = previous ?? this.database.createWeiboPublication(userId, { renderId: input.renderId, title: article.title, mode, idempotencyKey })
+      if (mode === 'draft') {
+        this.database.updateWeiboPublication(userId, publication.id, { status: 'draft', message: '已保存为 MultiPush 本地草稿；微博网页端没有草稿箱，请在渲染页复制文案/图片后手动发布' })
+        return this.get(userId, publication.id)
+      }
       this.database.updateWeiboPublication(userId, publication.id, { status: 'running', message: '正在准备微博正文及图片' })
       const task = this.run(userId, publication.id, checked.state, article, checked.identity)
       this.jobs.set(publication.id, task)

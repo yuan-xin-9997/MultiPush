@@ -43,6 +43,7 @@ const DOUYIN_STYLES: Record<string, string> = {
   td: 'border:1px solid #ebebee;padding:10px 12px;text-align:left;vertical-align:top;',
   img: 'display:block;max-width:100%;height:auto;border-radius:10px;margin:20px auto;',
   video: 'display:block;width:100%;border-radius:10px;margin:20px 0;background:#000;',
+  'figure img': 'display:block;max-width:100%;height:auto;border-radius:8px;margin:0 auto;',
   figure: 'margin:20px 0;',
   figcaption: 'margin-top:8px;text-align:center;color:#8a8f99;font-size:13px;line-height:1.6;',
   hr: 'border:none;border-top:1px solid #ebebee;margin:28px 0;',

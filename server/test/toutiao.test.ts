@@ -26,7 +26,9 @@ function setup() {
     beginLogin: vi.fn<ToutiaoDriver['beginLogin']>().mockResolvedValue(attempt),
     checkSession: vi.fn<ToutiaoDriver['checkSession']>().mockResolvedValue({ state, identity }),
     checkPublication: vi.fn<ToutiaoDriver['checkPublication']>().mockResolvedValue({ state, status: 'published', url: 'https://www.toutiao.com/article/5000000000000001/', message: '已发布' }),
-    publish: vi.fn<ToutiaoDriver['publish']>().mockResolvedValue({ state, status: 'published', remoteId: '5000000000000001', url: 'https://www.toutiao.com/article/5000000000000001/', message: '今日头条文章已发布' }),
+    publish: vi.fn<ToutiaoDriver['publish']>().mockImplementation(async (_state, article) => article.mode === 'draft'
+      ? { state, status: 'draft' as const, remoteId: '', url: 'https://mp.toutiao.com/profile_v4/graphic/publish', message: '草稿已保存' }
+      : { state, status: 'published' as const, remoteId: '5000000000000001', url: 'https://www.toutiao.com/article/5000000000000001/', message: '今日头条文章已发布' }),
     close: vi.fn(async () => {}),
   }
   const service = new ToutiaoService(database, config, driver)
@@ -66,6 +68,14 @@ describe('Toutiao publishing', () => {
     expect(driver.publish.mock.calls[0][1].html).toContain('正文内容')
     expect((await service.publish(alice.id, input, 'http://127.0.0.1:34080')).id).toBe(publication.id)
     expect(driver.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates a toutiao draft without publishing', async () => {
+    const { service, alice, driver, article } = setup()
+    const render = await article()
+    const publication = await service.publish(alice.id, { renderId: render.id, mode: 'draft' }, 'http://127.0.0.1:34080')
+    expect(await finish(service, alice.id, publication.id)).toMatchObject({ status: 'draft', url: 'https://mp.toutiao.com/profile_v4/graphic/publish' })
+    expect(driver.publish.mock.calls[0][1]).toMatchObject({ mode: 'draft' })
   })
 
   it('rejects cross-user renders and blocks new publishes while a result is uncertain', async () => {

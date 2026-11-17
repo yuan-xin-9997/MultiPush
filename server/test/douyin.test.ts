@@ -26,7 +26,9 @@ function setup() {
     beginLogin: vi.fn<DouyinDriver['beginLogin']>().mockResolvedValue(attempt),
     checkSession: vi.fn<DouyinDriver['checkSession']>().mockResolvedValue({ state, identity }),
     checkPublication: vi.fn<DouyinDriver['checkPublication']>().mockResolvedValue({ state, status: 'unknown', url: null, message: '请人工核实' }),
-    publish: vi.fn<DouyinDriver['publish']>().mockResolvedValue({ state, status: 'published', remoteId: '1234567890123456789', url: 'https://www.douyin.com/video/1234567890123456789', message: '成功' }),
+    publish: vi.fn<DouyinDriver['publish']>().mockImplementation(async (_state, article) => article.mode === 'draft'
+      ? { state, status: 'draft' as const, remoteId: null, url: 'https://creator.douyin.com/creator-micro/content/upload', message: '草稿已保存' }
+      : { state, status: 'published' as const, remoteId: '1234567890123456789', url: 'https://www.douyin.com/video/1234567890123456789', message: '成功' }),
     close: vi.fn(async () => {}),
   }
   const service = new DouyinService(database, config, driver)
@@ -71,6 +73,15 @@ describe('Douyin publishing', () => {
     await vi.waitFor(async () => expect(await service.pollLogin(bob.id, login.id)).toMatchObject({ status: 'connected' }))
     expect(await service.account(bob.id)).toMatchObject({ status: 'connected' })
   })
+  it('saves a Douyin draft without submitting for review', async () => {
+    const { service, alice, driver, image, article } = setup()
+    const render = article(), asset = image()
+    const publication = await service.publish(alice.id, { renderId: render.id, mode: 'draft', imageMediaIds: [asset.id] })
+    await vi.waitFor(() => expect(service.get(alice.id, publication.id).status).not.toBe('running'))
+    expect(service.get(alice.id, publication.id)).toMatchObject({ status: 'draft', mode: 'draft' })
+    expect(driver.publish.mock.calls[0][1]).toMatchObject({ mode: 'draft' })
+  })
+
   it('preserves image order and deduplicates identical content across media uploads', async () => {
     const { service, alice, driver, image, article } = setup()
     const render = article(), first = image(), second = image()

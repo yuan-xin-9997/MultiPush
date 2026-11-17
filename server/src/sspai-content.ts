@@ -1,6 +1,7 @@
 import { load } from 'cheerio'
 import { ApiError } from './errors'
 import { normalizeArticleLists } from './renderers/article-normalization'
+import { normalizeFigureCaptions } from './renderers/figure-captions'
 
 const IMAGE_HOSTS = ['cdnfile.sspai.com', 'cdn-static.sspai.com']
 const ALLOWED_ATTRIBUTES = new Set(['href', 'src', 'alt', 'title', 'colspan', 'rowspan', 'start', 'lang'])
@@ -25,6 +26,7 @@ export function prepareSspaiContent(html: string): string {
   const $ = load(html, null, false)
   $('script,noscript,style,meta,link,iframe,object,embed,form,input,button,video,audio,svg,nav').remove()
   normalizeArticleLists($)
+  normalizeFigureCaptions($)
   $('h1').each((_, node) => {
     node.name = 'h2'
   })

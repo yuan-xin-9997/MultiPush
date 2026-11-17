@@ -8,7 +8,7 @@ import { ApiError } from './errors'
 import { qrReady } from './qr-capture'
 
 export interface BaijiahaoIdentity { accountId: string; name: string }
-export interface BaijiahaoArticle { title: string; html: string; text: string; images: PublisherImage[] }
+export interface BaijiahaoArticle { title: string; html: string; text: string; mode: 'draft' | 'publish'; images: PublisherImage[] }
 export interface BaijiahaoLoginAttempt {
   poll(): Promise<{ status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'; qrCode: string | null; message: string; state?: PublisherStorageState; identity?: BaijiahaoIdentity }>
   close(): Promise<void>
@@ -17,7 +17,7 @@ export interface BaijiahaoDriver {
   beginLogin(): Promise<BaijiahaoLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: BaijiahaoIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'missing' | 'unknown'; url: string | null; message: string }>
-  publish(state: PublisherStorageState, article: BaijiahaoArticle, progress: (value: Partial<Pick<BaijiahaoPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'published'; remoteId: string; url: string; message: string }>
+  publish(state: PublisherStorageState, article: BaijiahaoArticle, progress: (value: Partial<Pick<BaijiahaoPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   close(): Promise<void>
 }
 

@@ -39,7 +39,7 @@ function content(overrides: Partial<ContentDetail> = {}): ContentDetail {
 
 const options: RenderOptions = { cardStyle: 'clean', includeTags: true }
 
-function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
+function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'jianshu' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
   return {
     content: content(overrides),
     platforms,
@@ -99,6 +99,36 @@ describe('renderPlatforms', () => {
     expect(result.downloads[0].filename).toContain('微博')
   })
 
+  it('renders a Douban diary with Markdown/HTML downloads and figure captions', async () => {
+    const [result] = await renderPlatforms(input(['douban'], {
+      contentHtml: '<p>正文</p><p><img src="/uploads/cover.png" alt="图"></p><p><em>图：说明：）</em></p>',
+    }))
+    expect(result.platform).toBe('douban')
+    expect(result.previewMode).toBe('article')
+    expect(result.title).toBe('一次创作，多平台发布')
+    expect(result.html).toContain('font-size:17px')
+    expect(result.html).toContain('<figure')
+    expect(result.html).toContain('<figcaption')
+    expect(result.markdown).toContain('# 一次创作，多平台发布')
+    expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown'])
+    expect(result.downloads[0].filename).toContain('豆瓣')
+  })
+
+  it('renders Juejin and Jianshu articles with Markdown/HTML downloads', async () => {
+    for (const platform of ['juejin', 'jianshu'] as const) {
+      const [result] = await renderPlatforms(input([platform], {
+        contentHtml: '<h2>小节</h2><p>正文</p><p><img src="/uploads/cover.png" alt="图"></p><p><em>图：说明</em></p>',
+      }))
+      expect(result.platform).toBe(platform)
+      expect(result.previewMode).toBe('article')
+      expect(result.html).toContain('<figure')
+      expect(result.html).toContain('<figcaption')
+      expect(result.markdown).toContain('# 一次创作，多平台发布')
+      expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown'])
+      expect(result.downloads[0].filename).toContain(platform === 'juejin' ? '掘金' : '简书')
+    }
+  })
+
   it('renders personal blog article with Markdown and HTML downloads', async () => {
     const [result] = await renderPlatforms(input(['blog']))
     expect(result.platform).toBe('blog')
@@ -146,33 +176,35 @@ describe('renderPlatforms', () => {
     expect(result.downloads[0].content).toContain(result.html)
   })
 
-  it('keeps images close to numbered and semantic captions while retaining ordinary paragraph spacing', async () => {
-    const [result] = await renderPlatforms(input(['wechat'], { contentHtml: '<p><img src="/uploads/first.png" alt="首图"></p><p><br></p><p><em>图 1：图片说明</em></p><p>后续正文</p><figure><img src="/uploads/figure.png"><figcaption>语义图注</figcaption></figure><p><img src="/uploads/plain.png"></p><p><br></p><p>普通正文不应当作图注</p>' }))
+  it('normalizes legacy image + caption paragraphs into one compact WeChat figure', async () => {
+    const [result] = await renderPlatforms(input(['wechat'], { contentHtml: '<p><img src="/uploads/first.png" alt="首图"></p><p><br></p><p><em>图 1：图片说明</em></p><p>后续正文</p><figure><img src="/uploads/figure.png"><figcaption>图：语义图注</figcaption></figure><p><img src="/uploads/plain.png"></p><p><br></p><p>普通正文不应当作图注</p>' }))
     const $ = load(result.html)
-    const first = $('img').first()
-    expect(first.css('margin')).toBe('20px auto 0 auto')
-    expect(first.parent().css('margin')).toBe('0 0 0 0')
-    expect(first.parent().next().text()).toBe('图 1：图片说明')
-    expect(first.parent().next().css('margin')).toBe('8px 0 16px 0')
-    expect(first.parent().next().find('em').length).toBe(1)
-    expect(first.attr('alt')).toBe('首图')
-    expect($('figcaption').css('margin')).toBe('8px 0 0 0')
-    expect($('figure img').css('margin')).toBe('20px auto 0 auto')
-    for (const element of [first, first.parent(), first.parent().next()]) {
+    expect($('figure')).toHaveLength(2)
+    expect($('figcaption')).toHaveLength(2)
+    expect($('p img')).toHaveLength(1)
+    expect($('p img').attr('src')).toContain('plain.png')
+    const first = $('figure').first()
+    expect(first.find('img').attr('alt')).toBe('首图')
+    expect(first.find('img').css('margin')).toBe('0 auto')
+    expect(first.css('margin')).toBe('20px 0')
+    expect(first.find('figcaption').text()).toBe('图 1：图片说明')
+    expect(first.find('figcaption').css('margin')).toBe('8px 0 0')
+    expect(first.find('figcaption').find('em').length).toBe(0)
+    expect(first.next().text()).toBe('后续正文')
+    for (const element of [first, first.find('img'), first.find('figcaption')]) {
       expect(element.attr('style')).not.toMatch(/margin-(?:top|right|bottom|left)\s*:/)
     }
-    expect($('img').last().css('margin-bottom')).toBeUndefined()
+    expect($('figure').last().find('figcaption').text()).toBe('图：语义图注')
     expect($('img').last().parent().next().text()).toBe('普通正文不应当作图注')
-    expect($('img').last().parent().css('margin-bottom')).toBeUndefined()
     expect(result.downloads[0].content).toContain(result.html)
   })
 
   it('flattens legacy overlapping image margins without changing material metadata or text', () => {
     const $ = load('<section style="margin:0 0 16px;margin-bottom:0;color:#333"><img data-imgfileid="100000843" src="https://mmbiz.qpic.cn/image" style="margin:20px auto;margin-bottom:0;max-width:100%"></section><p style="margin:0 0 16px;margin-top:8px"><em>图 1：说明</em></p>', null, false)
     normalizeWechatCaptions($)
-    expect($('img').css('margin')).toBe('20px auto 0 auto')
-    expect($('section').css('margin')).toBe('0 0 0 0')
-    expect($('p').css('margin')).toBe('8px 0 16px 0')
+    expect($('img').css('margin')).toBe('20px auto 0')
+    expect($('section').css('margin')).toBe('0')
+    expect($('p').css('margin')).toBe('8px 0 16px')
     expect($.html()).not.toMatch(/margin-(?:top|right|bottom|left)\s*:/)
     expect($('img').attr('data-imgfileid')).toBe('100000843')
     expect($('section').css('color')).toBe('#333')

@@ -8,7 +8,7 @@ import { ApiError } from './errors'
 import { qrReady } from './qr-capture'
 
 export interface ToutiaoIdentity { accountId: string; name: string }
-export interface ToutiaoArticle { title: string; html: string; text: string; images: PublisherImage[] }
+export interface ToutiaoArticle { title: string; html: string; text: string; mode: 'draft' | 'publish'; images: PublisherImage[] }
 export interface ToutiaoLoginAttempt {
   poll(): Promise<{ status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'; qrCode: string | null; message: string; state?: PublisherStorageState; identity?: ToutiaoIdentity }>
   close(): Promise<void>
@@ -17,7 +17,7 @@ export interface ToutiaoDriver {
   beginLogin(): Promise<ToutiaoLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: ToutiaoIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'missing' | 'unknown'; url: string | null; message: string }>
-  publish(state: PublisherStorageState, article: ToutiaoArticle, progress: (value: Partial<Pick<ToutiaoPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'published'; remoteId: string; url: string; message: string }>
+  publish(state: PublisherStorageState, article: ToutiaoArticle, progress: (value: Partial<Pick<ToutiaoPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   close(): Promise<void>
 }
 
@@ -267,6 +267,24 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
       await title.fill(article.title)
       await this.fillEditor(page, article, progress)
       await this.security(page)
+
+      if (article.mode === 'draft') {
+        progress({ message: '正在保存今日头条草稿' })
+        const draft = page.getByRole('button', { name: /存草稿|保存草稿/ }).first()
+        if (!await draft.count()) throw new ApiError(502, 'toutiao_draft_unavailable', '今日头条编辑器没有找到存草稿按钮，平台页面可能已改版；请使用复制正文手动保存')
+        const draftResponse = page.waitForResponse(response => {
+          const url = new URL(response.url())
+          return url.hostname === 'mp.toutiao.com' && /draft/i.test(url.pathname) && response.request().method() === 'POST'
+        }, { timeout: 20_000 }).catch(() => null)
+        await draft.click()
+        const saved = await draftResponse
+        await page.waitForTimeout(1_000)
+        const body = await page.locator('body').innerText().catch(() => '')
+        if (!(saved?.ok() || /草稿保存成功|已保存草稿|保存成功/.test(body))) {
+          throw new ApiError(409, 'toutiao_draft_unconfirmed', '今日头条草稿保存请求已发出，但未确认成功；请到创作中心草稿箱核对')
+        }
+        return { state: await context.storageState(), status: 'draft' as const, remoteId: '', url: PUBLISH, message: '已保存到今日头条草稿箱' }
+      }
 
       progress({ message: '正在提交今日头条发布' })
       const responsePromise = page.waitForResponse(response => {
