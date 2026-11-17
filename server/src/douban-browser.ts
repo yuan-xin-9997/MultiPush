@@ -30,18 +30,19 @@ export interface DoubanDriver {
 }
 
 const HOME = 'https://www.douban.com/'
-const LOGIN = 'https://accounts.douban.com/passport/login'
+const LOGIN = 'https://accounts.douban.com/passport/login?prefer_login_way=qrcode'
 const MINE = 'https://www.douban.com/mine/'
 const NOTE_CREATE = 'https://www.douban.com/note/create'
+const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 const QR_SELECTORS = [
-  'img[src*="qrcode"]',
-  'img[src*="qr"]',
-  '.qrcode img',
-  '.qr-code img',
+  '.account-qr-scan img',
+  '.account-qr-code img',
   '[class*="qrcode"] img',
   '[class*="qr-code"] img',
   '[class*="login-qr"] img',
-  '[class*="account-qr"] img',
+  'img[src^="data:image"]',
+  'img[src*="qrcode"]',
+  'img[src*="qr"]',
   'canvas[class*="qr"]',
 ]
 const EXPIRED_TEXT = /二维码已过期|二维码失效|登录已过期|请重新登录/
@@ -166,13 +167,37 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
     if (!this.browser) {
       const executablePath = publisherExecutablePath('douban')
       if (!executablePath) throw new ApiError(503, 'douban_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
-      this.browser = chromium.launch({ executablePath, headless: true, chromiumSandbox: process.env.WECHAT_BROWSER_NO_SANDBOX !== '1', args: ['--disable-dev-shm-usage'] }).then(browser => {
+      this.browser = chromium.launch({
+        executablePath,
+        headless: true,
+        chromiumSandbox: process.env.WECHAT_BROWSER_NO_SANDBOX !== '1',
+        args: ['--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
+      }).then(browser => {
         browser.on('disconnected', () => { this.browser = null })
         return browser
       }).catch(() => { this.browser = null; throw new ApiError(503, 'douban_browser_unavailable', '无法启动豆瓣浏览器，请检查服务器浏览器配置') })
     }
-    const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1440, height: 1000 } })
+    const context = await (await this.browser).newContext({
+      storageState: state,
+      locale: 'zh-CN',
+      viewport: { width: 1440, height: 1000 },
+      userAgent: DESKTOP_UA,
+    })
     context.setDefaultTimeout(20_000)
+    // Douban serves the React login app from a font-CDN host that Chrome's ORB
+    // can block in headless mode. Fetch those scripts through Playwright's HTTP
+    // stack (same cookies/UA, no ORB) and fulfill them for the page.
+    await context.route('https://asset.doubanio.com/**', async route => {
+      try {
+        const response = await context.request.fetch(route.request(), {
+          timeout: 30_000,
+          headers: { ...route.request().headers(), referer: 'https://accounts.douban.com/' },
+        })
+        await route.fulfill({ response })
+      } catch {
+        await route.abort()
+      }
+    })
     return context
   }
 
@@ -209,6 +234,12 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
         const qr = frame.locator(selector).first()
         if (!await qr.isVisible().catch(() => false)) continue
         const src = await qr.getAttribute('src').catch(() => null)
+        const size = await qr.evaluate((element) => {
+          const image = element as unknown as { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number }
+          return { width: image.naturalWidth || image.width || 0, height: image.naturalHeight || image.height || 0 }
+        }).catch(() => ({ width: 0, height: 0 }))
+        // Ignore the 37px "scan to download App" icon and other small badges.
+        if (size.width < 100 && !src?.startsWith('data:image')) continue
         if (src) {
           try {
             const response = await context.request.get(new URL(src, page.url()).href, { timeout: 15_000 })

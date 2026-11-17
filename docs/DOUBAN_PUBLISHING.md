@@ -102,7 +102,7 @@ POST   /api/douban/publications/:id/resolve
 
 | 现象 | 处理 |
 | --- | --- |
-| 无法取得登录二维码 | 检查服务器能否访问 `accounts.douban.com`；豆瓣登录页可能对 IDC IP 返回验证页 |
+| 无法取得登录二维码 | 确认访问的是 `accounts.douban.com/passport/login?prefer_login_way=qrcode`；driver 使用桌面 UA 并经 Playwright API 代理 `asset.doubanio.com` 静态资源，避免无头 Chrome ORB 拦截。仍失败时检查服务器访问豆瓣 CDN 的网络/代理 |
 | 保存失败/接口不可用 | 豆瓣网页接口可能已改版；到发布页使用「复制 Markdown」或「打开豆瓣编辑器」手动发布 |
 | 图片上传失败 | 检查图片格式（JPG/PNG/GIF）与大小（≤10 MB）；发布会在上传阶段停止，不会创建残缺日记 |
 | 结果待核实 | 先到豆瓣日记列表确认；确认未发布再重新提交，确认已发布则填写链接关联 |
