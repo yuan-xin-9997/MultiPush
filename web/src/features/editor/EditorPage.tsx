@@ -38,6 +38,7 @@ import {
   Heading3,
   Highlighter,
   ImagePlus,
+  Images,
   Italic,
   Link2,
   List,
@@ -60,6 +61,7 @@ import {
   Type,
   Underline as UnderlineIcon,
   Undo2,
+  Upload,
   Video,
   X,
 } from 'lucide-react'
@@ -74,7 +76,15 @@ import Dropdown from '@/components/Dropdown'
 import Logo from '@/components/Logo'
 import Modal from '@/components/Modal'
 import { Figure, FigureCaption, NormalizeFigureCaptions, normalizeEditorFigures } from './figure'
+import {
+  collectBodyImages,
+  coverFileExtension,
+  isSameCoverSource,
+  type CoverImageCandidate,
+} from './cover'
 import './editor.css'
+
+const MAX_COVER_BYTES = 20 * 1024 * 1024
 
 const TEXT_COLORS = [
   { label: '默认', value: '#1f2329' },
@@ -264,6 +274,9 @@ export default function EditorPage() {
   const [deleting, setDeleting] = useState(false)
   const [uploading, setUploading] = useState<{ label: string; percent: number } | null>(null)
   const [coverUploading, setCoverUploading] = useState(false)
+  const [coverBusySource, setCoverBusySource] = useState<string | null>(null)
+  const [coverPickerOpen, setCoverPickerOpen] = useState(false)
+  const [bodyImages, setBodyImages] = useState<CoverImageCandidate[]>([])
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null)
 
   const initializedIdRef = useRef<string | null>(null)
@@ -307,6 +320,21 @@ export default function EditorPage() {
 
   const syncOutline = useCallback((target: Editor) => {
     setOutline(buildOutline(target))
+  }, [])
+
+  const syncBodyImages = useCallback((target: Editor) => {
+    const next = collectBodyImages(target)
+    setBodyImages((current) => {
+      const unchanged =
+        current.length === next.length &&
+        current.every(
+          (image, index) =>
+            image.src === next[index].src &&
+            image.alt === next[index].alt &&
+            image.source === next[index].source,
+        )
+      return unchanged ? current : next
+    })
   }, [])
 
   const updateSlashMenu = useCallback((next: SlashMenuState | null) => {
@@ -483,6 +511,7 @@ export default function EditorPage() {
     onUpdate({ editor: instance }) {
       editorRef.current = instance
       syncOutline(instance)
+      syncBodyImages(instance)
       syncSlashQuery(instance)
       markDirty()
     },
@@ -809,6 +838,8 @@ export default function EditorPage() {
     setLoadError(null)
     setSaveState('saved')
     setLastSavedAt(null)
+    setCoverPickerOpen(false)
+    setBodyImages([])
     dirtyRef.current = false
     setDirty(false)
     setRevision(0)
@@ -894,11 +925,12 @@ export default function EditorPage() {
     initializedIdRef.current = content.id
     initializedContentRef.current = true
     syncOutline(editor)
+    syncBodyImages(editor)
     setRevision(0)
     setDirty(false)
     dirtyRef.current = false
     setSaveState('saved')
-  }, [editor, content, id, syncOutline])
+  }, [editor, content, id, syncOutline, syncBodyImages])
 
   useEffect(() => {
     void api.books
@@ -1038,18 +1070,85 @@ export default function EditorPage() {
     }
   }
 
+  function applyCoverImage(next: string, message: string) {
+    setCoverImage(next)
+    markDirty()
+    setCoverPickerOpen(false)
+    toast.success(message)
+  }
+
   async function handleCoverFile(file: File) {
     if (coverUploading) return
+    if (file.type && !file.type.startsWith('image/')) {
+      toast.error('请选择图片文件')
+      return
+    }
+    if (file.size > MAX_COVER_BYTES) {
+      toast.error('封面图片不能超过 20MB')
+      return
+    }
     setCoverUploading(true)
     try {
       const { media } = await api.media.upload(file)
-      setCoverImage(media.url)
-      markDirty()
-      toast.success('封面已更新')
+      applyCoverImage(media.url, '封面已更新')
     } catch (error) {
       toast.error(getErrorMessage(error, '封面上传失败'))
     } finally {
       setCoverUploading(false)
+    }
+  }
+
+  async function handleChooseBodyImage(image: CoverImageCandidate) {
+    if (coverUploading) return
+    if (isSameCoverSource(coverImage, image.src)) {
+      setCoverPickerOpen(false)
+      return
+    }
+    if (image.source === 'local') {
+      applyCoverImage(image.src, '已选用正文图片作为封面')
+      return
+    }
+
+    setCoverUploading(true)
+    setCoverBusySource(image.src)
+    try {
+      let blob: Blob
+      try {
+        const response = await fetch(image.src, { credentials: 'omit' })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        blob = await response.blob()
+      } catch (error) {
+        toast.error(
+          error instanceof TypeError
+            ? '这张外部图片不允许跨域读取，请下载后从本地上传'
+            : '正文图片读取失败，请下载后从本地上传',
+        )
+        return
+      }
+
+      if (blob.size > MAX_COVER_BYTES) {
+        toast.error('图片超过 20MB，请压缩后再试')
+        return
+      }
+      if (blob.type && !blob.type.startsWith('image/')) {
+        toast.error('图片地址返回的不是图片文件')
+        return
+      }
+      const extension = coverFileExtension(image.src, blob.type)
+      if (!extension) {
+        toast.error('不支持的图片格式，请使用 JPG、PNG、WebP 或 GIF')
+        return
+      }
+      const mimeType = blob.type || (extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : `image/${extension}`)
+      try {
+        const { media } = await api.media.upload(new File([blob], `cover.${extension}`, { type: mimeType }))
+        applyCoverImage(media.url, '正文图片已转存并设为封面')
+      } catch (error) {
+        toast.error(getErrorMessage(error, '正文图片转存失败，请下载后从本地上传'))
+      }
+    } finally {
+      setCoverUploading(false)
+      setCoverBusySource(null)
     }
   }
 
@@ -1273,37 +1372,84 @@ export default function EditorPage() {
             <div className="editor-info-section">
               <span className="editor-info-label">封面</span>
               {coverImage ? (
-                <div className="editor-cover-preview">
-                  <img src={absoluteUrl(coverImage)} alt="文档封面" />
+                <>
+                  <div className="editor-cover-preview">
+                    <img src={absoluteUrl(coverImage)} alt="文档封面" />
+                    <button
+                      type="button"
+                      className="editor-cover-remove"
+                      onClick={() => {
+                        setCoverImage(null)
+                        markDirty()
+                      }}
+                      disabled={coverUploading}
+                      title="移除封面"
+                      aria-label="移除封面"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                  <div className="editor-cover-actions">
+                    <button
+                      type="button"
+                      className="editor-cover-action"
+                      onClick={() => coverInputRef.current?.click()}
+                      disabled={coverUploading}
+                    >
+                      <Upload size={12} />
+                      上传新图
+                    </button>
+                    <span className="editor-cover-action-divider" aria-hidden="true" />
+                    <button
+                      type="button"
+                      className="editor-cover-action"
+                      onClick={() => setCoverPickerOpen(true)}
+                      disabled={coverUploading}
+                    >
+                      <Images size={12} />
+                      从正文选择
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="editor-cover-sources">
                   <button
                     type="button"
-                    className="editor-cover-remove"
-                    onClick={() => {
-                      setCoverImage(null)
-                      markDirty()
-                    }}
-                    title="移除封面"
-                    aria-label="移除封面"
+                    className="editor-cover-source"
+                    onClick={() => coverInputRef.current?.click()}
+                    disabled={coverUploading}
                   >
-                    <X size={13} />
+                    <Upload size={17} />
+                    <span>本地上传</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="editor-cover-source"
+                    onClick={() => setCoverPickerOpen(true)}
+                    disabled={coverUploading}
+                  >
+                    <Images size={17} />
+                    <span>从正文选择</span>
+                    {bodyImages.length > 0 ? (
+                      <span className="editor-cover-source-count" aria-label={`${bodyImages.length} 张正文图片`}>
+                        {bodyImages.length}
+                      </span>
+                    ) : null}
                   </button>
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  className="editor-cover-empty"
-                  onClick={() => coverInputRef.current?.click()}
-                  disabled={coverUploading}
-                >
-                  {coverUploading ? <LoaderCircle size={17} className="spin" /> : <ImagePlus size={17} />}
-                  {coverUploading ? '上传中…' : '添加封面'}
-                </button>
               )}
+              {coverUploading ? (
+                <div className="editor-cover-status" role="status" aria-live="polite">
+                  <LoaderCircle size={12} className="spin" />
+                  {coverBusySource ? '正在转存正文图片…' : '正在上传封面…'}
+                </div>
+              ) : null}
               <input
                 ref={coverInputRef}
                 type="file"
                 accept="image/*"
                 className="visually-hidden"
+                aria-label="上传封面图片"
                 onChange={(event) => {
                   const file = event.target.files?.[0]
                   if (file) void handleCoverFile(file)
@@ -1745,6 +1891,79 @@ export default function EditorPage() {
             }}
           />
         </div>
+      </Modal>
+
+      <Modal
+        open={coverPickerOpen}
+        onClose={() => setCoverPickerOpen(false)}
+        title="从正文选择封面"
+        subtitle="点击图片即可设为封面；外部或内嵌图片会先转存到本站。"
+        footer={
+          <button type="button" className="btn" onClick={() => setCoverPickerOpen(false)}>
+            取消
+          </button>
+        }
+      >
+        {bodyImages.length === 0 ? (
+          <div className="cover-picker-empty">
+            <span className="cover-picker-empty-icon">
+              <Images size={22} />
+            </span>
+            <strong>正文中还没有图片</strong>
+            <p>先在正文插入图片，再回来把它设为封面。</p>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                setCoverPickerOpen(false)
+                imageInputRef.current?.click()
+              }}
+            >
+              <ImagePlus size={14} />
+              在正文插入图片
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="cover-picker-grid">
+              {bodyImages.map((image, index) => {
+                const current = isSameCoverSource(coverImage, image.src)
+                const busy = coverBusySource === image.src
+                return (
+                  <button
+                    key={image.src}
+                    type="button"
+                    className={cn('cover-picker-item', current && 'is-current')}
+                    onClick={() => void handleChooseBodyImage(image)}
+                    disabled={coverUploading}
+                    aria-pressed={current}
+                    aria-label={`第 ${index + 1} 张正文图片${image.alt ? `：${image.alt}` : ''}${current ? '（当前封面）' : ''}`}
+                    title={image.alt || `正文图片 ${index + 1}`}
+                  >
+                    <img src={absoluteUrl(image.src)} alt="" loading="lazy" decoding="async" />
+                    {image.source !== 'local' ? (
+                      <span className="cover-picker-badge">{image.source === 'external' ? '外部' : '内嵌'}</span>
+                    ) : null}
+                    {current ? (
+                      <span className="cover-picker-current">
+                        <Check size={11} />
+                        当前封面
+                      </span>
+                    ) : null}
+                    {busy ? (
+                      <span className="cover-picker-loading">
+                        <LoaderCircle size={17} className="spin" />
+                      </span>
+                    ) : null}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="cover-picker-tip">
+              共 {bodyImages.length} 张正文图片；外部或内嵌图片选用时会自动转存到本站。
+            </p>
+          </>
+        )}
       </Modal>
 
       <ConfirmDialog

@@ -12,9 +12,10 @@ const time = new Date().toISOString()
 const user = { id: 'alice', username: 'alice', displayName: 'Alice', email: 'alice@example.com', avatarUrl: null, createdAt: time }
 const items = Array.from({ length: 9 }, (_, index) => ({ id: `doc-${index}`, title: `菜单测试文档 ${index}`, excerpt: '测试卡片底部菜单', bookId: null, bookName: null,
   coverImage: null, tags: [], favorite: false, status: 'ready', wordCount: 59, imageCount: 0, videoCount: 0, createdAt: time, updatedAt: time, deletedAt: null }))
+const books = [{ id: 'book-1', name: '影视推荐', description: '', color: '#00b96b', docCount: 0, createdAt: time, updatedAt: time }]
 const app = express()
 app.get('/api/auth/me', (_req, res) => res.json({ user }))
-app.get('/api/books', (_req, res) => res.json({ books: [] }))
+app.get('/api/books', (_req, res) => res.json({ books }))
 app.get('/api/contents', (req, res) => res.json({ items, total: items.length, page: 1, pageSize: Number(req.query.pageSize) || 24 }))
 app.get('/api/contents/:id', (req, res) => res.json({ content: { ...items.find((item) => item.id === req.params.id), contentHtml: '<p>测试正文</p>', contentJson: {} } }))
 app.use(express.static(path.join(root, 'web', 'dist')))
@@ -33,6 +34,18 @@ try {
   page.on('pageerror', (error) => errors.push(error.message))
   const base = `http://127.0.0.1:${server.address().port}`
   await page.goto(`${base}/library`)
+  await page.locator('.book-row').first().waitFor()
+  const rowMetrics = await page.locator('.book-row').evaluateAll((nodes) => nodes.map((row) => {
+    const count = row.querySelector('.book-count')?.getBoundingClientRect()
+    const icon = row.querySelector('.book-icon')
+    const iconRect = icon?.getBoundingClientRect()
+    return { countRight: count?.right, iconWidth: iconRect?.width, iconHeight: iconRect?.height, iconTag: icon?.tagName?.toLowerCase(), iconClass: icon?.getAttribute('class') || '' }
+  }))
+  assert.ok(rowMetrics.length >= 2, 'expected a book row and the unfiled row')
+  const countRights = rowMetrics.map((item) => item.countRight)
+  assert.ok(Math.max(...countRights) - Math.min(...countRights) <= 1, `sidebar counts are not aligned: ${countRights}`)
+  assert.ok(rowMetrics.every((item) => item.iconWidth === rowMetrics[0].iconWidth && item.iconHeight === rowMetrics[0].iconHeight), 'book and unfiled icons differ in size')
+  assert.ok(rowMetrics.every((item) => item.iconTag === 'svg' && item.iconClass.includes('lucide-folder')), 'book and unfiled rows should both use the folder icon')
   const trigger = page.getByRole('button', { name: '「菜单测试文档 0」更多操作', exact: true })
   async function openMenu(button = trigger) {
     await button.scrollIntoViewIfNeeded()

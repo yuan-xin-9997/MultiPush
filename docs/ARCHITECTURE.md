@@ -14,6 +14,7 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/contents  内容 CRUD、软删除、收藏、统计
   ├─ routes/media     上传（multer → DATA_DIR/uploads）
   ├─ routes/renders   调用渲染器、保存历史
+  ├─ routes/platform-sms 平台手机验证码登录（知乎/微博/头条/百家号/豆瓣/掘金/抖音）
   ├─ routes/weibo     微博扫码登录、发布与核实
   ├─ routes/toutiao   今日头条扫码登录、文章发布与核实
   ├─ routes/baijiahao 百家号扫码登录、文章发布与核实
@@ -22,6 +23,7 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/jianshu   简书 Cookie 连接、草稿/文章发布与核实
   ├─ routes/ai        AI 配置、会话、消息与工具调用
   ├─ routes/batch     批量渲染 / 批量发布任务
+  ├─ sms-login.ts     共享短信登录浏览器流程与会话导入
   ├─ ai.ts            OpenAI 兼容模型客户端与业务工具
   ├─ batch.ts         顺序批量任务执行器
   ├─ renderers/*      平台规则渲染（纯函数，服务端）

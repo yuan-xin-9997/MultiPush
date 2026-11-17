@@ -84,6 +84,8 @@ import type {
   BatchJob,
   BatchPublishInput,
   BatchRenderInput,
+  SmsLogin,
+  SmsLoginPlatform,
 } from '@shared/types'
 
 const TOKEN_KEY = 'multipush_token'
@@ -391,6 +393,21 @@ export const api = {
     getSession: (id: string) => request<{ session: AiSessionDetail }>(`/api/ai/sessions/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     deleteSession: (id: string) => request<{ ok: true }>(`/api/ai/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     sendMessage: (id: string, message: string) => request<AiChatResult>(`/api/ai/sessions/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ message }) }),
+  },
+
+  platformSms: {
+    start: (platform: SmsLoginPlatform, phone: string) =>
+      request<{ login: SmsLogin }>(`/api/platform-sms/${platform}/start`, {
+        method: 'POST',
+        body: JSON.stringify({ phone }),
+      }),
+    verify: (platform: SmsLoginPlatform, id: string, code: string) =>
+      request<{ login: SmsLogin }>(`/api/platform-sms/${platform}/${encodeURIComponent(id)}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      }),
+    cancel: (platform: SmsLoginPlatform, id: string) =>
+      request<{ ok: true }>(`/api/platform-sms/${platform}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
 
   batch: {

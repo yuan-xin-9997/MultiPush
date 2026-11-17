@@ -8,8 +8,9 @@
 
 - **多用户**：注册、登录、JWT 鉴权，内容按用户隔离。
 - **类语雀内容库**：知识库分组、全部内容、收藏、回收站、搜索、排序、卡片/列表视图、复制、移动、批量操作。
-- **类语雀编辑器**：Tiptap 富文本、`/` 快捷插入菜单、标题/列表/任务/表格/代码/引用/图片/视频/链接/颜色/对齐、目录大纲、字数统计、自动保存、封面与标签。
+- **类语雀编辑器**：Tiptap 富文本、`/` 快捷插入菜单、标题/列表/任务/表格/代码/引用/图片/视频/链接/颜色/对齐、目录大纲、字数统计、自动保存、封面与标签；封面支持本地上传，也可一键选用正文中的图片。
 - **导入 / 导出**：批量导入 Markdown、HTML、TXT、MultiPush JSON；单篇导出 Markdown/HTML/JSON；多选打包 ZIP。导入与粘贴会自动把“图片 + 紧邻图注”合并为 `figure/figcaption`。
+- **平台登录**：知乎、微博、今日头条、百家号、豆瓣、掘金、抖音支持「手机验证码登录」，在 MultiPush 内输入手机号和短信验证码即可连接；不保存平台密码，扫码登录保留为兜底。遇到滑块或安全验证会停止并提示改用扫码。该能力复用现有 Playwright Chromium 运行环境。详见 [手机验证码登录说明](docs/SMS_LOGIN.md)。
 - **智能渲染**：
   - 图文 figure/figcaption：编辑器保留、历史 `p+p` 自动归一化；公众号、知乎、博客统一输出 figure，图片下边距 0、图注上边距 8px，不再出现空行。
   - 微信公众号：移动端图文排版、内联样式、复制富文本、下载 HTML。
@@ -159,6 +160,9 @@ npm test            # 后端 + 前端单元测试
 npm run test:web    # 前端 Tiptap / 导入归一化测试
 npm run normalize:figures -- --db=.data/multipush.sqlite --report  # 历史图注迁移 dry-run
 node scripts/smoke-figure-captions.mjs  # 构建后跑 21 组图文 E2E（编辑器/三平台渲染）
+node scripts/smoke-editor-cover.mjs     # 构建后验证封面上传与正文选图
+node scripts/smoke-sms-login-ui.mjs      # 构建后验证 7 个平台的手机验证码登录弹窗
+npx tsx scripts/smoke-sms-login-selectors.mts # 真实登录页选择器检查（不发短信）
 node scripts/smoke-douban-ui.mjs        # 构建后跑豆瓣渲染/发布页 UI 冒烟
 node scripts/smoke-juejin-jianshu-ui.mjs # 构建后跑掘金/简书发布页 UI 冒烟
 npm run build       # 构建前端与后端单文件

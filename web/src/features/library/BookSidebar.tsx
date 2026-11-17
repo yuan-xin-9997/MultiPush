@@ -4,7 +4,6 @@ import {
   BookOpen,
   Ellipsis,
   Folder,
-  Inbox,
   Layers,
   LoaderCircle,
   PenLine,
@@ -214,7 +213,7 @@ export default function BookSidebar({
                       onClick={onClose}
                       title={book.name}
                     >
-                      <span className="book-color" style={{ backgroundColor: book.color || '#00b96b' }} />
+                      <Folder size={15} className="book-icon" style={{ color: book.color || '#00b96b' }} fill="currentColor" fillOpacity={0.16} aria-hidden="true" />
                       <span className="book-name">{book.name}</span>
                       <span className="book-count">{formatNumber(book.docCount)}</span>
                     </NavLink>
@@ -260,10 +259,11 @@ export default function BookSidebar({
                   className="book-row-link"
                   onClick={onClose}
                 >
-                  <Inbox size={15} className="book-unfiled-icon" />
+                  <Folder size={15} className="book-icon book-icon-unfiled" fill="currentColor" fillOpacity={0.12} aria-hidden="true" />
                   <span className="book-name">未分组</span>
                   <span className="book-count">{formatNumber(counts.unfiled)}</span>
                 </NavLink>
+                <span className="book-row-menu-spacer" aria-hidden="true" />
               </div>
             ) : null}
 

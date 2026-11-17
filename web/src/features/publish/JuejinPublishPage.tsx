@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, CheckCircle2, ExternalLink, FileText, LoaderCircle, LogOut, QrCode, RefreshCw, Send, ShieldCheck } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ExternalLink, FileText, LoaderCircle, LogOut, QrCode, RefreshCw, Send, ShieldCheck, Smartphone } from 'lucide-react'
 import { toast } from 'sonner'
 import type { JuejinAccount, JuejinLogin, JuejinPublication, JuejinResolveInput, RenderListItem, RenderRecord } from '@shared/types'
 import { api, ApiError } from '@/lib/api'
@@ -8,6 +8,8 @@ import { getErrorMessage } from '@/lib/errors'
 import { formatDateTime } from '@/lib/utils'
 import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import SmsLoginModal from './SmsLoginModal'
+import { useSmsLogin } from './useSmsLogin'
 
 const labels: Record<JuejinPublication['status'], string> = { running: '处理中', draft: '草稿', published: '已发布', failed: '失败', uncertain: '结果待核实' }
 const categories = [
@@ -27,6 +29,17 @@ export default function JuejinPublishPage() {
   const [recordLoading, setRecordLoading] = useState(false)
   const [publications, setPublications] = useState<JuejinPublication[]>([])
   const [login, setLogin] = useState<JuejinLogin | null>(null)
+  const smsLogin = useSmsLogin({
+    platform: 'juejin',
+    onConnected: (login) => {
+      setAccount({ status: 'connected', name: login.name || '掘金账号', checkedAt: new Date().toISOString() })
+      setLogin(null)
+      setLoginError('')
+      setLoginBusy(false)
+      setLoginOpen(false)
+      toast.success('掘金已连接，登录状态已保存')
+    },
+  })
   const [loginOpen, setLoginOpen] = useState(false)
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginError, setLoginError] = useState('')
@@ -153,7 +166,7 @@ export default function JuejinPublishPage() {
   return <div className="publish-page juejin-publish-page">
     <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 掘金</span><h1>把内容发布到掘金</h1><p>连接掘金账号，选择技术分类和标签，保存草稿或直接发布文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
-    <section className="publish-account" aria-label="掘金账号"><span className="publish-account-icon">掘</span><div className="publish-account-copy"><h2>{account?.name || '掘金账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存，下次访问和服务重启后自动复用；失效时重新扫码。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码连接。' : '使用掘金 App 扫描官方二维码登录。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div><span className={`publish-status ${account?.status === 'connected' ? 'is-success' : ''}`}>{account?.status === 'connected' ? <><CheckCircle2 size={13} />已连接</> : account?.status === 'expired' ? '已过期' : '未连接'}</span><div className="publish-account-actions">{account?.status === 'connected' ? <button type="button" className="btn btn-sm" disabled={busy || loginBusy} onClick={() => setConfirmation('disconnect')}><LogOut size={14} />断开连接</button> : <button type="button" className="btn btn-primary" disabled={busy || loginBusy || refreshing} onClick={() => void startLogin()}><QrCode size={16} />扫码连接掘金</button>}{login && ['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn btn-sm" onClick={() => setLoginOpen(true)}>查看登录二维码</button> : null}</div></section>
+    <section className="publish-account" aria-label="掘金账号"><span className="publish-account-icon">掘</span><div className="publish-account-copy"><h2>{account?.name || '掘金账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存，下次访问和服务重启后自动复用；失效时重新扫码或使用手机验证码。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码或使用手机验证码连接。' : '使用掘金 App 扫码登录，或使用手机验证码登录。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div><span className={`publish-status ${account?.status === 'connected' ? 'is-success' : ''}`}>{account?.status === 'connected' ? <><CheckCircle2 size={13} />已连接</> : account?.status === 'expired' ? '已过期' : '未连接'}</span><div className="publish-account-actions">{account?.status === 'connected' ? <button type="button" className="btn btn-sm" disabled={busy || loginBusy} onClick={() => setConfirmation('disconnect')}><LogOut size={14} />断开连接</button> : <><button type="button" className="btn btn-primary" disabled={busy || loginBusy || refreshing} onClick={() => void startLogin()}><QrCode size={16} />扫码连接掘金</button><button type="button" className="btn" disabled={busy || loginBusy || refreshing || smsLogin.busy || loginOpen} onClick={smsLogin.openModal}><Smartphone size={15} />手机验证码登录</button></>}{login && ['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn btn-sm" onClick={() => setLoginOpen(true)}>查看登录二维码</button> : null}</div></section>
     <div className="publish-compose-grid"><section className="publish-panel">
       <div className="publish-section-head"><h2>准备发布</h2><p>使用渲染工作台中已保存的掘金排版。</p></div>
       {!renders.length && !selectedId && !refreshing ? <div className="publish-empty"><p>先生成一篇掘金排版</p><button type="button" className="btn btn-primary" onClick={() => navigate('/render')}>去渲染内容<ArrowRight size={14} /></button></div> : <label className="publish-field">选择内容<select className="input" value={selectedId} disabled={busy} onChange={event => { setError(''); setParams({ platform: 'juejin', renderId: event.target.value }) }}><option value="" disabled>选择掘金排版</option>{selectedId && !renders.some(item => item.id === selectedId) ? <option value={selectedId}>指定的排版记录</option> : null}{renders.map(item => <option key={item.id} value={item.id}>{item.contentTitle} · {formatDateTime(item.createdAt)}</option>)}</select></label>}
@@ -171,7 +184,19 @@ export default function JuejinPublishPage() {
       </> : null}
     </section><aside className="publish-panel publish-preview-panel"><div className="publish-section-head"><h2>掘金预览</h2><p>以掘金实际编辑器和展示效果为准。</p></div>{article ? <div className="juejin-publish-preview"><h3>{article.title}</h3><iframe title="掘金预览" srcDoc={article.html} sandbox="" /></div> : <div className="publish-empty"><p>选择内容后预览掘金文章</p></div>}</aside></div>
     <section className="publish-panel publish-history"><div className="publish-section-head"><h2>掘金发布记录</h2><p>发布结果会在这里更新，结果待核实时请先到掘金草稿箱核对。</p></div>{!publications.length ? <div className="publish-empty"><p>还没有掘金发布记录</p></div> : <div className="publish-history-list">{publications.map(item => <article key={item.id} className="publish-history-item"><div className="publish-history-title"><strong>{item.title}</strong><span className={`publish-status ${item.status === 'published' || item.status === 'draft' ? 'is-success' : item.status === 'failed' ? 'is-error' : item.status === 'uncertain' ? 'is-warning' : ''}`}>{labels[item.status]}</span></div><small>{item.mode === 'draft' ? '草稿' : '发布'} · {formatDateTime(item.createdAt)}</small><p>{item.message}</p>{safeUrl(item.url) ? <a className="btn btn-sm" href={item.url!} target="_blank" rel="noreferrer">{item.status === 'draft' ? '打开草稿' : '查看文章'}<ExternalLink size={13} /></a> : null}{item.status === 'uncertain' ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(item)}>核实结果</button> : null}{item.resolutions?.length ? <details className="publish-resolution-history"><summary>核实记录（{item.resolutions.length}）</summary>{item.resolutions.map(entry => <p key={entry.id}><small>{formatDateTime(entry.createdAt)}</small> · {entry.message}</p>)}</details> : null}</article>)}</div>}</section>
-    <p className="publish-bottom-note"><ShieldCheck size={14} />使用掘金官方二维码登录；草稿与发布均通过掘金网页接口完成，遇到安全验证会停止并保留记录。</p>
+    <p className="publish-bottom-note"><ShieldCheck size={14} />使用掘金官方二维码或手机验证码登录；草稿与发布均通过掘金网页接口完成，遇到安全验证会停止并保留记录。</p>
+    <SmsLoginModal
+      open={smsLogin.open}
+      onClose={smsLogin.close}
+      platformName="掘金"
+      platformLoginUrl="https://juejin.cn/login"
+      login={smsLogin.login}
+      busy={smsLogin.busy}
+      error={smsLogin.error}
+      onStart={smsLogin.start}
+      onVerify={smsLogin.verify}
+      onReset={smsLogin.reset}
+    />
     <Modal open={loginOpen} onClose={() => setLoginOpen(false)} title="连接掘金" subtitle="使用掘金 App 扫码登录" size="compact"><div className="publish-login" aria-live="polite">{loginBusy || login?.status === 'waiting' && !login.qrCode ? <><LoaderCircle size={30} className="spin" /><p>正在获取掘金官方登录二维码…</p></> : login ? <>{login.qrCode && ['waiting', 'scanned'].includes(login.status) ? <img className="publish-login-qr" src={login.qrCode} alt="掘金官方登录二维码" /> : <QrCode size={32} />}<p>{login.message}</p><small>有效期至 {formatDateTime(login.expiresAt)}</small>{!['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn" onClick={() => void startLogin()}>重新获取二维码</button> : null}</> : null}{loginError ? <p className="publish-failure-message" role="alert">{loginError}</p> : null}{!loginBusy && !login ? <button type="button" className="btn btn-primary" onClick={() => void startLogin()}>重新连接</button> : null}</div></Modal>
     <Modal open={!!resolveItem} onClose={() => { if (!resolveBusy) setResolveItem(null) }} title="核实掘金发布结果" subtitle={resolveItem?.title} size="compact" closeOnBackdrop={!resolveBusy}><div className="publish-resolution-actions"><button type="button" className="btn" disabled={resolveBusy} onClick={() => void resolveResult('check')}><RefreshCw size={14} />重新自动核实</button><button type="button" className={`btn ${resolveChoice === 'not_published' ? 'btn-primary' : ''}`} disabled={resolveBusy} onClick={() => { setResolveChoice('not_published'); setResolveError('') }}>我已核实，未发布</button><button type="button" className={`btn ${resolveChoice === 'published' ? 'btn-primary' : ''}`} disabled={resolveBusy} onClick={() => { setResolveChoice('published'); setResolveError('') }}>我已核实，已发布</button></div>{resolveChoice === 'not_published' ? <><p className="publish-warning">请确认掘金草稿箱/文章中确实没有这篇内容。确认后允许再次提交。</p><button type="button" className="btn btn-primary" disabled={resolveBusy} onClick={() => void resolveResult('not_published')}>确认未发布，解除限制</button></> : null}{resolveChoice === 'published' ? <><label className="publish-field">已发布掘金文章链接<input className="input" type="url" value={resolveUrl} maxLength={2048} disabled={resolveBusy} placeholder="https://juejin.cn/post/文章编号" onChange={event => setResolveUrl(event.target.value)} /></label><button type="button" className="btn btn-primary" disabled={resolveBusy || !resolveUrl.trim()} onClick={() => void resolveResult('published')}>确认已发布并关联</button></> : null}{resolveBusy ? <p className="publish-muted"><LoaderCircle size={15} className="spin" />正在保存核实结果…</p> : null}{resolveError ? <p className="publish-failure-message" role="alert">{resolveError}</p> : null}</Modal>
     <ConfirmDialog open={confirmation === 'draft' || confirmation === 'publish'} title={confirmation === 'draft' ? '保存到掘金草稿箱？' : '发布到掘金？'} description={<><strong>{article?.title}</strong><p>{confirmation === 'draft' ? '草稿不会公开，可在掘金编辑器继续修改。' : `文章将使用分类「${categories.find(item => item.id === categoryId)?.name}」和标签「${tags || '默认'}」发布。`}</p></>} confirmLabel={confirmation === 'draft' ? '确认保存草稿' : '确认发布到掘金'} tone="primary" loading={submitting} onConfirm={() => submit(confirmation === 'draft' ? 'draft' : 'publish')} onClose={() => setConfirmation(null)} />

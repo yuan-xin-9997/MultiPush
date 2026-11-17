@@ -52,6 +52,8 @@ import { BatchService } from './batch'
 import { AiService } from './ai'
 import { createBatchRouter } from './routes/batch'
 import { createAiRouter } from './routes/ai'
+import { SmsLoginManager } from './sms-login'
+import { createPlatformSmsRouter } from './routes/platform-sms'
 
 function securityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction): void {
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -164,6 +166,16 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.batch = batch
   const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, batch)
   app.locals.ai = ai
+  const smsLogin = new SmsLoginManager({
+    zhihu: { importPublisherSession: (userId, state) => zhihu.importPublisherSession(userId, state) },
+    weibo: { importPublisherSession: (userId, state) => weibo.importPublisherSession(userId, state) },
+    toutiao: { importPublisherSession: (userId, state) => toutiao.importPublisherSession(userId, state) },
+    baijiahao: { importPublisherSession: (userId, state) => baijiahao.importPublisherSession(userId, state) },
+    douban: { importPublisherSession: (userId, state) => douban.importPublisherSession(userId, state) },
+    juejin: { importPublisherSession: (userId, state) => juejin.importPublisherSession(userId, state) },
+    douyin: { importPublisherSession: (userId, state) => douyin.importPublisherSession(userId, state) },
+  })
+  app.locals.smsLogin = smsLogin
   app.disable('x-powered-by')
   app.use(securityHeaders)
   if (config.desktopMode) app.use(desktopLoopbackGuard)
@@ -195,6 +207,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/sspai', requireAuth, createSspaiRouter(sspai))
   app.use('/api/blog', requireAuth, createBlogRouter(blog))
   app.use('/api/ai', requireAuth, createAiRouter(ai))
+  app.use('/api/platform-sms', requireAuth, createPlatformSmsRouter(smsLogin))
   app.use('/api/batch', requireAuth, createBatchRouter(batch))
   app.use('/api', createMetaRouter(config, requireAuth))
   app.use('/api', apiNotFound)

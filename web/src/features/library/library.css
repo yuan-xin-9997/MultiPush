@@ -86,9 +86,11 @@
 }
 
 .book-nav-count {
+  min-width: 20px;
   color: var(--muted-2);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .book-nav-item.active .book-nav-count {
@@ -173,15 +175,11 @@
   text-decoration: none;
 }
 
-.book-color {
-  width: 7px;
-  height: 7px;
+.book-icon {
   flex: 0 0 auto;
-  border-radius: 50%;
 }
 
-.book-unfiled-icon {
-  margin: 0 2px;
+.book-icon-unfiled {
   color: var(--muted-2);
 }
 
@@ -193,15 +191,23 @@
 }
 
 .book-count {
+  min-width: 18px;
   color: var(--muted-2);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .book-row-menu {
   opacity: 0;
   padding-right: 4px;
   transition: opacity 0.15s ease;
+}
+
+/* Keep the unfiled row's count in the same column as rows with a menu. */
+.book-row-menu-spacer {
+  width: 28px;
+  flex: 0 0 28px;
 }
 
 .book-row:hover .book-row-menu,

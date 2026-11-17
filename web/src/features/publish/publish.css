@@ -137,3 +137,21 @@
 .jianshu-publish-preview iframe { display: block; width: 100%; height: 590px; border: 0; border-top: 1px solid var(--line); margin-top: 12px; background: #fff; }
 .jianshu-publish-page .publish-mode-switch { display: flex; gap: 8px; margin-top: 14px; }
 .publish-connect-form { display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- Platform mobile SMS login ---------- */
+.sms-login-form { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 6px; }
+.sms-login-form .publish-field { margin-top: 0; }
+.sms-login-phone { display: flex; align-items: center; gap: 0; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.sms-login-phone:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.sms-login-prefix { display: inline-flex; height: 36px; align-items: center; padding: 0 9px; border-right: 1px solid var(--line); background: var(--bg-soft); color: var(--muted); font-size: 12px; font-weight: 500; }
+.sms-login-phone .input { border: 0; border-radius: 0; box-shadow: none; }
+.sms-login-phone .input:focus { box-shadow: none; }
+.sms-login-agree { display: flex; align-items: flex-start; gap: 7px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.sms-login-agree input { margin-top: 2px; accent-color: var(--brand); }
+.sms-login-agree a { color: var(--brand-dark); }
+.sms-login-sent { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 9px 10px; border-radius: 8px; background: var(--bg-soft); color: var(--muted); font-size: 11.5px; }
+.sms-login-sent svg { color: var(--brand-dark); }
+.sms-login-sent .btn-link { margin-left: auto; font-size: 11.5px; }
+.sms-login-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.sms-login-actions .btn-primary { flex: 1; min-width: 140px; }
+.sms-login-hint { margin: 0; color: var(--muted-2); font-size: 10.5px; line-height: 1.6; }

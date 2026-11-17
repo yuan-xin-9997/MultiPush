@@ -430,6 +430,21 @@ export interface ZhihuAccount {
   checkedAt: string | null
 }
 
+/** Platforms whose official login page supports a mainland mobile SMS code. */
+export type SmsLoginPlatform = 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'douyin'
+
+export interface SmsLogin {
+  id: string
+  platform: SmsLoginPlatform
+  status: 'waiting' | 'verifying' | 'connected' | 'expired' | 'failed'
+  message: string
+  expiresAt: string
+  /** Masked mobile number; the full number and SMS code are never returned. */
+  phoneMasked: string
+  /** Connected platform account name when status is `connected`. */
+  name?: string | null
+}
+
 export interface ZhihuLogin {
   id: string
   status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'

@@ -28,6 +28,9 @@
     "test:web": "npm run test -w web",
     "normalize:figures": "tsx scripts/normalize-figures.ts",
     "smoke:figures": "npm run build && node scripts/smoke-figure-captions.mjs",
+    "smoke:editor-cover": "npm run build && node scripts/smoke-editor-cover.mjs",
+    "smoke:sms-login": "npm run build && node scripts/smoke-sms-login-ui.mjs",
+    "smoke:sms-login-selectors": "npx tsx scripts/smoke-sms-login-selectors.mts",
     "smoke:douban": "npm run build && node scripts/smoke-douban-ui.mjs",
     "smoke:juejin-jianshu": "npm run build && node scripts/smoke-juejin-jianshu-ui.mjs",
     "smoke:draft-modes": "npm run build && node scripts/smoke-draft-modes-ui.mjs"

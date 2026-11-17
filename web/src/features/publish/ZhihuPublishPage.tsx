@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, CheckCircle2, ExternalLink, FileText, LoaderCircle, LogOut, QrCode, RefreshCw, Send, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ExternalLink, FileText, LoaderCircle, LogOut, QrCode, RefreshCw, Send, ShieldCheck, Smartphone, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { MediaAsset, RenderListItem, RenderRecord, ZhihuAccount, ZhihuLogin, ZhihuPublication, ZhihuResolveInput } from '@shared/types'
 import { absoluteUrl, api, ApiError } from '@/lib/api'
@@ -8,6 +8,8 @@ import { getErrorMessage } from '@/lib/errors'
 import { formatDateTime } from '@/lib/utils'
 import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import SmsLoginModal from './SmsLoginModal'
+import { useSmsLogin } from './useSmsLogin'
 
 const labels: Record<ZhihuPublication['status'], string> = { running: '处理中', draft: '已保存草稿', published: '已发布', failed: '失败', uncertain: '结果待核实' }
 const safeUrl = (value: string | null) => !!value && /^https:\/\/zhuanlan\.zhihu\.com\/p\/\d+(?:\/edit)?$/.test(value)
@@ -35,6 +37,17 @@ export default function ZhihuPublishPage() {
   const [resolveUrl, setResolveUrl] = useState('')
   const [resolveBusy, setResolveBusy] = useState(false)
   const [resolveError, setResolveError] = useState('')
+  const smsLogin = useSmsLogin({
+    platform: 'zhihu',
+    onConnected: (login) => {
+      setAccount({ status: 'connected', name: login.name || '知乎账号', checkedAt: new Date().toISOString() })
+      setLogin(null)
+      setLoginError('')
+      setLoginBusy(false)
+      setLoginOpen(false)
+      toast.success('知乎已连接，登录状态已保存')
+    },
+  })
   const [deleteTarget, setDeleteTarget] = useState<ZhihuPublication | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const article = record?.results.find(result => result.platform === 'zhihu')
@@ -183,9 +196,9 @@ export default function ZhihuPublishPage() {
     <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 知乎</span><h1>把内容发布到知乎</h1><p>连接知乎账号，选择排版，一键保存草稿或正式发布文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
     <section className="publish-account" aria-label="知乎账号">
-      <span className="publish-account-icon">知</span><div className="publish-account-copy"><h2>{account?.name || '知乎账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存，下次访问和服务重启后自动复用；失效时重新扫码。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码连接。' : '使用知乎 App 扫描官方二维码，并在手机上确认登录。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div>
+      <span className="publish-account-icon">知</span><div className="publish-account-copy"><h2>{account?.name || '知乎账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存，下次访问和服务重启后自动复用；失效时重新扫码或使用手机验证码。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码或使用手机验证码连接。' : '使用知乎 App 扫码登录，或使用手机验证码连接。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div>
       <span className={`publish-status ${account?.status === 'connected' ? 'is-success' : ''}`}>{account?.status === 'connected' ? <><CheckCircle2 size={13} />已连接</> : account?.status === 'expired' ? '已过期' : '未连接'}</span>
-      <div className="publish-account-actions">{account?.status === 'connected' ? <button type="button" className="btn btn-sm" disabled={busy || loginBusy} onClick={() => setConfirmation('disconnect')}><LogOut size={14} />断开连接</button> : <button type="button" className="btn btn-primary" disabled={busy || loginBusy || refreshing} onClick={() => void startLogin()}><QrCode size={16} />扫码连接知乎</button>}{login && ['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn btn-sm" onClick={() => setLoginOpen(true)}>查看登录二维码</button> : null}</div>
+      <div className="publish-account-actions"> {account?.status === 'connected' ? <button type="button" className="btn btn-sm" disabled={busy || loginBusy} onClick={() => setConfirmation('disconnect')}><LogOut size={14} />断开连接</button> : <><button type="button" className="btn btn-primary" disabled={busy || loginBusy || refreshing} onClick={() => void startLogin()}><QrCode size={16} />扫码连接知乎</button><button type="button" className="btn" disabled={busy || loginBusy || refreshing || smsLogin.busy || loginOpen} onClick={smsLogin.openModal}><Smartphone size={15} />手机验证码登录</button></>}{login && ['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn btn-sm" onClick={() => setLoginOpen(true)}>查看登录二维码</button> : null}</div>
     </section>
     <div className="publish-compose-grid"><section className="publish-panel">
       <div className="publish-section-head"><h2>准备发布</h2><p>使用渲染工作台中已保存的知乎排版，支持知乎专栏文章。</p></div>
@@ -200,7 +213,19 @@ export default function ZhihuPublishPage() {
       </> : null}
     </section><aside className="publish-panel publish-preview-panel"><div className="publish-section-head"><h2>知乎文章预览</h2><p>以知乎实际排版和审核结果为准。</p></div>{article ? <><h3>{article.title}</h3><iframe title="待发布的知乎正文" sandbox="" srcDoc={`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>body{padding:18px;font-family:sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}</style><body>${article.html}</body></html>`} /></> : <div className="publish-empty"><p>选择内容后预览知乎排版</p></div>}</aside></div>
     <section className="publish-panel publish-history"><div className="publish-section-head"><h2>知乎发布记录</h2><p>草稿和正式发布分别记录，处理中的任务会自动更新。</p></div>{!publications.length ? <div className="publish-empty"><p>还没有知乎发布记录</p></div> : <div className="publish-history-list">{publications.map(item => <article key={item.id} className="publish-history-item"><div className="publish-history-title"><strong>{item.title}</strong><span className={`publish-status ${item.status === 'published' || item.status === 'draft' ? 'is-success' : item.status === 'failed' ? 'is-error' : ''}`}>{labels[item.status]}</span></div><small>{item.mode === 'draft' ? '保存草稿' : '正式发布'} · {formatDateTime(item.createdAt)}</small><p>{item.message}</p>{safeUrl(item.url) ? <a className="btn btn-sm" href={item.url!} target="_blank" rel="noreferrer">{item.status === 'published' ? '查看知乎文章' : '打开知乎草稿'}<ExternalLink size={13} /></a> : null}{item.status === 'uncertain' ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(item)}>核实结果</button> : null}{item.mode === 'draft' && item.status !== 'running' ? <button type="button" className="btn btn-sm publish-delete-button" disabled={busy || deleteBusy} onClick={() => setDeleteTarget(item)}><Trash2 size={13} />删除草稿</button> : null}{item.resolutions?.length ? <details className="publish-resolution-history"><summary>核实记录（{item.resolutions.length}）</summary>{item.resolutions.map(entry => <p key={entry.id}><small>{formatDateTime(entry.createdAt)}</small> · {entry.message}</p>)}</details> : null}</article>)}</div>}</section>
-    <p className="publish-bottom-note"><ShieldCheck size={14} />使用知乎官方二维码登录，无需提供知乎密码。知乎要求额外安全验证时，会显示原因并保留草稿。</p>
+    <p className="publish-bottom-note"><ShieldCheck size={14} />使用知乎官方二维码或手机验证码登录，无需提供知乎密码。知乎要求额外安全验证时，会显示原因并保留草稿。</p>
+    <SmsLoginModal
+      open={smsLogin.open}
+      onClose={smsLogin.close}
+      platformName="知乎"
+      platformLoginUrl="https://www.zhihu.com/signin"
+      login={smsLogin.login}
+      busy={smsLogin.busy}
+      error={smsLogin.error}
+      onStart={smsLogin.start}
+      onVerify={smsLogin.verify}
+      onReset={smsLogin.reset}
+    />
     <Modal open={loginOpen} onClose={() => setLoginOpen(false)} title="连接知乎" subtitle="使用知乎 App 扫码，并在手机上确认登录" size="compact"><div className="publish-login" aria-live="polite">{loginBusy || login?.status === 'waiting' && !login.qrCode ? <><LoaderCircle size={30} className="spin" /><p>正在获取知乎官方登录二维码…</p></> : login ? <>{login.qrCode && ['waiting', 'scanned'].includes(login.status) ? <img className="publish-login-qr" src={login.qrCode} alt="知乎官方登录二维码" /> : <QrCode size={32} />}<p>{login.message}</p><small>有效期至 {formatDateTime(login.expiresAt)}</small>{!['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn" onClick={() => void startLogin()}>重新获取二维码</button> : null}</> : null}{loginError ? <p className="publish-failure-message" role="alert">{loginError}</p> : null}{!loginBusy && !login ? <button type="button" className="btn btn-primary" onClick={() => void startLogin()}>重新连接</button> : null}</div></Modal>
     <Modal open={!!resolveItem} onClose={() => { if (!resolveBusy) setResolveItem(null) }} title="核实知乎发布结果" subtitle={resolveItem?.title} size="compact" closeOnBackdrop={!resolveBusy}>
       <div className="publish-resolution-actions">

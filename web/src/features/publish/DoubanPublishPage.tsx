@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, CheckCircle2, ClipboardCopy, ExternalLink, FileText, LoaderCircle, LogOut, QrCode, RefreshCw, Send, ShieldAlert } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ClipboardCopy, ExternalLink, FileText, LoaderCircle, LogOut, QrCode, RefreshCw, Send, ShieldAlert, Smartphone } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DoubanAccount, DoubanLogin, DoubanPublication, DoubanResolveInput, RenderListItem, RenderRecord } from '@shared/types'
 import { api, ApiError } from '@/lib/api'
@@ -8,6 +8,8 @@ import { getErrorMessage } from '@/lib/errors'
 import { formatDateTime } from '@/lib/utils'
 import Modal from '@/components/Modal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import SmsLoginModal from './SmsLoginModal'
+import { useSmsLogin } from './useSmsLogin'
 
 const labels: Record<DoubanPublication['status'], string> = { running: '处理中', draft: '草稿', published: '已发布', failed: '失败', uncertain: '结果待核实' }
 const safeUrl = (value: string | null) => !!value && /^https:\/\/www\.douban\.com\/note\/\d{6,30}\/$/.test(value)
@@ -21,6 +23,17 @@ export default function DoubanPublishPage() {
   const [recordLoading, setRecordLoading] = useState(false)
   const [publications, setPublications] = useState<DoubanPublication[]>([])
   const [login, setLogin] = useState<DoubanLogin | null>(null)
+  const smsLogin = useSmsLogin({
+    platform: 'douban',
+    onConnected: (login) => {
+      setAccount({ status: 'connected', name: login.name || '豆瓣账号', checkedAt: new Date().toISOString() })
+      setLogin(null)
+      setLoginError('')
+      setLoginBusy(false)
+      setLoginOpen(false)
+      toast.success('豆瓣已连接，登录状态已保存')
+    },
+  })
   const [loginOpen, setLoginOpen] = useState(false)
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginError, setLoginError] = useState('')
@@ -161,9 +174,9 @@ export default function DoubanPublishPage() {
     <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 豆瓣</span><h1>把内容发布到豆瓣日记</h1><p>连接豆瓣账号，选择豆瓣日记排版，发布长文日记；图片会自动转存到豆瓣图床。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
     <section className="publish-account" aria-label="豆瓣账号">
-      <span className="publish-account-icon">豆</span><div className="publish-account-copy"><h2>{account?.name || '豆瓣账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存；豆瓣没有官方开放写接口，发布使用已登录的浏览器会话。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码连接。' : '使用豆瓣 App 扫描官方二维码登录。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div>
+      <span className="publish-account-icon">豆</span><div className="publish-account-copy"><h2>{account?.name || '豆瓣账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存；豆瓣没有官方开放写接口，发布使用已登录的浏览器会话。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码或使用手机验证码连接。' : '使用豆瓣 App 扫码登录，或使用手机验证码连接。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div>
       <span className={`publish-status ${account?.status === 'connected' ? 'is-success' : ''}`}>{account?.status === 'connected' ? <><CheckCircle2 size={13} />已连接</> : account?.status === 'expired' ? '已过期' : '未连接'}</span>
-      <div className="publish-account-actions">{account?.status === 'connected' ? <button type="button" className="btn btn-sm" disabled={busy || loginBusy} onClick={() => setConfirmation('disconnect')}><LogOut size={14} />断开连接</button> : <button type="button" className="btn btn-primary" disabled={busy || loginBusy || refreshing} onClick={() => void startLogin()}><QrCode size={16} />扫码连接豆瓣</button>}{login && ['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn btn-sm" onClick={() => setLoginOpen(true)}>查看登录二维码</button> : null}</div>
+      <div className="publish-account-actions">{account?.status === 'connected' ? <button type="button" className="btn btn-sm" disabled={busy || loginBusy} onClick={() => setConfirmation('disconnect')}><LogOut size={14} />断开连接</button> : <><button type="button" className="btn btn-primary" disabled={busy || loginBusy || refreshing} onClick={() => void startLogin()}><QrCode size={16} />扫码连接豆瓣</button><button type="button" className="btn" disabled={busy || loginBusy || refreshing || smsLogin.busy || loginOpen} onClick={smsLogin.openModal}><Smartphone size={15} />手机验证码登录</button></>}{login && ['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn btn-sm" onClick={() => setLoginOpen(true)}>查看登录二维码</button> : null}</div>
     </section>
     <div className="publish-compose-grid"><section className="publish-panel">
       <div className="publish-section-head"><h2>准备发布</h2><p>使用渲染工作台中已保存的豆瓣排版。</p></div>
@@ -182,7 +195,19 @@ export default function DoubanPublishPage() {
       </> : null}
     </section><aside className="publish-panel publish-preview-panel"><div className="publish-section-head"><h2>豆瓣日记预览</h2><p>以豆瓣实际编辑器和展示效果为准。</p></div>{article ? <div className="douban-publish-preview"><h3>{article.title}</h3><iframe title="豆瓣日记预览" srcDoc={article.html} sandbox="" /></div> : <div className="publish-empty"><p>选择内容后预览豆瓣日记</p></div>}</aside></div>
     <section className="publish-panel publish-history"><div className="publish-section-head"><h2>豆瓣发布记录</h2><p>发布结果会在这里更新，结果待核实时请先到豆瓣日记列表核对。</p></div>{!publications.length ? <div className="publish-empty"><p>还没有豆瓣发布记录</p></div> : <div className="publish-history-list">{publications.map(item => <article key={item.id} className="publish-history-item"><div className="publish-history-title"><strong>{item.title}</strong><span className={`publish-status ${item.status === 'published' ? 'is-success' : item.status === 'failed' ? 'is-error' : item.status === 'uncertain' ? 'is-warning' : ''}`}>{labels[item.status]}</span></div><small>发布 · {formatDateTime(item.createdAt)}</small><p>{item.message}</p>{safeUrl(item.url) ? <a className="btn btn-sm" href={item.url!} target="_blank" rel="noreferrer">查看日记<ExternalLink size={13} /></a> : null}{item.status === 'uncertain' ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(item)}>核实结果</button> : null}{item.resolutions?.length ? <details className="publish-resolution-history"><summary>核实记录（{item.resolutions.length}）</summary>{item.resolutions.map(entry => <p key={entry.id}><small>{formatDateTime(entry.createdAt)}</small> · {entry.message}</p>)}</details> : null}</article>)}</div>}</section>
-    <p className="publish-bottom-note"><ShieldAlert size={14} />豆瓣自动发布属于实验性能力，不绕过登录、验证码或安全验证；遇到验证会停止并保留记录。</p>
+    <p className="publish-bottom-note"><ShieldAlert size={14} />豆瓣自动发布属于实验性能力，不绕过登录、验证码或安全验证；可使用扫码或手机验证码登录，遇到验证会停止并保留记录。</p>
+    <SmsLoginModal
+      open={smsLogin.open}
+      onClose={smsLogin.close}
+      platformName="豆瓣"
+      platformLoginUrl="https://accounts.douban.com/passport/login"
+      login={smsLogin.login}
+      busy={smsLogin.busy}
+      error={smsLogin.error}
+      onStart={smsLogin.start}
+      onVerify={smsLogin.verify}
+      onReset={smsLogin.reset}
+    />
     <Modal open={loginOpen} onClose={() => setLoginOpen(false)} title="连接豆瓣" subtitle="使用豆瓣 App 扫码登录" size="compact"><div className="publish-login" aria-live="polite">{loginBusy || login?.status === 'waiting' && !login.qrCode ? <><LoaderCircle size={30} className="spin" /><p>正在获取豆瓣官方登录二维码…</p></> : login ? <>{login.qrCode && ['waiting', 'scanned'].includes(login.status) ? <img className="publish-login-qr" src={login.qrCode} alt="豆瓣官方登录二维码" /> : <QrCode size={32} />}<p>{login.message}</p><small>有效期至 {formatDateTime(login.expiresAt)}</small>{!['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn" onClick={() => void startLogin()}>重新获取二维码</button> : null}</> : null}{loginError ? <p className="publish-failure-message" role="alert">{loginError}</p> : null}{!loginBusy && !login ? <button type="button" className="btn btn-primary" onClick={() => void startLogin()}>重新连接</button> : null}</div></Modal>
     <Modal open={!!resolveItem} onClose={() => { if (!resolveBusy) setResolveItem(null) }} title="核实豆瓣发布结果" subtitle={resolveItem?.title} size="compact" closeOnBackdrop={!resolveBusy}>
       <div className="publish-resolution-actions">

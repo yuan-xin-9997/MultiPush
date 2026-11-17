@@ -80,6 +80,14 @@ export class BaijiahaoService {
     return check
   }
 
+  /** Persist a verified session created by the shared SMS-login manager. */
+  async importPublisherSession(userId: string, state: PublisherStorageState): Promise<{ name: string }> {
+    this.idle(userId)
+    const result = await this.driver.checkSession(state)
+    this.save(userId, result.state, result.identity)
+    return { name: result.identity.name }
+  }
+
   async startLogin(userId: string): Promise<BaijiahaoLogin> {
     this.idle(userId)
     const pending = [...this.logins.values()].find(entry => entry.userId === userId && entry.preparing)
