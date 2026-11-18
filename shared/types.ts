@@ -6,7 +6,7 @@
  * dependencies so it can be used in either environment.
  */
 
-export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'jianshu' | 'douyin' | 'sspai' | 'blog'
+export type PlatformId = 'wechat' | 'wechatpic' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'jianshu' | 'douyin' | 'sspai' | 'blog'
 
 export type ContentStatus = 'draft' | 'ready'
 
@@ -44,6 +44,17 @@ export const PLATFORMS: PlatformInfo[] = [
     contentTypes: ['image-text', 'video'],
     highlight: '沉浸式图文排版 · 内联样式 · 一键复制',
     limits: { titleMax: 64, bodyMax: 20000, imageMax: 100 },
+  },
+  {
+    id: 'wechatpic',
+    name: '公众号贴图',
+    shortName: '贴图',
+    description: '生成微信公众号图片消息（贴图）所需的标题、配文与图片清单；连接公众号 API 后一键保存为草稿，发表在公众号后台手动完成。',
+    color: '#07c160',
+    softColor: '#e9f9f0',
+    contentTypes: ['image-text'],
+    highlight: '图片消息 · 最多 20 图 · API 建草稿 · 手动发表',
+    limits: { titleMax: 32, bodyMax: 20000, imageMax: 20 },
   },
   {
     id: 'xiaohongshu',
@@ -493,6 +504,37 @@ export interface WechatPublication {
   status: 'running' | 'draft' | 'awaiting_confirmation' | 'published' | 'failed' | 'uncertain'
   message: string
   qrCode: string | null
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WechatpicAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  appId: string | null
+  checkedAt: string | null
+}
+
+export interface WechatpicConnectInput {
+  /** 公众号 AppID，在「设置与开发 → 基本配置」查看。 */
+  appId: string
+  /** 公众号 AppSecret，连接后按用户加密保存。 */
+  appSecret: string
+}
+
+export interface WechatpicPublishInput {
+  renderId: string
+}
+
+export interface WechatpicPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'published' | 'failed' | 'uncertain'
+  message: string
   url: string | null
   remoteId: string | null
   createdAt: string
@@ -1140,4 +1182,4 @@ export interface ApiErrorBody {
   issues?: Array<{ path: string; message: string }>
 }
 
-export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog']
+export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog']

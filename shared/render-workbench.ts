@@ -82,9 +82,10 @@ export interface PublishCheck { label: string; detail: string; ok: boolean; acti
 
 export function publishChecks(render: PlatformRender, stale = false): PublishCheck[] {
   const limits = getPlatformInfo(render.platform).limits
-  const short = render.platform === 'xiaohongshu' || render.platform === 'douyin' || render.platform === 'weibo'
+  const short = render.platform === 'xiaohongshu' || render.platform === 'douyin' || render.platform === 'weibo' || render.platform === 'wechatpic'
   // Caption text includes the title and hashtags that are copied together.
-  const bodyLength = Array.from(render.text ?? '').length
+  // A sticker's body is the plain-text caption alone; the API requires it.
+  const bodyLength = render.platform === 'wechatpic' ? Array.from(getCaptionBody(render)).length : Array.from(render.text ?? '').length
   const titleLength = Array.from(render.title).length
   const images = render.platform === 'xiaohongshu' ? render.cards.length : render.assets.filter((asset) => asset.kind === 'image').length
   return [

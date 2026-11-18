@@ -21,6 +21,9 @@ import { errorHandler } from './errors'
 import { WechatService } from './wechat'
 import { PlaywrightWechatDriver, type WechatBrowserDriver } from './wechat-browser'
 import { createWechatRouter } from './routes/wechat'
+import { WechatpicService } from './wechatpic'
+import { WechatStickerApiDriver, type WechatStickerDriver } from './wechatpic-api'
+import { createWechatpicRouter } from './routes/wechatpic'
 import { ZhihuService } from './zhihu'
 import { PlaywrightZhihuDriver, type ZhihuDriver } from './zhihu-browser'
 import { createZhihuRouter } from './routes/zhihu'
@@ -139,10 +142,12 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver, doubanDriver?: DoubanDriver, juejinDriver?: JuejinDriver, jianshuDriver?: JianshuDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver, doubanDriver?: DoubanDriver, juejinDriver?: JuejinDriver, jianshuDriver?: JianshuDriver, wechatpicDriver?: WechatStickerDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
+  const wechatpic = new WechatpicService(database, config, wechatpicDriver ?? new WechatStickerApiDriver())
+  app.locals.wechatpic = wechatpic
   const zhihu = new ZhihuService(database, config, zhihuDriver ?? new PlaywrightZhihuDriver())
   app.locals.zhihu = zhihu
   const weibo = new WeiboService(database, config, weiboDriver ?? new PlaywrightWeiboDriver())
@@ -200,6 +205,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api', createVideoRouter(database, video, requireAuth))
   app.use('/api/renders', requireAuth, createRendersRouter(database, config))
   app.use('/api/wechat', requireAuth, createWechatRouter(wechat))
+  app.use('/api/wechatpic', requireAuth, createWechatpicRouter(wechatpic))
   app.use('/api/douyin', requireAuth, createDouyinRouter(douyin))
   app.use('/api/xiaohongshu', requireAuth, createXhsRouter(database))
   app.use('/api/zhihu', requireAuth, createZhihuRouter(zhihu))

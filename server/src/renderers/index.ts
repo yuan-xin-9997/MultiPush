@@ -1,6 +1,7 @@
 import type { PlatformId, PlatformRender } from '../../../shared/types'
 import type { PlatformRenderer, RenderInput } from './types'
 import { renderWechat } from './wechat'
+import { renderWechatpic } from './wechatpic'
 import { renderXiaohongshu } from './xiaohongshu'
 import { renderZhihu } from './zhihu'
 import { renderWeibo } from './weibo'
@@ -15,6 +16,7 @@ import { renderBlog } from './blog'
 
 const RENDERERS: Record<PlatformId, PlatformRenderer> = {
   wechat: renderWechat,
+  wechatpic: renderWechatpic,
   xiaohongshu: renderXiaohongshu,
   zhihu: renderZhihu,
   weibo: renderWeibo,

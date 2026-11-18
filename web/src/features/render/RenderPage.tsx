@@ -89,7 +89,7 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
 
-const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog']
+const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog']
 
 const DOWNLOAD_LABELS = {
   html: 'HTML 页面',
@@ -821,6 +821,11 @@ export default function RenderPage() {
         else toast.warning('浏览器仅复制了纯文本；如需保留排版，请下载 HTML')
         return
       }
+      if (activeRender.platform === 'wechatpic') {
+        await copyText(activeRender.text || '')
+        toast.success('贴图文案已复制')
+        return
+      }
       if (activeRender.platform === 'zhihu') {
         await copyText(activeRender.markdown || activeRender.text || '')
         toast.success('知乎 Markdown 已复制')
@@ -1267,14 +1272,16 @@ export default function RenderPage() {
                       {activeRender.previewMode === 'article' ? <FileText size={13} /> : <Video size={13} />}
                       {activeRender.platform === 'wechat'
                         ? '公众号图文'
-                        : activeRender.platform === 'weibo'
-                          ? '微博图文'
-                          : activeRender.platform === 'toutiao'
-                            ? '今日头条图文'
-                          : activeRender.platform === 'douyin'
-                            ? activeRender.videos.length > 0
-                              ? '抖音视频'
-                              : '抖音图文'
+                        : activeRender.platform === 'wechatpic'
+                          ? '公众号贴图'
+                          : activeRender.platform === 'weibo'
+                            ? '微博图文'
+                            : activeRender.platform === 'toutiao'
+                              ? '今日头条图文'
+                            : activeRender.platform === 'douyin'
+                              ? activeRender.videos.length > 0
+                                ? '抖音视频'
+                                : '抖音图文'
                           : activeRender.platform === 'sspai'
                             ? '少数派 Matrix 文章'
                             : activeRender.platform === 'douban'
@@ -1371,6 +1378,62 @@ export default function RenderPage() {
                       <button type="button" className="btn btn-sm btn-primary" onClick={() => void copyCurrent()}>
                         <Copy size={14} />
                         复制富文本
+                      </button>
+                    </div>
+                  </div>
+                ) : activeRender.platform === 'wechatpic' ? (
+                  <div className="wechatpic-scene">
+                    <div className="phone-shell">
+                      <div className="phone-statusbar">
+                        <span>9:41</span>
+                        <span className="phone-status-icons">
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                      </div>
+                      <div className="wechat-phone-nav">
+                        <span className="wechat-nav-dots">···</span>
+                        <span>公众号</span>
+                        <span className="wechat-nav-more">⊙</span>
+                      </div>
+                      <div className="wechat-phone-scroll">
+                        <div className="wechatpic-article-head">
+                          <h1>{activeRender.title}</h1>
+                          <div className="wechatpic-meta-line">
+                            <span>{authorLabel}</span>
+                            <span>今天</span>
+                          </div>
+                        </div>
+                        <div className="wechatpic-images">
+                          {activeRender.assets.filter((asset) => asset.kind === 'image').map((asset) => (
+                            <img key={asset.url} src={absoluteUrl(asset.url)} alt="" loading="lazy" />
+                          ))}
+                        </div>
+                        {activeRender.captionBody ? (
+                          <div className="wechatpic-body">
+                            {activeRender.captionBody.split(/\n{2,}/).filter((part) => part.trim()).map((part, index) => (
+                              <p key={index}>{part}</p>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="wechat-article-foot">阅读 1.2 万 · 分享 96</div>
+                      </div>
+                      <div className="wechat-phone-bottom">
+                        <span>写留言</span>
+                        <span>♡ 328</span>
+                        <span>↗ 96</span>
+                      </div>
+                    </div>
+                    <div className="wechat-side-note">
+                      <span className="wechat-side-icon">
+                        <PlatformGlyph platform="wechatpic" size={18} />
+                      </span>
+                      <h3>贴图（图片消息）</h3>
+                      <p>最多 20 张图，首张即为封面；保存草稿后到公众号后台手动发表。个人号可通过 API 建草稿。</p>
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => void copyCurrent()}>
+                        <Copy size={14} />
+                        复制文案
                       </button>
                     </div>
                   </div>
@@ -1853,6 +1916,7 @@ export default function RenderPage() {
                   </span>
                   <h2>交付与发布</h2>
                   {activeRender.platform === 'wechat' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到公众号</button> : null}
+                  {activeRender.platform === 'wechatpic' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=wechatpic&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />保存为贴图草稿</button> : null}
                   {activeRender.platform === 'weibo' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=weibo&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到微博</button> : null}
                   {activeRender.platform === 'toutiao' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=toutiao&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到今日头条</button> : null}
                   {activeRender.platform === 'baijiahao' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=baijiahao&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到百家号</button> : null}

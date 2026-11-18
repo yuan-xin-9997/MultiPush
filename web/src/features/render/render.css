@@ -1132,6 +1132,68 @@
   margin-top: 13px;
 }
 
+/* ---------- WeChat sticker (图片消息 / 贴图) ---------- */
+.wechatpic-scene {
+  display: flex;
+  gap: 36px;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+}
+
+.wechatpic-article-head {
+  padding: 21px 19px 12px;
+}
+
+.wechatpic-article-head h1 {
+  color: #171a1f;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.4;
+}
+
+.wechatpic-meta-line {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  color: #9ba0a7;
+  font-size: 9.5px;
+}
+
+.wechatpic-meta-line span:first-child {
+  color: #64748b;
+}
+
+.wechatpic-images {
+  display: flex;
+  flex-direction: column;
+}
+
+.wechatpic-images img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #f2f3f4;
+}
+
+.wechatpic-images img + img {
+  margin-top: 3px;
+}
+
+.wechatpic-body {
+  padding: 14px 19px 6px;
+  color: #191919;
+  font-size: 15px;
+  line-height: 1.85;
+  word-break: break-word;
+}
+
+.wechatpic-body p {
+  margin: 0 0 12px;
+}
+
+
 /* ---------- Zhihu browser ---------- */
 .browser-shell {
   display: flex;

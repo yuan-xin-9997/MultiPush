@@ -1,4 +1,4 @@
-import { AtSign, BookMarked, BookOpen, Code2, Feather, Globe2, Heart, MessageCircle, Music2, Newspaper, Rss, Search } from 'lucide-react'
+import { AtSign, BookMarked, BookOpen, Code2, Feather, Globe2, Heart, Images, MessageCircle, Music2, Newspaper, Rss, Search } from 'lucide-react'
 import type { PlatformId } from '@shared/types'
 
 interface PlatformGlyphProps {
@@ -17,6 +17,9 @@ export default function PlatformGlyph({
 }: PlatformGlyphProps) {
   if (platform === 'wechat') {
     return <MessageCircle size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
+  }
+  if (platform === 'wechatpic') {
+    return <Images size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
   }
   if (platform === 'xiaohongshu') {
     return <Heart size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />

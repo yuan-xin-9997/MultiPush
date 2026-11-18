@@ -29,6 +29,10 @@ import type {
   WechatLogin,
   WechatPublication,
   WechatPublishInput,
+  WechatpicAccount,
+  WechatpicConnectInput,
+  WechatpicPublication,
+  WechatpicPublishInput,
   ToutiaoAccount,
   ToutiaoLogin,
   ToutiaoPublication,
@@ -305,6 +309,16 @@ export const api = {
     deletePublication: (id: string) => request<PublicationDeletion>(`/api/wechat/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
 
+  wechatpic: {
+    account: () => request<{ account: WechatpicAccount }>('/api/wechatpic/account', { cache: 'no-store' }),
+    connect: (input: WechatpicConnectInput) => request<{ account: WechatpicAccount }>('/api/wechatpic/connect', { method: 'POST', body: JSON.stringify(input) }),
+    disconnect: () => request<{ ok: true }>('/api/wechatpic/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: WechatpicPublication[] }>('/api/wechatpic/publications', { cache: 'no-store' }),
+    publish: (input: WechatpicPublishInput) => request<{ publication: WechatpicPublication }>('/api/wechatpic/publications', { method: 'POST', body: JSON.stringify(input) }),
+    getPublication: (id: string) => request<{ publication: WechatpicPublication }>(`/api/wechatpic/publications/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/wechatpic/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
+
   zhihu: {
     resolve: (id: string, input: ZhihuResolveInput) => request<{ publication: ZhihuPublication }>(`/api/zhihu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
     account: () => request<{ account: ZhihuAccount }>('/api/zhihu/account', { cache: 'no-store' }),
@@ -454,7 +468,7 @@ export const api = {
 }
 
 export function isPlatformId(value: string): value is PlatformId {
-  return value === 'wechat' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'toutiao' || value === 'baijiahao' || value === 'douban' || value === 'juejin' || value === 'jianshu' || value === 'douyin' || value === 'sspai' || value === 'blog'
+  return value === 'wechat' || value === 'wechatpic' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'toutiao' || value === 'baijiahao' || value === 'douban' || value === 'juejin' || value === 'jianshu' || value === 'douyin' || value === 'sspai' || value === 'blog'
 }
 
 /** Make an uploaded relative URL absolute for previews / rendering. */

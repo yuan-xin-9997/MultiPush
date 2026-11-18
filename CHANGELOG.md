@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## 2026-11-18 · 新增公众号贴图（图片消息）渲染与 API 草稿发布
+
+**改了什么**
+
+- 新增独立平台「公众号贴图」，对应公众号后台「新的创作 → 贴图」（官方 API `article_type: newspic` 图片消息）：渲染提取正文图片（最多 20 张、首图即封面）、标题（≤32 字）与纯文本配文，话题以 `#标签#` 拼入文案；含贴图手机壳预览、文案 TXT 与结构化 JSON 下载。
+- 渲染工作台支持贴图独立的标题/配文/话题调整（配文存为 `captionBody`，正文纯文本不参与富文本编辑），发布前检查按贴图上限校验（标题 32 字、图片 20 张、配文必填）。
+- 发布中心新增「公众号贴图」页：使用公众号 AppID/AppSecret 连接（AES-256-GCM 按用户加密保存，密钥 `.wechatpic-session-key`），一键「保存为贴图草稿」；正式发表按个人号现状在公众号后台手动完成（2025-07 起个人主体账号被回收 `freepublish` 权限）。
+- 服务端经官方 API 完成：`cgi-bin/token`（含内存缓存与 40164 IP 白名单友好提示）、`material/add_material` 上传永久图片素材（仅 JPG/PNG、≤10 MB）、`draft/add` 创建 newspic 草稿、`draft/get` 回读核对标题与图片数量、`draft/delete` 删除草稿；`account/getaccountbasicinfo` 读取公众号名称（无权限回退 AppID）。
+- 幂等与安全：同一公众号+原文+标题+配文+图片重复提交复用已有记录；上传失败/明确拒绝→失败，草稿已建但核对未完成/网络中断/服务重启→结果待核实（不自动重试，需人工核对后删除记录再提交）；原文修改/删除阻止发布旧版本；跨用户渲染不可见。
+- 贴图发布记录支持删除草稿并同步删除后台草稿（已发表或已消失时自动清理本地记录）。
+
+**实现**
+
+- 共享类型：`PlatformId`/`PLATFORMS`/`PLATFORM_ORDER` 新增 `wechatpic`；`WechatpicAccount`、`WechatpicConnectInput`、`WechatpicPublishInput`、`WechatpicPublication`；`publishChecks` 贴图分支（配文按纯文本长度校验）。
+- 数据库（`CREATE TABLE IF NOT EXISTS` 增量，无破坏性迁移）：`wechatpic_accounts`（加密凭证+AppID+名称）、`wechatpic_publications`（状态 running/draft/published/failed/uncertain，幂等键唯一）及重启恢复置 uncertain。
+- 后端：`server/src/wechatpic-api.ts`（官方 API 驱动，token 缓存、素材上传、newspic 草稿、错误码映射：40164 IP 白名单/40001 凭证/48001 无权限/45009 限频）、`server/src/wechatpic.ts`（服务层：连接、贴图构造、幂等、状态机、草稿删除）、`server/src/renderers/wechatpic.ts` + `render-adjustment.ts` 贴图分支、`server/src/routes/wechatpic.ts`、`app.ts` 挂载 `/api/wechatpic`、`validation.ts` 新 schema 与平台枚举（渲染平台上限 12→13）。
+- 前端：`web/src/features/publish/WechatpicPublishPage.tsx`（连接弹窗、图片清单、iframe 预览、发布记录、IP 白名单提示）、`PublishPage.tsx` 平台 Tab、`RenderPage.tsx` 贴图手机壳场景与复制/发布入口、`platform-glyph.tsx`、`lib/api.ts` `api.wechatpic`、`render.css`/`publish.css` 贴图样式。
+- 文档：新增 `docs/WECHATPIC_PUBLISHING.md`；同步 README、产品规格、架构说明、用户指南与 AI 创作说明（AI 工具与批量发布暂不含贴图平台）。
+
+**验证**
+
+- `npm run typecheck`（server + web）通过；`npm run build` 通过。
+- `npm test`：server 39 个文件 / 334 项全部通过（新增 `server/test/wechatpic.test.ts` 16 项：渲染器图片提取与 20 张截断、32 字标题截断与无图/视频警告、配文调整与发布检查、AppID/AppSecret schema 校验、凭证加密与用户绑定、连接与失败闭环、建草稿与幂等复用、跨用户/无图/视频/超长标题/原文变更拦截、结果待核实与拦截、核对失败保留草稿状态、删除草稿（含后台已消失）、已知拒绝置失败并在鉴权失败时使连接过期、驱动层先验证 token 再读昵称且凭证错误必须连接失败）；web 20 项通过。
+- `node scripts/smoke-wechatpic-publish.mjs`（新增，已加入 `test:publish-ui` 链，headless Chrome + 隔离假 API）：打开发布页 → AppID/AppSecret 连接 → 图片清单（1/20）与配文校验 → 确认创建草稿 → 状态「草稿已创建，待手动发表」→ IP 白名单错误提示 → 删除草稿恢复可提交 → 桌面/移动端截图，页面无 JS 错误；截图在 `artifacts/wechatpic-ui-check/`。
+- 未覆盖：真实公众号 API 联调（需 AppID/AppSecret 与 IP 白名单，属账号操作，待用户在受控环境验证）；已认证企业号/服务号的 `freepublish` 自动发表留待后续版本。
+
 ## 2026-11-18 · 新增视频内容与系统内剪辑（服务端 ffmpeg）
 
 **改了什么**

@@ -132,7 +132,7 @@ export const favoriteBodySchema = z.object({
   favorite: z.boolean(),
 })
 
-const platformSchema = z.enum(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog'])
+const platformSchema = z.enum(['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog'])
 const mediaUrlSchema = z.string().max(2048).refine((value) => /^(https?:\/\/|\/uploads\/|data:image\/(png|jpeg|webp|gif);base64,)/i.test(value), '图片地址无效')
 export const renderPlatformParamsSchema = z.object({ id: z.string().max(100), platform: platformSchema })
 export const platformAdjustmentSchema = z.object({
@@ -167,7 +167,7 @@ export const renderRequestSchema = z.object({
   platforms: z
     .array(platformSchema)
     .min(1, '请至少选择一个平台')
-    .max(12, '最多选择十二个平台')
+    .max(13, '最多选择十三个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
 })
@@ -197,7 +197,7 @@ export const batchRenderSchema = z.object({
   platforms: z
     .array(platformSchema)
     .min(1, '请至少选择一个平台')
-    .max(12, '最多选择十二个平台')
+    .max(13, '最多选择十三个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
 }).strict()
@@ -208,4 +208,16 @@ export const batchPublishSchema = z.object({
   mode: z.enum(['draft', 'publish']),
   coverMediaId: z.uuid().optional(),
   options: renderOptionsSchema.optional(),
+}).strict()
+
+const wechatAppIdSchema = z.string().trim().regex(/^wx[0-9a-fA-F]{16}$/, 'AppID 格式不正确，应以 wx 开头并共 18 位，可在公众号「设置与开发 → 基本配置」查看')
+const wechatAppSecretSchema = z.string().trim().regex(/^[0-9a-fA-F]{32}$/, 'AppSecret 格式不正确，应为 32 位字母或数字，可在公众号「设置与开发 → 基本配置」查看')
+
+export const wechatpicConnectSchema = z.object({
+  appId: wechatAppIdSchema,
+  appSecret: wechatAppSecretSchema,
+}).strict()
+
+export const wechatpicPublishSchema = z.object({
+  renderId: z.uuid(),
 }).strict()

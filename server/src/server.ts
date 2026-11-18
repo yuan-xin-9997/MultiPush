@@ -65,6 +65,7 @@ export async function startMultiPushServer(overrides: ConfigOverrides = {}): Pro
       })
     })
     try { await app.locals.wechat.close() } catch { /* ignore */ }
+    try { await app.locals.wechatpic.close() } catch { /* ignore */ }
     try { await app.locals.douyin.close() } catch { /* ignore */ }
     try { await app.locals.zhihu.close() } catch { /* ignore */ }
     try { await app.locals.weibo.close() } catch { /* ignore */ }
