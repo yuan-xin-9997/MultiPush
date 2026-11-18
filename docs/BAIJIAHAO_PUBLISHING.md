@@ -26,6 +26,7 @@
 
 - 使用百度 App 扫码并在手机上确认；
 - 二维码元素为 `img.tang-pass-qrcode-img`，源图 `passport.baidu.com/v2/api/qrcode?sign=…` 是 265×265 的 PNG，系统直接取源图展示而不是截屏缩略图；
+- 登录页上还有「下载百度 APP / 立即体验创作中心」等营销二维码（`img[class*="qrcode"]`），它们排在登录二维码之前，绝不能作为选择器，否则会把「创作中心」深链当成登录码展示（扫码后手机显示空白页）；系统只接受 `passport.baidu.com/v2/api/qrcode` 源图的二维码；
 - 登录成功以 `.baidu.com` 域下的 `BDUSS` Cookie 为准；账号信息来自 `GET /userb/user/loginInfo`，兼容 `userid/user_id/uid` 与 `uname/name/nickname` 等字段；该接口失败不阻塞登录，昵称回退为「百家号作者」；
 - 浏览器 Cookie/localStorage 使用 AES-256-GCM 加密保存，密钥位于 `DATA_DIR/.baijiahao-session-key`，加密绑定 MultiPush 用户 ID；
 - 断开连接只删除本系统会话，不会退出其他设备；

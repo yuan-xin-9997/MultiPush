@@ -26,7 +26,10 @@ const LOGIN = 'https://baijiahao.baidu.com/builder/theme/bjh/login'
 const EDITOR = 'https://baijiahao.baidu.com/builder/rc/edit?type=news'
 const LOGIN_INFO = 'https://baijiahao.baidu.com/userb/user/loginInfo'
 const APP_INFO = 'https://baijiahao.baidu.com/builder/app/appinfo'
-const QR = 'img.tang-pass-qrcode-img, img[src*="passport.baidu.com/v2/api/qrcode"], img[class*="qrcode"]'
+// Only the passport login QR. `img[class*="qrcode"]` also matches the marketing
+// "下载百度APP / 创作中心" cards, which appear earlier in the DOM, so Playwright's
+// `.first()` used to return those and we displayed the wrong QR entirely.
+const QR = 'img.tang-pass-qrcode-img, img[src*="passport.baidu.com/v2/api/qrcode"]'
 const TITLE = '[data-testid="news-title-input"] [contenteditable="true"], #newsTextArea [contenteditable="true"], [contenteditable="true"][placeholder*="标题"], textarea[placeholder*="标题"], input[placeholder*="标题"]'
 const BODY_FRAME = '#ueditor_0'
 const SESSION_ERRORS = [20040001, 10001401, 217100002]
@@ -149,6 +152,10 @@ export class PlaywrightBaijiahaoDriver implements BaijiahaoDriver {
       if (!await qr.isVisible().catch(() => false)) return null
       // The page renders the QR at 100px but the source PNG is 265px, so fetch it.
       const src = await qr.getAttribute('src').catch(() => null)
+      if (src && !/passport\.baidu\.com\/v2\/api\/qrcode/.test(src)) {
+        log('ignoring non-login QR image', src.slice(0, 120))
+        return null
+      }
       if (src) {
         try {
           const response = await context.request.get(new URL(src, page.url()).href, { timeout: 15_000 })
