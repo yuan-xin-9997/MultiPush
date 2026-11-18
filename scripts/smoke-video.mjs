@@ -182,9 +182,12 @@ async function main() {
     console.log('  - 未配置 QA_ACCOUNT_B，跳过跨用户隔离检查')
   }
 
-  // Cleanup: move created content to trash to keep the QA account tidy.
+  // Cleanup: remove created contents and uploaded media to keep the account tidy.
   await request(`/api/contents/${contentId}?permanent=true`, { method: 'DELETE', token })
   await request(`/api/contents/${article.data.content.id}?permanent=true`, { method: 'DELETE', token })
+  for (const mediaId of mediaIds) {
+    await request(`/api/media/${mediaId}`, { method: 'DELETE', token })
+  }
 
   if (failures > 0) {
     console.error(`\n✗ ${failures} 项未通过`)
