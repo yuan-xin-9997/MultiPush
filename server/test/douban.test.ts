@@ -153,6 +153,7 @@ describe('Douban content preparation', () => {
 describe('Douban parsing', () => {
   it('parses the web session uid, profile name and note links', () => {
     expect(parseDoubanUidFromSession('123456789:abc')).toBe('123456789')
+    expect(parseDoubanUidFromSession('"123456789:abc"')).toBe('123456789')
     expect(parseDoubanUidFromSession('abc')).toBeNull()
     expect(parseDoubanIdentity('<meta property="og:title" content="小林 - 豆瓣">', '123')).toEqual({ accountId: '123', name: '小林' })
     expect(parseDoubanIdentity('<title>豆瓣</title>', '123')).toEqual({ accountId: '123', name: '豆瓣用户' })

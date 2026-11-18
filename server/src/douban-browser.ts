@@ -55,8 +55,14 @@ function log(...parts: unknown[]): void { console.log('[douban]', ...parts) }
 
 /** The web session cookie starts with the numeric user id, e.g. `1234567:abc`. */
 export function parseDoubanUidFromSession(value: string | null | undefined): string | null {
-  const match = /^(\d{5,20}):/.exec((value ?? '').trim())
+  const normalized = (value ?? '').trim().replace(/^"|"$/g, '')
+  const match = /^(\d{5,20}):/.exec(normalized)
   return match?.[1] ?? null
+}
+
+/** Douban may send `dbcl2="123:..."`; browser APIs can preserve the quotes. */
+function cookieValue(value: string | null | undefined): string {
+  return (value ?? '').trim().replace(/^"|"$/g, '')
 }
 
 /** Extract a display name from /mine or a profile page. */
@@ -203,16 +209,16 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
 
   private async session(context: BrowserContext): Promise<{ uid: string; ck: string; name: string } | null> {
     let cookies = await context.cookies().catch(() => [])
-    let dbcl2 = cookies.find(cookie => cookie.name === 'dbcl2' && /(^|\.)douban\.com$/i.test(cookie.domain))?.value
-    let ck = cookies.find(cookie => cookie.name === 'ck' && /(^|\.)douban\.com$/i.test(cookie.domain))?.value ?? ''
+    let dbcl2 = cookieValue(cookies.find(cookie => cookie.name === 'dbcl2' && /(^|\.)douban\.com$/i.test(cookie.domain))?.value)
+    let ck = cookieValue(cookies.find(cookie => cookie.name === 'ck' && /(^|\.)douban\.com$/i.test(cookie.domain))?.value)
     if (!dbcl2 || !ck) {
       const page = await context.newPage()
       try {
         await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 25_000 }).catch(() => null)
         await page.waitForTimeout(1_500)
         cookies = await context.cookies().catch(() => [])
-        dbcl2 = cookies.find(cookie => cookie.name === 'dbcl2' && /(^|\.)douban\.com$/i.test(cookie.domain))?.value
-        ck = cookies.find(cookie => cookie.name === 'ck' && /(^|\.)douban\.com$/i.test(cookie.domain))?.value ?? ''
+        dbcl2 = cookieValue(cookies.find(cookie => cookie.name === 'dbcl2' && /(^|\.)douban\.com$/i.test(cookie.domain))?.value)
+        ck = cookieValue(cookies.find(cookie => cookie.name === 'ck' && /(^|\.)douban\.com$/i.test(cookie.domain))?.value)
       } finally { await page.close().catch(() => {}) }
     }
     const uid = parseDoubanUidFromSession(dbcl2)
