@@ -1,6 +1,7 @@
 import { getPlatformInfo } from '../../../shared/types'
 import type { PlatformRender } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
+import { preserveExternalLinksAsText } from './link-fallback'
 import {
   ARTICLE_WRAPPER_STYLE,
   buildHtmlDocument,
@@ -56,7 +57,12 @@ export async function renderBaijiahao(input: RenderInput, context?: RendererCont
   ])
   if (Array.from(prepared.rawTitle).length < 5) warnings.push('百家号标题建议不少于 5 个字。')
 
-  const article = buildStyledArticle(prepared.html, {
+  const linkFallback = preserveExternalLinksAsText(prepared.html, { allowedHosts: ['baidu.com'] })
+  if (linkFallback.converted > 0) {
+    warnings.push(`百家号普通账号的正文外链可能被过滤，${linkFallback.converted} 个外链已保留为可复制地址。`)
+  }
+
+  const article = buildStyledArticle(linkFallback.html, {
     styles: BAIJIAHAO_STYLES,
     wrapperStyle: `${ARTICLE_WRAPPER_STYLE}font-size:17px;line-height:1.9;`,
     tableWrapStyle: 'width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:24px 0;border-radius:8px;',

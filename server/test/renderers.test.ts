@@ -68,6 +68,28 @@ describe('renderPlatforms', () => {
     expect(result.warnings).toEqual([])
   })
 
+  it('adds a copyable address for external links on Toutiao and Baijiahao, but keeps them clickable elsewhere', async () => {
+    const linked = content({
+      contentHtml: '<h1>一次创作，多平台发布</h1><p>去影视库看看：<a href="https://movies.yuan-xin.top/item/a1">影视库条目</a></p>',
+    })
+    const results = await renderPlatforms({
+      content: linked,
+      platforms: ['toutiao', 'baijiahao', 'zhihu', 'blog'],
+      options,
+      authorName: 'MultiPush 编辑部',
+      baseUrl: 'http://192.168.0.111:34080',
+    })
+    const [toutiao, baijiahao, zhihu, blog] = results
+    for (const result of [toutiao, baijiahao]) {
+      expect(result.html).not.toContain('<a href="https://movies.yuan-xin.top/item/a1"')
+      expect(result.html).toContain('https://movies.yuan-xin.top/item/a1')
+      expect(result.warnings.join('')).toContain('可复制地址')
+    }
+    for (const result of [zhihu, blog]) {
+      expect(result.html).toContain('<a href="https://movies.yuan-xin.top/item/a1"')
+    }
+  })
+
   it('renders a Toutiao graphic article with Markdown and HTML downloads', async () => {
     const [result] = await renderPlatforms(input(['toutiao']))
     expect(result.platform).toBe('toutiao')

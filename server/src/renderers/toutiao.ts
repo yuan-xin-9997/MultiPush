@@ -1,6 +1,7 @@
 import { getPlatformInfo } from '../../../shared/types'
 import type { PlatformRender } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
+import { preserveExternalLinksAsText } from './link-fallback'
 import {
   ARTICLE_WRAPPER_STYLE,
   buildHtmlDocument,
@@ -56,7 +57,12 @@ export async function renderToutiao(input: RenderInput, context?: RendererContex
   ])
   if (Array.from(prepared.rawTitle).length < 2) warnings.push('今日头条标题至少需要 2 个字。')
 
-  const article = buildStyledArticle(prepared.html, {
+  const linkFallback = preserveExternalLinksAsText(prepared.html, { allowedHosts: ['toutiao.com'] })
+  if (linkFallback.converted > 0) {
+    warnings.push(`今日头条正文不支持站外可点击链接，${linkFallback.converted} 个外链已保留为可复制地址。`)
+  }
+
+  const article = buildStyledArticle(linkFallback.html, {
     styles: TOUTIAO_STYLES,
     wrapperStyle: `${ARTICLE_WRAPPER_STYLE}font-size:17px;line-height:1.9;`,
     tableWrapStyle: 'width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:24px 0;border-radius:8px;',
