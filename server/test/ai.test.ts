@@ -17,6 +17,7 @@ import { AiService } from '../src/ai'
 import { loadConfig } from '../src/config'
 import { openDatabase, type Database } from '../src/db'
 import { decryptPublisherSecret, loadPublisherKey } from '../src/publisher-session'
+import { VideoService } from '../src/video'
 import type { PlatformRender } from '../../shared/types'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -41,10 +42,11 @@ function setup(defaults?: { apiKey: string; baseUrl: string; model: string; labe
   const juejin = { publish: vi.fn() } as unknown as JuejinService
   const jianshu = { publish: vi.fn() } as unknown as JianshuService
   const batch = {} as BatchService
-  const service = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, batch)
+  const video = new VideoService(database, config)
+  const service = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, batch, video)
   const session = service.createSession(user.id)
   cleanups.push(() => { database.close(); rmSync(directory, { recursive: true, force: true }) })
-  return { directory, config, database, user, service, session, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu }
+  return { directory, config, database, user, service, session, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, video }
 }
 
 afterEach(() => {
@@ -135,6 +137,48 @@ describe('AI settings and chat', () => {
     const result = await service.chat(user.id, session.id, '把这篇保存为公众号草稿')
     expect(wechat.publish).toHaveBeenCalledWith(user.id, { renderId: record.id, mode: 'draft', coverMediaId: 'cover-1' }, expect.any(String))
     expect(result.reply.content).toContain('草稿')
+  })
+
+  it('edits a video timeline and starts an export through tools', async () => {
+    const { database, user, service, session } = setup()
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    const videoContent = database.createContent(user.id, {
+      title: 'AI 剪辑测试', kind: 'video', bookId: null, contentJson: {}, contentHtml: '<p>正文</p>', excerpt: '',
+      coverImage: null, tags: [], status: 'draft', favorite: false, wordCount: 2, imageCount: 0, videoCount: 0,
+    })
+    const media = database.createMedia(user.id, {
+      kind: 'video', filename: 'ai-clip.mp4', originalName: 'ai-clip.mp4', mimeType: 'video/mp4', size: 1024,
+      meta: { duration: 8, width: 1280, height: 720, hasAudio: true },
+    })
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      if (calls === 1) {
+        return response(toolCall('update_video_timeline', {
+          contentId: videoContent.id,
+          clips: [{ mediaId: media.id, trimStart: 2 }],
+        }))
+      }
+      if (calls === 2) return response(toolCall('export_video', { contentId: videoContent.id }))
+      return response({ choices: [{ message: { role: 'assistant', content: '已修剪开头并开始导出。' } }] })
+    }))
+    const result = await service.chat(user.id, session.id, '把开头 2 秒剪掉然后导出')
+    const row = database.getVideoProjectRow(user.id, videoContent.id)
+    expect(row.clips).toHaveLength(1)
+    expect(row.clips[0]).toMatchObject({ mediaId: media.id, trimStart: 2, trimEnd: null, duration: 8 })
+    const exportsList = database.listVideoExports(user.id, videoContent.id)
+    expect(exportsList).toHaveLength(1)
+    // The media file does not exist in this test, so the queued job fails
+    // asynchronously with a clear message — that is the expected path.
+    let status = exportsList[0]?.status
+    for (let i = 0; i < 20 && (status === 'queued' || status === 'running'); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      status = database.listVideoExports(user.id, videoContent.id)[0]?.status
+    }
+    expect(status).toBe('failed')
+    expect(database.listVideoExports(user.id, videoContent.id)[0]?.message).toContain('素材文件已丢失')
+    expect(database.getContentSummary(user.id, videoContent.id)?.videoCount).toBe(1)
+    expect(result.reply.content).toContain('导出')
   })
 })
 

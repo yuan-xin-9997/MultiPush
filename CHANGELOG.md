@@ -22,7 +22,7 @@
 **验证**
 
 - `npm run typecheck`（server + web）通过；`npm run build` 通过。
-- `npm test`：server 38 个文件 / 317 项全部通过（含真实 ffmpeg 导出集成测试）；web 20 项通过。
+- `npm test`：server 38 个文件 / 318 项全部通过（含真实 ffmpeg 导出集成测试与 AI 视频剪辑工具链测试）；web 20 项通过。
 - `server/test/video.test.ts`：时间线持久化与用户隔离、修剪裁剪校验（发现并修复了片段缺省起点继承上片段的 bug）、图文内容拒绝剪辑、ffmpeg 命令构建（显式终点/补静音/总时长）、ffprobe JSON 解析；装有 ffmpeg 的环境执行真实导出集成测试：两段混合规格素材（有音轨 320×240 + 无音轨 640×480）→ 裁剪合并 → 输出 3.0s 320×240 H.264+AAC，缺失媒体同步报 400、丢失文件异步任务失败原因正确。
 - `node scripts/smoke-video.mjs`（新增，`npm run smoke:video`）：对真实服务完成 注册 → 建视频内容 → 上传两段（含 ffprobe 时长）→ 保存时间线 → 读取项目 → 图文拒绝剪辑 → 导出成片（Range 访问 + 大小校验）→ 回收站清理，全部通过。
 - `node scripts/smoke-video-ui.mjs`（新增，`npm run smoke:video-ui`，headless Chrome）：登录 → 内容库「新建视频」→ 工作台打开 → 页面上传两段 → 修剪出点 → 上移调序 → 标题自动保存 → 导出成片完成并可下载，页面无 JS 错误；截图在 `artifacts/video-workspace-check/`。
