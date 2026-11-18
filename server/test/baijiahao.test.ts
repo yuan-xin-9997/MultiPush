@@ -8,7 +8,7 @@ import { ApiError } from '../src/errors'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey } from '../src/publisher-session'
 import { renderPlatforms } from '../src/renderers'
 import { BaijiahaoService, parseBaijiahaoPublishedId } from '../src/baijiahao'
-import { parseBaijiahaoProfile, parseBaijiahaoPublished, type BaijiahaoDriver, type BaijiahaoLoginAttempt } from '../src/baijiahao-browser'
+import { parseBaijiahaoProfile, parseBaijiahaoProfileIssue, parseBaijiahaoPublished, type BaijiahaoDriver, type BaijiahaoLoginAttempt } from '../src/baijiahao-browser'
 import type { ContentDetail } from '../../shared/types'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -118,6 +118,9 @@ describe('Baijiahao parsing', () => {
     expect(parseBaijiahaoProfile({ errno: 0, data: { user_id: 42, name: '作者' } })).toEqual({ accountId: '42', name: '作者' })
     expect(parseBaijiahaoProfile({ errno: 217100002, data: null })).toBeNull()
     expect(parseBaijiahaoProfile({ errno: 0, data: {} })).toBeNull()
+    expect(parseBaijiahaoProfile({ errno: 0, data: { uk: '123', name: '作者' } })).toEqual({ accountId: '123', name: '作者' })
+    expect(parseBaijiahaoProfileIssue({ errno: 20040000, errmsg: '当前用户未绑定百家号', data: { name: '百度用户', have_account: 0 } })).toContain('尚未开通百家号')
+    expect(parseBaijiahaoProfileIssue({ errno: 0, data: { uk: '123' } })).toBeNull()
     expect(parseBaijiahaoPublished({ errno: 0, data: { id: '5000000000000001' } })).toEqual({ remoteId: '5000000000000001', url: 'https://baijiahao.baidu.com/s?id=5000000000000001' })
     expect(parseBaijiahaoPublished({ errno: 0, data: { url: 'https://baijiahao.baidu.com/s?id=5000000000000001&wfr=x' } })).toEqual({ remoteId: '5000000000000001', url: 'https://baijiahao.baidu.com/s?id=5000000000000001' })
     expect(parseBaijiahaoPublished({ errno: 20040001 })).toBeNull()

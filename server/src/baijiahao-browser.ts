@@ -62,10 +62,21 @@ export function parseBaijiahaoProfile(value: unknown): BaijiahaoIdentity | null 
     }
     return ''
   }
-  const id = pick(['userid', 'user_id', 'author_id', 'authorid', 'uid', 'id'])
+  const id = pick(['uk', 'userid', 'user_id', 'author_id', 'authorid', 'uid', 'id'])
   const name = pick(['uname', 'name', 'nickname', 'author_name', 'authorname', 'screen_name'])
   if (!id && !name) return null
   return { accountId: id, name: name || '百家号作者' }
+}
+
+/** Distinguish "Baidu login is valid but has no Baijiahao author profile" from an expired session. */
+export function parseBaijiahaoProfileIssue(value: unknown): string | null {
+  const root = object(value)
+  const code = Number(root.errno ?? root.code ?? root.status ?? -1)
+  const message = String(root.errmsg ?? root.message ?? '')
+  if (code === 20040000 || /未绑定百家号|用户没有注册/.test(message)) {
+    return '当前百度账号尚未开通百家号，登录本身有效；请用已开通百家号的百度账号登录，或先到 baijiahao.baidu.com 完成作者注册'
+  }
+  return null
 }
 
 /** Finds an article id in the publish response, preferring explicit id fields. */
@@ -117,6 +128,7 @@ export class PlaywrightBaijiahaoDriver implements BaijiahaoDriver {
   private async profile(context: BrowserContext): Promise<BaijiahaoIdentity | null> {
     const headers = { 'x-requested-with': 'XMLHttpRequest', Referer: `${HOME}builder/rc/home`, Accept: 'application/json' }
     const info = await this.readJson(await context.request.get(LOGIN_INFO, { headers, timeout: 20_000 }).catch(() => null))
+    const infoIssue = parseBaijiahaoProfileIssue(info)
     const identity = parseBaijiahaoProfile(info)
     if (identity) return identity
     const root = object(info)
@@ -125,8 +137,10 @@ export class PlaywrightBaijiahaoDriver implements BaijiahaoDriver {
     const app = await this.readJson(await context.request.get(APP_INFO, { headers, timeout: 20_000 }).catch(() => null))
     const fallback = parseBaijiahaoProfile(app)
     if (fallback) return fallback
+    const appIssue = parseBaijiahaoProfileIssue(app)
     const appRoot = object(app)
     if (Number(appRoot.errno) !== 0) logThrottled('appinfo', 'errno=' + String(appRoot.errno))
+    if (infoIssue || appIssue) throw new ApiError(409, 'baijiahao_account_unbound', infoIssue || appIssue || '当前百度账号尚未开通百家号')
     return null
   }
 
@@ -192,10 +206,15 @@ export class PlaywrightBaijiahaoDriver implements BaijiahaoDriver {
         const signedIn = cookies.some(cookie => cookie.name === 'BDUSS' && cookie.value && /(^|\.)baidu\.com$/i.test(cookie.domain))
         if (signedIn) {
           if (!signedInAt) signedInAt = Date.now()
-          const identity = await this.profile(context).catch(() => null)
+          let profileError: unknown = null
+          const identity = await this.profile(context).catch((error) => { profileError = error; return null })
           if (identity) {
             log('login completed', identity.accountId || '(uid unavailable)')
             return { status: 'connected', qrCode: null, message: '百家号已登录，登录状态已保存', state: await context.storageState(), identity }
+          }
+          if (profileError instanceof ApiError && profileError.code === 'baijiahao_account_unbound') {
+            log('login completed but the Baidu account has no Baijiahao profile')
+            return { status: 'failed', qrCode: null, message: profileError.message }
           }
           // Never keep the user stuck on the nickname lookup once BDUSS exists.
           if (Date.now() - signedInAt > 8_000) {

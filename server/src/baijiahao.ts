@@ -40,9 +40,9 @@ export class BaijiahaoService {
     if (this.active.has(userId)) throw new ApiError(409, 'baijiahao_busy', '百家号操作正在进行，请等待完成')
   }
 
-  private state(userId: string): PublisherStorageState {
+  private state(userId: string, allowExpired = false): PublisherStorageState {
     const account = this.database.getBaijiahaoAccount(userId)
-    if (!account || account.status === 'expired') throw new ApiError(409, 'baijiahao_session_expired', '请先在系统中扫码登录百家号')
+    if (!account || (account.status === 'expired' && !allowExpired)) throw new ApiError(409, 'baijiahao_session_expired', '请先在系统中扫码登录百家号')
     try { return decryptPublisherSession(account.encryptedSession, this.key, userId) }
     catch {
       this.database.saveBaijiahaoAccount(userId, { ...account, status: 'expired', checkedAt: now() })
@@ -58,11 +58,11 @@ export class BaijiahaoService {
     const current = this.database.getBaijiahaoAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<BaijiahaoAccount> => {
       try {
-        const result = await this.driver.checkSession(this.state(userId))
+        const result = await this.driver.checkSession(this.state(userId, current.status === 'expired'))
         const latest = this.database.getBaijiahaoAccount(userId)
         if (!latest) return { status: 'disconnected', name: null, checkedAt: null }
         if (latest.encryptedSession !== current.encryptedSession) return { status: latest.status, name: latest.name, checkedAt: latest.checkedAt }
