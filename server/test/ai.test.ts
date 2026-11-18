@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -87,7 +88,7 @@ describe('AI settings and chat', () => {
       return response({ choices: [{ message: { role: 'assistant', content: '你的内容库目前有 0 篇内容。' } }] })
     })
     vi.stubGlobal('fetch', fetchMock)
-    const result = await service.chat(user.id, session.id, '看看我的内容库')
+    const result = await service.chat(user.id, session.id, { message: '看看我的内容库' })
     expect(result.reply.content).toContain('0 篇')
     expect(result.session.messages.map(message => message.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
     expect(result.session.messages[2]).toMatchObject({ toolName: 'list_contents', toolCallId: 'call-list_contents' })
@@ -107,7 +108,7 @@ describe('AI settings and chat', () => {
       }
       return response({ choices: [{ message: { role: 'assistant', content: '文章已创建并生成知乎排版。' } }] })
     }))
-    const result = await service.chat(user.id, session.id, '写一篇关于 AI 的文章并生成知乎排版')
+    const result = await service.chat(user.id, session.id, { message: '写一篇关于 AI 的文章并生成知乎排版' })
     const contents = database.listContents(user.id, { favorite: false, trash: false, sort: 'updated_desc', page: 1, pageSize: 10 })
     expect(contents.total).toBe(1)
     expect(contents.items[0]).toMatchObject({ title: 'AI 生成文章', tags: ['AI'] })
@@ -134,7 +135,7 @@ describe('AI settings and chat', () => {
       if (calls === 1) return response(toolCall('publish_article', { renderId: record.id, platform: 'wechat', mode: 'draft', coverMediaId: 'cover-1' }))
       return response({ choices: [{ message: { role: 'assistant', content: '已保存为公众号草稿。' } }] })
     }))
-    const result = await service.chat(user.id, session.id, '把这篇保存为公众号草稿')
+    const result = await service.chat(user.id, session.id, { message: '把这篇保存为公众号草稿' })
     expect(wechat.publish).toHaveBeenCalledWith(user.id, { renderId: record.id, mode: 'draft', coverMediaId: 'cover-1' }, expect.any(String))
     expect(result.reply.content).toContain('草稿')
   })
@@ -162,7 +163,7 @@ describe('AI settings and chat', () => {
       if (calls === 2) return response(toolCall('export_video', { contentId: videoContent.id }))
       return response({ choices: [{ message: { role: 'assistant', content: '已修剪开头并开始导出。' } }] })
     }))
-    const result = await service.chat(user.id, session.id, '把开头 2 秒剪掉然后导出')
+    const result = await service.chat(user.id, session.id, { message: '把开头 2 秒剪掉然后导出' })
     const row = database.getVideoProjectRow(user.id, videoContent.id)
     expect(row.clips).toHaveLength(1)
     expect(row.clips[0]).toMatchObject({ mediaId: media.id, trimStart: 2, trimEnd: null, duration: 8 })
@@ -196,7 +197,7 @@ describe('Server default AI provider', () => {
       return response({ choices: [{ message: { role: 'assistant', content: '正常' } }] })
     })
     vi.stubGlobal('fetch', fetchMock)
-    const result = await service.chat(user.id, session.id, '只回复正常')
+    const result = await service.chat(user.id, session.id, { message: '只回复正常' })
     expect(result.reply.content).toBe('正常')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -209,5 +210,161 @@ describe('Server default AI provider', () => {
     expect(settings).toMatchObject({ configured: true, source: 'user', baseUrl: 'https://api.example.com/v1', model: 'custom-model' })
     const record = database.getAiSettings(user.id)!
     expect(decryptPublisherSecret<string>(record.encryptedApiKey, loadPublisherKey(directory, 'ai'), user.id)).toBe('sk-server-default')
+  })
+})
+
+describe('AI attachments', () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7XkAAAAASUVORK5CYII=', 'base64')
+  const jpg = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD//gA7Q1JFQVRPUgo=', 'base64')
+
+  function image(config: ReturnType<typeof loadConfig>, database: Database, userId: string, name = 'photo.png') {
+    const filename = `${randomUUID()}.png`
+    writeFileSync(path.join(config.uploadsDir, filename), png)
+    return database.createMedia(userId, { kind: 'image', filename, originalName: name, mimeType: 'image/png', size: png.length, meta: { width: 32, height: 32, hasAudio: false } })
+  }
+
+  function videoMedia(config: ReturnType<typeof loadConfig>, database: Database, userId: string, name = 'clip.mp4') {
+    const filename = `${randomUUID()}.mp4`
+    writeFileSync(path.join(config.uploadsDir, filename), Buffer.from('fake-video'))
+    return database.createMedia(userId, { kind: 'video', filename, originalName: name, mimeType: 'video/mp4', size: 1024, meta: { duration: 30, width: 1280, height: 720, hasAudio: true } })
+  }
+
+  it('stores attachments, sends vision parts for the current turn and references later', async () => {
+    const { config, database, user, service, session } = setup()
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    const media = image(config, database, user.id)
+    const bodies: Array<{ messages: Array<{ role: string; content: unknown }> }> = []
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      calls += 1
+      bodies.push(JSON.parse(String(init?.body)))
+      if (calls === 1) return response({ choices: [{ message: { role: 'assistant', content: '这是一张测试图片。' } }] })
+      return response({ choices: [{ message: { role: 'assistant', content: '已根据图片继续处理。' } }] })
+    }))
+    const first = await service.chat(user.id, session.id, { message: '看看这张图', mediaIds: [media.id] })
+    expect(first.session.messages[0]).toMatchObject({ role: 'user', content: '看看这张图' })
+    expect(first.session.messages[0].attachments).toEqual([expect.objectContaining({ kind: 'image', mediaId: media.id, url: media.url })])
+    // Current turn: vision part with a data URL plus attachment metadata text.
+    const firstContent = bodies[0].messages.find(message => message.role === 'user')?.content as Array<{ type: string; text?: string; image_url?: { url: string } }>
+    expect(firstContent).toBeInstanceOf(Array)
+    const imagePart = firstContent.find(part => part.type === 'image_url')
+    expect(imagePart?.image_url?.url).toContain('data:image/png;base64,')
+    const textPart = firstContent.find(part => part.type === 'text')
+    expect(textPart?.text).toContain('素材 ID')
+    expect(textPart?.text).toContain('32×32')
+    // Next turn: the older message keeps only a compact reference.
+    const second = await service.chat(user.id, session.id, { message: '再帮我写一段说明' })
+    const historyUser = bodies[1].messages.filter(message => message.role === 'user')[0]
+    expect(typeof historyUser.content).toBe('string')
+    expect(String(historyUser.content)).toContain('[图片附件]')
+    expect(String(historyUser.content)).toContain(media.id)
+    expect(String(historyUser.content)).not.toContain('data:image')
+    expect(second.reply.content).toContain('继续处理')
+  })
+
+  it('inlines document text on the current turn and omits it from later turns', async () => {
+    const { user, service, session } = setup()
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    const longText = '字'.repeat(25_000)
+    const bodies: Array<{ messages: Array<{ role: string; content: unknown }> }> = []
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      calls += 1
+      bodies.push(JSON.parse(String(init?.body)))
+      return response({ choices: [{ message: { role: 'assistant', content: `收到第 ${calls} 条消息。` } }] })
+    }))
+    await service.chat(user.id, session.id, { message: '根据这份资料写文章', documents: [{ name: '资料.md', mimeType: 'text/markdown', size: 50_000, text: longText }] })
+    const userMessage = bodies[0].messages.find(message => message.role === 'user')?.content as string
+    expect(userMessage).toContain('[文档附件] 资料.md')
+    expect(userMessage).toContain('已截断')
+    const inlineCount = (userMessage.match(/字/g) ?? []).length
+    expect(inlineCount).toBeGreaterThanOrEqual(20_000)
+    expect(inlineCount).toBeLessThan(25_000)
+    await service.chat(user.id, session.id, { message: '换一个角度再写' })
+    const olderMessage = bodies[1].messages.filter(message => message.role === 'user')[0]
+    expect(String(olderMessage.content)).toContain('正文文本已省略')
+    expect(String(olderMessage.content)).not.toContain('字字字')
+  })
+
+  it('allows attachments without text and reports them in the stored message', async () => {
+    const { config, database, user, service, session } = setup()
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    const media = videoMedia(config, database, user.id)
+    vi.stubGlobal('fetch', vi.fn(async () => response({ choices: [{ message: { role: 'assistant', content: '收到视频，我会用它创建视频内容。' } }] })))
+    const result = await service.chat(user.id, session.id, { message: '', mediaIds: [media.id] })
+    expect(result.session.messages[0]).toMatchObject({ role: 'user', content: '（消息包含 1 个附件）' })
+    expect(result.session.messages[0].attachments?.[0]).toMatchObject({ kind: 'video', duration: 30 })
+    expect(result.session.title).toBe(media.originalName)
+  })
+
+  it('rejects foreign media and oversized attachment batches', async () => {
+    const { config, database, user, service, session } = setup()
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    const bob = database.createUser({ username: 'bob', email: 'b@example.com', displayName: 'Bob', passwordHash: 'hash' })
+    const foreign = image(config, database, bob.id)
+    await expect(service.chat(user.id, session.id, { message: '看看', mediaIds: [foreign.id] })).rejects.toMatchObject({ status: 404 })
+    const many = Array.from({ length: 11 }, () => image(config, database, user.id).id)
+    await expect(service.chat(user.id, session.id, { message: '一次太多', mediaIds: many })).rejects.toMatchObject({ code: 'ai_attachments_too_many' })
+  })
+
+  it('creates an article with uploaded images and cover through create_content', async () => {
+    const { config, database, user, service, session } = setup()
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    const first = image(config, database, user.id, 'first.png')
+    const second = image(config, database, user.id, 'second.png')
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      if (calls === 1) return response(toolCall('create_content', { title: '游记', html: '<h1>游记</h1><p>正文</p>', mediaIds: [first.id, second.id], tags: ['旅行'] }))
+      return response({ choices: [{ message: { role: 'assistant', content: '文章已创建，图片已插入。' } }] })
+    }))
+    const result = await service.chat(user.id, session.id, { message: '用这两张图写一篇游记' })
+    const toolMessage = result.session.messages.find(message => message.role === 'tool')
+    expect(toolMessage?.toolResult).toMatchObject({ ok: true })
+    const createdId = (toolMessage?.toolResult as { data: { content: { id: string } } }).data.content.id
+    const detail = database.getContentDetail(user.id, createdId)!
+    expect(detail.contentHtml).toContain('<h1>游记</h1>')
+    expect(detail.contentHtml).toContain(`src="${first.url}"`)
+    expect(detail.contentHtml).toContain(`src="${second.url}"`)
+    expect(detail.coverImage).toBe(first.url)
+    expect(detail.imageCount).toBe(2)
+    expect((detail.contentHtml.match(/<img /g) ?? []).length).toBe(2)
+  })
+
+  it('initializes a video timeline when creating video content from uploaded videos', async () => {
+    const { config, database, user, service, session, video } = setup()
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    const clipA = videoMedia(config, database, user.id, 'a.mp4')
+    const clipB = videoMedia(config, database, user.id, 'b.mp4')
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      if (calls === 1) return response(toolCall('create_content', { title: '旅行 vlog', kind: 'video', html: '<p>行进中的城市记录。</p>', mediaIds: [clipA.id, clipB.id] }))
+      return response({ choices: [{ message: { role: 'assistant', content: '视频内容已创建并初始化时间线。' } }] })
+    }))
+    const result = await service.chat(user.id, session.id, { message: '用这两段视频建一个视频内容' })
+    const toolMessage = result.session.messages.find(message => message.role === 'tool')
+    expect(toolMessage?.toolResult).toMatchObject({ ok: true, data: { timeline: { clips: 2 } } })
+    const createdId = (toolMessage?.toolResult as { data: { content: { id: string } } }).data.content.id
+    const project = await video.getProject(user.id, createdId)
+    expect(project.clips.map(clip => clip.mediaId)).toEqual([clipA.id, clipB.id])
+    expect(project.clips[0]).toMatchObject({ trimStart: 0, duration: 30 })
+    expect(database.getContentSummary(user.id, createdId)?.videoCount).toBe(2)
+  })
+
+  it('reports kind mismatches and unknown media in the tool result', async () => {
+    const { config, database, user, service, session } = setup()
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    const wrongKind = videoMedia(config, database, user.id, 'video-as-image.mp4')
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      if (calls === 1) return response(toolCall('create_content', { title: '错误用法', html: '<p>正文</p>', mediaIds: [wrongKind.id] }))
+      return response({ choices: [{ message: { role: 'assistant', content: '素材类型不对，我已停止。' } }] })
+    }))
+    const result = await service.chat(user.id, session.id, { message: '把视频插进文章' })
+    const toolMessage = result.session.messages.find(message => message.role === 'tool')
+    expect(toolMessage?.toolResult).toMatchObject({ ok: false, error: { code: 'ai_media_kind' } })
+    expect(calls).toBeGreaterThanOrEqual(2)
   })
 })

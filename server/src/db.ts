@@ -47,6 +47,7 @@ import type {
   JianshuPublication,
   JianshuResolution,
   AiMessage,
+  AiMessageAttachment,
   AiSession,
   AiToolCall,
   BatchJob,
@@ -291,6 +292,7 @@ export interface CreateAiMessageValues {
   toolName?: string | null
   toolArguments?: unknown
   toolResult?: unknown
+  attachments?: AiMessageAttachment[]
 }
 
 export interface CreateBatchJobValues {
@@ -713,6 +715,7 @@ export class Database {
         tool_name TEXT,
         tool_arguments_json TEXT,
         tool_result_json TEXT,
+        attachments_json TEXT,
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_ai_messages_session_created ON ai_messages(session_id, created_at);
@@ -939,6 +942,7 @@ export class Database {
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
     this.ensureDoubanPublicationColumns()
+    this.ensureAiColumns()
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     this.run(`UPDATE douyin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先核实抖音发布结果，避免重复发布。', nowIso()])
     // Never resend an operation that may already have reached WeChat before a restart.
@@ -982,6 +986,14 @@ export class Database {
    * and the video project/export tables. Older databases keep working and
    * existing rows default to the article kind.
    */
+  /** Additive migration for AI message attachments on older databases. */
+  private ensureAiColumns(): void {
+    const columns = new Set(this.all('PRAGMA table_info(ai_messages)').map((row) => text(row.name)))
+    if (!columns.has('attachments_json')) {
+      this.database.exec('ALTER TABLE ai_messages ADD COLUMN attachments_json TEXT')
+    }
+  }
+
   private ensureVideoColumns(): void {
     const contentColumns = new Set(this.all('PRAGMA table_info(contents)').map((row) => text(row.name)))
     if (!contentColumns.has('kind')) {
@@ -2701,6 +2713,7 @@ export class Database {
 
   private mapAiMessage(row: Row): AiMessage {
     const toolCalls = parseJson(row.tool_calls_json)
+    const attachments = parseJson(row.attachments_json)
     return {
       id: text(row.id),
       role: row.role as AiMessage['role'],
@@ -2710,6 +2723,7 @@ export class Database {
       toolName: nullableText(row.tool_name) ?? undefined,
       toolArguments: parseJson(row.tool_arguments_json) ?? undefined,
       toolResult: parseJson(row.tool_result_json) ?? undefined,
+      attachments: Array.isArray(attachments) ? attachments as AiMessage['attachments'] : undefined,
       createdAt: text(row.created_at),
     }
   }
@@ -2721,13 +2735,14 @@ export class Database {
 
   createAiMessage(userId: string, sessionId: string, values: CreateAiMessageValues): AiMessage {
     const id = randomUUID()
-    this.run(`INSERT INTO ai_messages (id, session_id, user_id, role, content, tool_calls_json, tool_call_id, tool_name, tool_arguments_json, tool_result_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    this.run(`INSERT INTO ai_messages (id, session_id, user_id, role, content, tool_calls_json, tool_call_id, tool_name, tool_arguments_json, tool_result_json, attachments_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, sessionId, userId, values.role, values.content,
         values.toolCalls ? JSON.stringify(values.toolCalls) : null,
         values.toolCallId ?? null, values.toolName ?? null,
         values.toolArguments === undefined ? null : JSON.stringify(values.toolArguments),
         values.toolResult === undefined ? null : JSON.stringify(values.toolResult),
+        values.attachments?.length ? JSON.stringify(values.attachments) : null,
         nowIso()])
     const row = this.get('SELECT * FROM ai_messages WHERE id = ? AND user_id = ?', [id, userId])
     if (!row) throw new Error('Failed to create AI message')

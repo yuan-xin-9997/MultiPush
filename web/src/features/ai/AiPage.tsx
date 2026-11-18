@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, CheckCircle2, ChevronDown, LoaderCircle, MessageSquarePlus, Send, Settings2, Sparkles, Trash2, Wrench } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { Bot, CheckCircle2, ChevronDown, FileText, Film, LoaderCircle, MessageSquarePlus, Paperclip, Send, Settings2, Sparkles, Trash2, Wrench, X } from 'lucide-react'
 import { toast } from 'sonner'
-import type { AiMessage, AiSession, AiSessionDetail, AiSettings } from '@shared/types'
-import { api } from '@/lib/api'
+import type { AiMessage, AiMessageAttachment, AiSession, AiSessionDetail, AiSettings } from '@shared/types'
+import { absoluteUrl, api } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { formatDateTime } from '@/lib/utils'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -11,11 +11,17 @@ import './ai.css'
 
 const OPENCODE_GO = { baseUrl: 'https://opencode.ai/inference/go/openai/v1', model: 'deepseek-v4.1-flash', label: 'OpenCode Go' }
 
+const DOCUMENT_EXTENSIONS = ['txt', 'md', 'markdown', 'json', 'csv', 'html', 'xml', 'yml', 'yaml']
+const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024
+const ATTACHMENT_ACCEPT = ['image/*', 'video/*', ...DOCUMENT_EXTENSIONS.map(ext => `.${ext}`)].join(',')
+
 const QUICK_PROMPTS = [
   '写一篇关于「用 AI 提升内容创作效率」的文章，保存到内容库，并生成公众号和知乎排版。',
+  '根据我上传的文档写一篇文章，把我上传的图片插入正文，并生成公众号排版。',
   '列出我最近的内容，挑一篇最新的，生成少数派排版并保存为草稿。',
-  '读取我最近 5 篇内容，批量生成知乎排版。',
-  '把最新一篇内容保存为个人博客草稿。',
+  '用我上传的视频新建一个视频内容，并把文案补充好。',
 ]
 
 function resultPreview(value: unknown): string {
@@ -48,6 +54,8 @@ export default function AiPage() {
   const [loadingSession, setLoadingSession] = useState(false)
   const [sending, setSending] = useState(false)
   const [input, setInput] = useState('')
+  const [attachments, setAttachments] = useState<AiMessageAttachment[]>([])
+  const [uploadingAttachments, setUploadingAttachments] = useState(0)
   const [error, setError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [deleteSession, setDeleteSession] = useState<AiSession | null>(null)
@@ -159,26 +167,73 @@ export default function AiPage() {
     finally { setDeleting(false) }
   }
 
+  function removeAttachment(index: number) {
+    setAttachments(current => current.filter((_item, i) => i !== index))
+  }
+
+  function pushAttachment(attachment: AiMessageAttachment) {
+    setAttachments(current => [...current, attachment])
+  }
+
+  async function handleFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (!files.length) return
+    for (const file of files) {
+      if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+        const limit = file.type.startsWith('image/') ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES
+        const label = file.type.startsWith('image/') ? '图片' : '视频'
+        if (file.size > limit) { toast.error(`${label}「${file.name}」超过大小限制，请压缩后再试`); continue }
+        setUploadingAttachments(current => current + 1)
+        try {
+          const { media } = await api.media.upload(file)
+          pushAttachment({ kind: media.kind, name: media.originalName || media.filename, mimeType: media.mimeType, size: media.size, mediaId: media.id, url: media.url, width: media.width ?? null, height: media.height ?? null, duration: media.duration ?? null })
+        } catch (cause) {
+          toast.error(getErrorMessage(cause, `上传「${file.name}」失败`))
+        } finally {
+          setUploadingAttachments(current => Math.max(0, current - 1))
+        }
+        continue
+      }
+      const extension = file.name.split('.').pop?.()?.toLowerCase() ?? ''
+      if (!DOCUMENT_EXTENSIONS.includes(extension)) { toast.error(`暂不支持「${file.name}」：图片和视频直接上传，文档目前仅支持纯文本类（txt/md/json/csv/html 等）`); continue }
+      if (file.size > MAX_DOCUMENT_BYTES) { toast.error(`文档「${file.name}」超过 2 MB，请拆分后再上传`); continue }
+      try {
+        const text = await file.text()
+        pushAttachment({ kind: 'document', name: file.name, mimeType: file.type || `text/${extension === 'md' ? 'markdown' : 'plain'}`, size: file.size, text })
+      } catch {
+        toast.error(`读取文档「${file.name}」失败`)
+      }
+    }
+  }
+
   async function send() {
     const text = input.trim()
-    if (!text || sending) return
+    const mediaIds = attachments.filter(item => item.mediaId).map(item => item.mediaId!) 
+    const documents = attachments.filter(item => item.kind === 'document').map(item => ({ name: item.name, mimeType: item.mimeType, size: item.size, text: item.text }))
+    if ((!text && !mediaIds.length && !documents.length) || sending || uploadingAttachments) return
     if (!settings?.configured) { openSettings(); setSettingsError('请先配置大模型接口和 API Key'); return }
     let target = activeId
     setError(''); setSending(true); setInput('')
+    const optimisticAttachments = attachments.length ? attachments : undefined
+    const optimisticContent = text || `（消息包含 ${attachments.length} 个附件）`
+    setAttachments([])
     try {
       if (!target) {
-        const created = await api.ai.createSession(text.slice(0, 36))
+        const created = await api.ai.createSession((text || optimisticAttachments?.[0]?.name || '').slice(0, 36))
         target = created.session.id
         setActiveId(target)
         setSessions(current => [created.session, ...current])
       }
-      const optimistic: AiMessage = { id: `local-${Date.now()}`, role: 'user', content: text, createdAt: new Date().toISOString() }
+      const optimistic: AiMessage = { id: `local-${Date.now()}`, role: 'user', content: optimisticContent, createdAt: new Date().toISOString(), attachments: optimisticAttachments }
       setSession(current => current ? { ...current, messages: [...current.messages, optimistic] } : current)
-      const result = await api.ai.sendMessage(target, text)
+      const result = await api.ai.sendMessage(target, { message: text, ...(mediaIds.length ? { mediaIds } : {}), ...(documents.length ? { documents } : {}) })
       setSession(result.session)
       setSessions(current => current.map(item => item.id === result.session.id ? { ...item, title: result.session.title, updatedAt: result.session.updatedAt } : item))
     } catch (cause) {
       setError(getErrorMessage(cause, 'AI 请求失败'))
+      // Keep the composed attachments so the user can retry without re-uploading.
+      if (optimisticAttachments) setAttachments(optimisticAttachments)
       if (target) {
         try {
           const result = await api.ai.getSession(target)
@@ -245,7 +300,7 @@ export default function AiPage() {
                 </div>
               ) : null}
               {messages.map(message => message.role === 'tool' ? <ToolTrace key={message.id} message={message} /> : message.role === 'user' ? (
-                <div key={message.id} className="ai-message is-user"><div className="ai-bubble">{message.content}</div><small>{formatDateTime(message.createdAt)}</small></div>
+                <div key={message.id} className="ai-message is-user"><div className="ai-bubble">{message.attachments?.length ? <div className="ai-attachments">{message.attachments.map((attachment, index) => attachment.kind === 'image' && attachment.url ? <figure key={`${attachment.name}-${index}`} className="ai-attachment is-image"><img src={absoluteUrl(attachment.url)} alt={attachment.name} /><figcaption>{attachment.name}</figcaption></figure> : <span key={`${attachment.name}-${index}`} className="ai-attachment">{attachment.kind === 'video' ? <Film size={12} /> : <FileText size={12} />}{attachment.name}</span>)}</div> : null}{message.content ? <p>{message.content}</p> : null}</div><small>{formatDateTime(message.createdAt)}</small></div>
               ) : (
                 <div key={message.id} className="ai-message is-assistant">
                   <span className="ai-avatar"><Bot size={16} /></span>
@@ -260,19 +315,37 @@ export default function AiPage() {
             </div>
             {error ? <div className="ai-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭</button></div> : null}
             <div className="ai-composer">
-              <textarea
-                className="input"
-                value={input}
-                rows={3}
-                maxLength={20000}
-                placeholder="告诉 AI 你想写什么、发到哪里，例如：写一篇关于效率工具的文章并保存为知乎草稿…"
-                onChange={event => setInput(event.target.value)}
-                onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }}
-                disabled={sending}
-              />
+              {attachments.length || uploadingAttachments ? (
+                <div className="ai-composer-attachments" aria-label="待发送附件">
+                  {attachments.map((attachment, index) => (
+                    <span key={`${attachment.name}-${index}`} className="ai-attachment-chip">
+                      {attachment.kind === 'image' && attachment.url ? <img src={absoluteUrl(attachment.url)} alt="" /> : attachment.kind === 'video' ? <Film size={12} /> : <FileText size={12} />}
+                      <span title={attachment.name}>{attachment.name}</span>
+                      <button type="button" aria-label={`移除附件 ${attachment.name}`} disabled={sending} onClick={() => removeAttachment(index)}><X size={11} /></button>
+                    </span>
+                  ))}
+                  {uploadingAttachments ? <span className="ai-attachment-chip is-uploading"><LoaderCircle size={12} className="spin" />正在上传…</span> : null}
+                </div>
+              ) : null}
+              <div className="ai-composer-row">
+                <label className="ai-attach-button" title="上传图片、视频或文本文档">
+                  <Paperclip size={16} />
+                  <input type="file" multiple accept={ATTACHMENT_ACCEPT} onChange={event => void handleFiles(event)} disabled={sending} aria-label="上传附件" />
+                </label>
+                <textarea
+                  className="input"
+                  value={input}
+                  rows={3}
+                  maxLength={20000}
+                  placeholder="告诉 AI 你想写什么、发到哪里；可点击回形针上传图片、视频或文本文档作为素材…"
+                  onChange={event => setInput(event.target.value)}
+                  onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }}
+                  disabled={sending}
+                />
+              </div>
               <div className="ai-composer-foot">
-                <span>{input.length} / 20000 · Enter 发送，Shift + Enter 换行</span>
-                <button type="button" className="btn btn-primary" onClick={() => void send()} disabled={sending || !input.trim()}>{sending ? <LoaderCircle size={15} className="spin" /> : <Send size={15} />}{sending ? '处理中…' : '发送'}</button>
+                <span>{input.length} / 20000 · 图片视频将进入素材库，文档全文随消息发送 · Enter 发送，Shift + Enter 换行</span>
+                <button type="button" className="btn btn-primary" onClick={() => void send()} disabled={sending || uploadingAttachments > 0 || (!input.trim() && !attachments.length)}>{sending ? <LoaderCircle size={15} className="spin" /> : <Send size={15} />}{sending ? '处理中…' : '发送'}</button>
               </div>
             </div>
           </>

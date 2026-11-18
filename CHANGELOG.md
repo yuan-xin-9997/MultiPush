@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## 2026-11-18 · AI 创作助手支持上传图片 / 视频 / 文档附件
+
+**改了什么**
+
+- AI 创作对话输入框新增回形针附件上传：图片、视频走素材库上传（自动登记为素材，≤10 MB 图片 / ≤200 MB 视频），文本文档（txt/md/markdown/json/csv/html/xml/yml/yaml，≤2 MB）前端读取全文随消息发送；支持一次多选、发送前移除、上传进度提示。
+- 模型按附件意图创作：
+  - 图片：≤6 MB 常见格式以 base64 视觉内容发给模型（可"看图"），消息携带素材 ID 与尺寸；`create_content`/`update_content` 新增 `mediaIds`，图片按顺序追加到图文正文末尾，第一张默认作为封面。
+  - 视频：`create_content(kind:"video", mediaIds:…)` 用上传的视频按顺序初始化剪辑时间线（trimStart 0、保留到结尾），之后可继续用剪辑工具修剪/调序/导出成片。
+  - 文档：全文作为写作素材注入（注入时每份截断到 2 万字并标注）。
+- 上下文与费用保护：附件元数据（含素材 ID）持久保存到消息（`ai_messages.attachments_json`）跨轮可用；**文档全文与图片视觉内容只在发送当轮注入**，历史轮次降级为「[附件] 名称（素材 ID）」紧凑引用。
+- 系统提示新增附件使用规则（mediaIds 用法、文档引用、禁止编造素材 ID、图片内容先描述确认）。
+- 输入为空但有附件时允许发送；会话标题回退到附件名；失败时保留已上传附件便于重试。
+
+**实现**
+
+- 共享类型：`AiMessageAttachment`、`AiSendMessageInput`；`AiMessage.attachments`。
+- 数据库（增量迁移 `ensureAiColumns`）：`ai_messages.attachments_json`；`CreateAiMessageValues`/`mapAiMessage`/`createAiMessage` 读写附件。
+- 服务端：`chat` 入参改为 `{message, mediaIds?, documents?}`（归属校验、数量/长度上限、空文本+附件允许）；`providerMessages` 变异步，按"最近一条用户消息"注入完整附件上下文（视觉 parts + 文档全文），旧消息紧凑引用；`create_content`/`update_content` 支持 `mediaIds`（图文插图 + 封面 / 视频时间线初始化，类型与归属校验）。
+- 前端：`AiPage.tsx` 附件选择/芯片/移除/进度、用户气泡附件展示（图片缩略图 + 文档/视频图标）、`api.ai.sendMessage` 传完整输入；`ai.css` 附件样式。
+- 文档：AI 创作说明新增「对话附件」章节并更新 API 表；同步 README、产品规格。
+
+**验证**
+
+- `npm run typecheck`（server + web）通过；`npm run build` 通过。
+- server 39 个文件 / 341 项测试全部通过（`ai.test.ts` 新增 7 项：附件存储与视觉 parts、历史轮次紧凑引用、文档全文当轮注入与截断、无文本纯附件发送、跨用户素材拒绝与数量上限、`create_content` 图片插入与封面、`create_content(kind=video)` 时间线初始化、类型不匹配以工具错误返回）。
+- `node scripts/smoke-ai-attachments.mjs`（新增，`npm run smoke:ai-attachments`，headless Chrome + 隔离假 LLM/假素材库）：上传图片+文档 → 芯片展示 → 发送 → 气泡内图片缩略图与文档徽标 → 请求体含 mediaIds 与文档全文 → 发送后清空 → 移动端截图，页面无 JS 错误；截图在 `artifacts/ai-attachments-check/`。
+- 未覆盖：真实多模态模型联调（视觉识别效果取决于所配置模型是否支持 image_url 输入；纯文本模型会忽略视觉部分）；PDF/Word 等二进制文档解析留待后续。
+
 ## 2026-11-18 · 新增公众号贴图（图片消息）渲染与 API 草稿发布
 
 **改了什么**

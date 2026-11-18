@@ -1,7 +1,11 @@
 import { load } from 'cheerio'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import type {
   AiChatResult,
   AiMessage,
+  AiMessageAttachment,
+  AiSendMessageInput,
   AiSession,
   AiSessionDetail,
   AiSettings,
@@ -10,6 +14,7 @@ import type {
   BatchPublishInput,
   BatchRenderInput,
   ContentDetail,
+  MediaAsset,
   PlatformId,
   RenderOptions,
 } from '../../shared/types'
@@ -17,6 +22,7 @@ import type { AppConfig } from './config'
 import type { Database } from './db'
 import type { BatchService } from './batch'
 import { ApiError, notFound } from './errors'
+import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { decryptPublisherSecret, encryptPublisherSecret, loadPublisherKey } from './publisher-session'
 import { defaultContentTitle, deriveContentMetrics, normalizeTags, plainTextFromContent } from './content-utils'
 import { renderPlatforms } from './renderers'
@@ -36,13 +42,25 @@ const MAX_TOOL_ROUNDS = 8
 const MAX_HISTORY_MESSAGES = 80
 const MAX_TOOL_RESULT_CHARS = 60_000
 const PROVIDER_TIMEOUT_MS = 120_000
+/** Attachment limits: images/videos are media assets, documents are inline text. */
+const MAX_MEDIA_ATTACHMENTS = 10
+const MAX_DOCUMENTS = 5
+/** Kept low enough that five max-size documents stay under the 2 MB JSON body limit. */
+const MAX_DOCUMENT_TEXT_CHARS = 100_000
+const MAX_DOCUMENT_INLINE_CHARS = 20_000
+/** Images above this size are referenced by metadata only, not sent as vision parts. */
+const MAX_VISION_IMAGE_BYTES = 6 * 1024 * 1024
+const VISION_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 const PLATFORM_IDS = new Set<PlatformId>(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog'])
 
 type JsonObject = Record<string, unknown>
 
+type ImageContentPart = { type: 'image_url'; image_url: { url: string } }
+type TextContentPart = { type: 'text'; text: string }
+
 interface ProviderMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | null
+  content: string | Array<ImageContentPart | TextContentPart> | null
   tool_calls?: AiToolCall[]
   tool_call_id?: string
 }
@@ -159,6 +177,13 @@ const SYSTEM_PROMPT = `你是 MultiPush 的 AI 创作助手。MultiPush 是一�
 - 将文章保存为平台草稿或正式发布；抖音视频笔记可使用导出的成片素材（videoMediaId）发布；
 - 创建批量渲染和批量发布任务。
 
+附件使用规则（用户消息可能附带图片、视频或文本文档）：
+- 附件元数据中带"素材 ID"的可以直接传给工具的 mediaIds 参数；没有素材 ID 的内容一律不要编造。
+- 用户上传图片并要求写文章：调用 create_content 或 update_content 时传 mediaIds，系统会把图片按顺序插入正文末尾，第一张默认作为封面（可用 coverImage 覆盖）。如需把图穿插在正文中，可在 html 里引用附件的 url（/uploads/... 路径）。
+- 用户上传视频并要求新建视频内容：调用 create_content(kind="video", mediaIds=...)，系统会用这些视频按顺序初始化剪辑时间线；之后可用 update_video_timeline 调整顺序和裁剪，export_video 导出成片。
+- 文档附件提供提取后的纯文本，是写作素材，可以引用、改写或总结；文本可能被截断，缺尾时说明即可，不要编造缺失部分。
+- 图片内容以视觉信息为准；如果无法确认图片内容，先向用户描述你看到的内容并确认，不要臆测。
+
 工作原则：
 1. 需要真实数据时必须调用工具，不要编造内容 ID、渲染 ID、发布记录 ID、素材 ID 或账号状态。
 2. 用户要求写文章时，直接写出完整、可读的文章，并使用干净语义 HTML（h1/h2/h3、p、ul/ol/li、blockquote、pre/code、img、table 等）。不要输出 script、style、iframe。
@@ -225,6 +250,7 @@ export const AI_TOOLS: ToolDefinition[] = [
           title: { type: 'string', description: '文章标题' },
           kind: { type: 'string', enum: ['article', 'video'], description: '内容类型，默认 article' },
           html: { type: 'string', description: '文章正文 HTML' },
+          mediaIds: { type: 'array', items: { type: 'string' }, description: '素材 ID 列表：article 时为按顺序插入正文末尾的图片（第一张默认作为封面），video 时为按顺序初始化剪辑时间线的视频' },
           excerpt: { type: 'string', description: '摘要，可选；不传则自动生成' },
           tags: { type: 'array', items: { type: 'string' }, description: '标签，最多 10 个' },
           bookId: { type: 'string', description: '知识库 ID，可选' },
@@ -240,13 +266,14 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'update_content',
-      description: '修改已有文章的标题、正文、标签、摘要、状态或所属知识库。只传需要修改的字段。',
+      description: '修改已有文章的标题、正文、标签、摘要、状态或所属知识库，也可为图文追加素材图片。只传需要修改的字段。',
       parameters: {
         type: 'object',
         properties: {
           contentId: { type: 'string' },
           title: { type: 'string' },
           html: { type: 'string' },
+          mediaIds: { type: 'array', items: { type: 'string' }, description: '图片素材 ID，按顺序追加到图文正文末尾（第一张同时作为封面，除非已有封面）' },
           excerpt: { type: 'string' },
           tags: { type: 'array', items: { type: 'string' } },
           bookId: { type: 'string', description: '知识库 ID；传空字符串表示未分组' },
@@ -540,28 +567,72 @@ export class AiService {
     if (!this.database.deleteAiSession(userId, id)) throw notFound('AI 会话不存在')
   }
 
-  async chat(userId: string, sessionId: string, message: string): Promise<AiChatResult> {
+  async chat(userId: string, sessionId: string, input: AiSendMessageInput): Promise<AiChatResult> {
     if (this.active.has(userId)) throw new ApiError(409, 'ai_busy', '当前账号已有 AI 请求正在处理，请等待完成后再发送')
     this.active.add(userId)
-    try { return await this.chatInner(userId, sessionId, message) }
+    try { return await this.chatInner(userId, sessionId, input) }
     finally { this.active.delete(userId) }
   }
 
-  private async chatInner(userId: string, sessionId: string, message: string): Promise<AiChatResult> {
+  /** Resolve media ids into attachment metadata, verifying per-user ownership. */
+  private mediaAttachments(userId: string, mediaIds: string[]): AiMessageAttachment[] {
+    const attachments: AiMessageAttachment[] = []
+    for (const mediaId of mediaIds) {
+      const media = this.database.getMedia(userId, mediaId)
+      if (!media) throw notFound(`素材不存在或无权访问：${mediaId}`)
+      attachments.push(this.mediaAttachment(media))
+    }
+    return attachments
+  }
+
+  private mediaAttachment(media: MediaAsset): AiMessageAttachment {
+    return {
+      kind: media.kind,
+      name: media.originalName || media.filename,
+      mimeType: media.mimeType,
+      size: media.size,
+      mediaId: media.id,
+      url: media.url,
+      width: media.width ?? null,
+      height: media.height ?? null,
+      duration: media.duration ?? null,
+    }
+  }
+
+  /** Sanitize client-read documents; the text is capped again on the server. */
+  private documentAttachments(documents: AiSendMessageInput['documents']): AiMessageAttachment[] {
+    const attachments: AiMessageAttachment[] = []
+    for (const document of documents ?? []) {
+      const name = (document.name || '未命名文档').slice(0, 200)
+      const mimeType = (document.mimeType || 'text/plain').slice(0, 100)
+      const text = clampText(typeof document.text === 'string' ? document.text : '', MAX_DOCUMENT_TEXT_CHARS)
+      if (!text.trim()) continue
+      attachments.push({ kind: 'document', name, mimeType, size: Number(document.size) || Buffer.byteLength(text, 'utf8'), text })
+    }
+    return attachments
+  }
+
+  private async chatInner(userId: string, sessionId: string, input: AiSendMessageInput): Promise<AiChatResult> {
     const session = this.database.getAiSession(userId, sessionId)
     if (!session) throw notFound('AI 会话不存在')
-    const text = message.trim()
-    if (!text) throw new ApiError(400, 'ai_message_empty', '请输入消息')
+    const mediaIds = Array.isArray(input.mediaIds) ? input.mediaIds.slice(0, MAX_MEDIA_ATTACHMENTS) : []
+    if (Array.isArray(input.mediaIds) && input.mediaIds.length > MAX_MEDIA_ATTACHMENTS) throw new ApiError(400, 'ai_attachments_too_many', `一次最多上传 ${MAX_MEDIA_ATTACHMENTS} 个图片或视频附件`)
+    const documents = this.documentAttachments(input.documents)
+    if ((input.documents?.length ?? 0) > MAX_DOCUMENTS) throw new ApiError(400, 'ai_attachments_too_many', `一次最多附带 ${MAX_DOCUMENTS} 个文档`)
+    const attachments = [...this.mediaAttachments(userId, mediaIds), ...documents]
+    const text = (input.message || '').trim()
     if (text.length > 20_000) throw new ApiError(400, 'ai_message_too_long', '单条消息最多 20000 个字符')
+    if (!text && !attachments.length) throw new ApiError(400, 'ai_message_empty', '请输入消息或先上传附件')
     const credentials = this.credentials(userId)
-    this.database.createAiMessage(userId, sessionId, { role: 'user', content: text })
-    this.database.updateAiSession(userId, sessionId, session.title === '新会话' ? { title: text.slice(0, 36) } : { touch: true })
+    const storedText = text || (attachments.length ? `（消息包含 ${attachments.length} 个附件）` : '')
+    this.database.createAiMessage(userId, sessionId, { role: 'user', content: storedText, attachments: attachments.length ? attachments : undefined })
+    this.database.updateAiSession(userId, sessionId, session.title === '新会话' ? { title: (text || attachments[0]?.name || '新会话').slice(0, 36) } : { touch: true })
 
     let history = this.database.listAiMessages(userId, sessionId)
     const deadline = Date.now() + 6 * 60_000
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       if (Date.now() > deadline) throw new ApiError(504, 'ai_timeout', '本轮 AI 操作超过 6 分钟，请缩小任务范围后重试')
-      const providerMessages = this.providerMessages(history)
+      const providerMessages = await this.providerMessages(history)
       const response = await this.provider(credentials, providerMessages, AI_TOOLS, undefined, sessionId)
       if (!response.toolCalls.length) {
         const reply = this.database.createAiMessage(userId, sessionId, { role: 'assistant', content: response.content || '（模型没有返回文字内容）' })
@@ -599,13 +670,22 @@ export class AiService {
     try { return object(JSON.parse(call.function.arguments || '{}')) } catch { return {} }
   }
 
-  private providerMessages(history: AiMessage[]): ProviderMessage[] {
+  /**
+   * Build the provider conversation. Only the most recent user message gets
+   * full attachment context (document text + image vision parts); earlier
+   * messages keep compact references so history stays cheap.
+   */
+  private async providerMessages(history: AiMessage[]): Promise<ProviderMessage[]> {
     const selected = history.slice(-MAX_HISTORY_MESSAGES)
     while (selected.length && selected[0].role !== 'user') selected.shift()
+    // The message being sent this turn (the latest user message) gets the full
+    // attachment context; older attachment messages degrade to references.
+    const currentId = [...selected].reverse().find(row => row.role === 'user')?.id
     const messages: ProviderMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }]
     for (const row of selected) {
-      if (row.role === 'user') messages.push({ role: 'user', content: row.content })
-      else if (row.role === 'assistant') {
+      if (row.role === 'user') {
+        messages.push({ role: 'user', content: await this.userContent(row, row.id === currentId) })
+      } else if (row.role === 'assistant') {
         messages.push({
           role: 'assistant',
           content: row.content || null,
@@ -616,6 +696,56 @@ export class AiService {
       }
     }
     return messages
+  }
+
+  private attachmentReferences(attachments: AiMessageAttachment[]): string {
+    return attachments.map((attachment) => {
+      if (attachment.kind === 'document') return `[文档附件] ${attachment.name}（${attachment.mimeType}；正文文本已省略，如需原文请让用户重新发送）`
+      const label = attachment.kind === 'image' ? '图片' : '视频'
+      return `[${label}附件] ${attachment.name}（素材 ID：${attachment.mediaId}）`
+    }).join('\n')
+  }
+
+  private async userContent(row: AiMessage, full: boolean): Promise<string | Array<ImageContentPart | TextContentPart>> {
+    const attachments = row.attachments ?? []
+    if (!attachments.length) return row.content
+    if (!full) return `${row.content}\n${this.attachmentReferences(attachments)}`.trim()
+    const lines: string[] = [row.content]
+    const images: ImageContentPart[] = []
+    for (const attachment of attachments) {
+      if (attachment.kind === 'document') {
+        const text = attachment.text ?? ''
+        const total = Array.from(text).length
+        const inline = Array.from(text).slice(0, MAX_DOCUMENT_INLINE_CHARS).join('')
+        lines.push(`[文档附件] ${attachment.name}（${attachment.mimeType}，共 ${total} 字${inline.length < total ? '，以下内容已截断' : ''}）\n${inline}${inline.length < total ? '\n…（已截断）' : ''}`)
+        continue
+      }
+      const label = attachment.kind === 'image' ? '图片' : '视频'
+      const dimensions = attachment.kind === 'image' && attachment.width && attachment.height ? `，${attachment.width}×${attachment.height}` : ''
+      const seconds = attachment.kind === 'video' && attachment.duration ? `，约 ${Math.round(attachment.duration)} 秒` : ''
+      lines.push(`[${label}附件] ${attachment.name}（素材 ID：${attachment.mediaId}${dimensions}${seconds}）`)
+      if (attachment.kind === 'image') {
+        const vision = await this.visionDataUrl(attachment)
+        if (vision) images.push({ type: 'image_url', image_url: { url: vision } })
+        else lines.push('（该图片过大或格式不受支持，未包含视觉内容，请依赖用户提供的信息）')
+      }
+    }
+    const text = { type: 'text' as const, text: lines.join('\n') }
+    return images.length ? [...images, text] : text.text
+  }
+
+  private async visionDataUrl(attachment: AiMessageAttachment): Promise<string | null> {
+    if (!attachment.mediaId || !attachment.url || !VISION_MIME_TYPES.has(attachment.mimeType)) return null
+    if ((attachment.size ?? 0) > MAX_VISION_IMAGE_BYTES) return null
+    const filename = attachment.url.startsWith('/uploads/') ? attachment.url.slice('/uploads/'.length) : ''
+    if (!filename || !UPLOAD_FILENAME_PATTERN.test(filename)) return null
+    try {
+      const buffer = await readFile(path.join(this.config.uploadsDir, filename))
+      if (buffer.length > MAX_VISION_IMAGE_BYTES) return null
+      return `data:${attachment.mimeType};base64,${buffer.toString('base64')}`
+    } catch {
+      return null
+    }
   }
 
   private async provider(
@@ -763,38 +893,71 @@ export class AiService {
     }
   }
 
-  private createContent(userId: string, args: JsonObject) {
+  /** Resolve media ids for tools: images for articles, videos for timelines. */
+  private mediaByIds(userId: string, mediaIds: string[], kind: 'image' | 'video'): MediaAsset[] {
+    const unique = [...new Set(mediaIds)]
+    return unique.map((mediaId) => {
+      const media = this.database.getMedia(userId, mediaId)
+      if (!media) throw notFound(`素材不存在或无权访问：${mediaId}`)
+      if (media.kind !== kind) throw new ApiError(400, 'ai_media_kind', `素材 ${media.filename} 不是${kind === 'image' ? '图片' : '视频'}，不能用于该用途`)
+      return media
+    })
+  }
+
+  private appendImagesHtml(html: string, media: MediaAsset[]): string {
+    const blocks = media.map((asset) => `<p><img src="${asset.url}" alt=""></p>`).join('')
+    return html ? `${html}${blocks}` : blocks
+  }
+
+  private async createContent(userId: string, args: JsonObject) {
     const title = stringArg(args, 'title', true)!
     const html = cleanHtml(stringArg(args, 'html', true)!)
     const bookId = stringArg(args, 'bookId') ?? null
     if (bookId && !this.database.getBook(userId, bookId)) throw notFound('知识库不存在')
     const tags = normalizeTags(stringArrayArg(args, 'tags'))
     const kind = args.kind === 'video' ? 'video' as const : 'article' as const
-    const metrics = deriveContentMetrics({ contentHtml: html, contentJson: {}, excerpt: stringArg(args, 'excerpt') })
+    const mediaIds = stringArrayArg(args, 'mediaIds')
+    const timelineMedia = kind === 'video' ? this.mediaByIds(userId, mediaIds, 'video') : []
+    const images = kind === 'article' ? this.mediaByIds(userId, mediaIds, 'image') : []
+    if (kind === 'video' && mediaIds.length && !timelineMedia.length) throw new ApiError(400, 'ai_media_kind', '视频内容需要至少一个视频素材 ID')
+    const htmlWithImages = images.length ? this.appendImagesHtml(html, images) : html
+    const metrics = deriveContentMetrics({ contentHtml: htmlWithImages, contentJson: {}, excerpt: stringArg(args, 'excerpt') })
+    const coverImage = stringArg(args, 'coverImage') ?? images[0]?.url ?? null
     const content = this.database.createContent(userId, {
       title: defaultContentTitle(title),
       kind,
       bookId,
       contentJson: {},
-      contentHtml: html,
+      contentHtml: htmlWithImages,
       excerpt: metrics.excerpt,
-      coverImage: stringArg(args, 'coverImage') ?? null,
+      coverImage,
       tags,
       status: args.status === 'ready' ? 'ready' : 'draft',
       favorite: false,
       wordCount: metrics.wordCount,
       imageCount: metrics.imageCount,
-      videoCount: 0,
+      videoCount: timelineMedia.length,
     })
-    return { content: { id: content.id, kind: content.kind, title: content.title, wordCount: content.wordCount, excerpt: content.excerpt, tags: content.tags, status: content.status } }
+    let timeline: { clips: number; totalDuration: number; mediaIds: string[] } | undefined
+    if (timelineMedia.length) {
+      const project = await this.video.saveTimeline(userId, content.id, timelineMedia.map(asset => ({ mediaId: asset.id, trimStart: 0, trimEnd: null })))
+      timeline = { clips: project.clips.length, totalDuration: Math.round(project.totalDuration * 100) / 100, mediaIds: timelineMedia.map(asset => asset.id) }
+    }
+    return {
+      content: { id: content.id, kind: content.kind, title: content.title, wordCount: content.wordCount, excerpt: content.excerpt, tags: content.tags, status: content.status },
+      ...(timeline ? { timeline } : {}),
+      ...(images.length ? { images: images.map(asset => ({ mediaId: asset.id, url: asset.url })) } : {}),
+    }
   }
 
   private updateContent(userId: string, args: JsonObject) {
     const contentId = stringArg(args, 'contentId', true)!
     const current = this.database.getContentDetail(userId, contentId)
     if (!current) throw notFound('内容不存在')
-    const html = args.html !== undefined ? cleanHtml(stringArg(args, 'html', true)!) : current.contentHtml
-    const htmlChanged = args.html !== undefined && html !== current.contentHtml
+    const appendedImages = current.kind === 'article' ? this.mediaByIds(userId, stringArrayArg(args, 'mediaIds'), 'image') : []
+    const baseHtml = args.html !== undefined ? cleanHtml(stringArg(args, 'html', true)!) : current.contentHtml
+    const html = appendedImages.length ? this.appendImagesHtml(baseHtml, appendedImages) : baseHtml
+    const htmlChanged = html !== current.contentHtml
     const excerpt = stringArg(args, 'excerpt') ?? current.excerpt
     const metrics = deriveContentMetrics({ contentHtml: html, contentJson: current.contentJson, excerpt })
     const bookId = args.bookId !== undefined ? (stringArg(args, 'bookId') || null) : current.bookId
@@ -808,7 +971,7 @@ export class AiService {
       contentHtmlHash: htmlChanged ? current.contentHtmlHash : undefined,
       contentJsonStale: htmlChanged ? true : current.contentJsonStale,
       excerpt: metrics.excerpt,
-      coverImage: stringArg(args, 'coverImage') ?? current.coverImage,
+      coverImage: stringArg(args, 'coverImage') ?? current.coverImage ?? appendedImages[0]?.url ?? null,
       tags: args.tags !== undefined ? normalizeTags(stringArrayArg(args, 'tags')) : current.tags,
       status: args.status === 'draft' || args.status === 'ready' ? args.status : current.status,
       favorite: current.favorite,
@@ -817,7 +980,10 @@ export class AiService {
       videoCount: current.kind === 'video' ? current.videoCount : metrics.videoCount,
     })
     if (!updated) throw notFound('内容不存在')
-    return { content: { id: updated.id, kind: updated.kind, title: updated.title, wordCount: updated.wordCount, excerpt: updated.excerpt, tags: updated.tags, status: updated.status } }
+    return {
+      content: { id: updated.id, kind: updated.kind, title: updated.title, wordCount: updated.wordCount, excerpt: updated.excerpt, tags: updated.tags, status: updated.status },
+      ...(appendedImages.length ? { images: appendedImages.map(asset => ({ mediaId: asset.id, url: asset.url })) } : {}),
+    }
   }
 
   private async getVideoProject(userId: string, args: JsonObject) {

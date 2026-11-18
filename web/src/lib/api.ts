@@ -85,6 +85,7 @@ import type {
   BlogPublishInput,
   BlogResolveInput,
   AiChatResult,
+  AiSendMessageInput,
   AiSession,
   AiSessionDetail,
   AiSettings,
@@ -430,7 +431,7 @@ export const api = {
     createSession: (title?: string) => request<{ session: AiSession }>('/api/ai/sessions', { method: 'POST', body: JSON.stringify({ ...(title ? { title } : {}) }) }),
     getSession: (id: string) => request<{ session: AiSessionDetail }>(`/api/ai/sessions/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     deleteSession: (id: string) => request<{ ok: true }>(`/api/ai/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    sendMessage: (id: string, message: string) => request<AiChatResult>(`/api/ai/sessions/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ message }) }),
+    sendMessage: (id: string, input: AiSendMessageInput) => request<AiChatResult>(`/api/ai/sessions/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify(input) }),
   },
 
   platformSms: {

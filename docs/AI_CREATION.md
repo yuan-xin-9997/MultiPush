@@ -8,6 +8,7 @@
 
 - 新建、修改、读取文章；
 - 读取知识库、内容、素材、渲染记录和发布记录；
+- 在对话中上传图片、视频和文本文档作为素材，让模型按附件意图创作（见下文「对话附件」）；
 - 创建视频内容并操控剪辑：查看/修改剪辑时间线（修剪、调序、增删片段）、触发导出并跟踪导出进度；
 - 为文章生成公众号、小红书、知乎、微博、今日头条、抖音、少数派和个人博客排版（公众号贴图暂不支持 AI 工具，可在渲染工作台手动生成）；
 - 保存平台草稿、正式发布、删除平台草稿；
@@ -50,13 +51,33 @@ OpenCode Go 的 OpenAI 兼容接口要求 `x-opencode-session` 请求头。Multi
 对话记录按用户保存在 `ai_sessions` / `ai_messages`。每轮最多执行 8 轮工具调用，单轮总时长上限 6 分钟。工具包括：
 
 - `get_system_overview`、`list_books`、`list_contents`（支持 `kind` 筛选图文/视频）、`get_content`、`list_media`
-- `create_content`、`update_content`
+- `create_content`、`update_content`（支持 `mediaIds`，见「对话附件」）
 - `get_video_project`、`update_video_timeline`、`export_video`、`get_video_export`
 - `render_content`、`get_render`、`list_renders`
 - `list_publications`、`publish_article`、`delete_draft`
 - `batch_render`、`batch_publish`、`get_batch_job`
 
 发布是有外部影响的操作。系统提示要求模型只在用户明确要求时发布，默认优先保存草稿；公众号正式发表可能仍需管理员在本系统扫码确认。出现「结果待核实」时不要重复提交，应先到发布管理核实。
+
+### 对话附件（图片 / 视频 / 文档）
+
+在 AI 输入框点击回形针上传附件后发送，附件会进入用户消息并按类型交给模型：
+
+| 类型 | 处理方式 | 模型能做什么 |
+| --- | --- | --- |
+| 图片 | 走素材库上传（`POST /api/media`，≤10 MB JPG/PNG/WebP/GIF），消息携带素材 ID 与尺寸；≤6 MB 且为常见格式时以 base64 视觉内容发给模型 | 看图写作、把图片插入文章（`create_content`/`update_content` 传 `mediaIds`，图片按顺序追加到正文末尾，第一张默认作为封面）、设置封面 |
+| 视频 | 走素材库上传（≤200 MB MP4/WebM/MOV），消息携带素材 ID、时长与分辨率 | `create_content(kind:"video", mediaIds:…)` 用上传的视频按顺序初始化剪辑时间线，再配合剪辑工具修剪、调序、导出成片 |
+| 文档 | 前端读取纯文本（txt/md/markdown/json/csv/html/xml/yml/yaml，≤2 MB），全文随消息发送；服务端再次截断（单文档 ≤10 万字符，注入提示词时每份 ≤2 万字） | 以文档内容为素材写文章、改写、总结 |
+
+规则与保护：
+
+- 一次最多 10 个图片/视频附件、5 个文档；文档缺失或超限会被拒绝。
+- 附件元数据持久保存在消息（`ai_messages.attachments_json`），素材 ID 跨轮有效；**文档全文与图片视觉内容只在发送当轮注入**，历史轮次仅保留「[附件] 名称（素材 ID）」的紧凑引用，避免上下文与费用膨胀。
+- 附件校验用户归属：只能引用自己上传的素材；类型不匹配（例如把视频当图片插图）会以工具错误返回。
+- 模型被要求不得编造素材 ID；无法确认图片内容时先描述并确认。
+- 文档不支持 PDF/Word 等二进制格式（需要额外解析能力，后续版本考虑）。
+
+示例指令：「根据我上传的资料写一篇青海湖游记，把我上传的 3 张图放进正文并生成公众号排版」「用我上传的两段视频新建一个视频内容，把文案补上」。
 
 ### AI 操控视频剪辑
 
@@ -95,7 +116,7 @@ OpenCode Go 的 OpenAI 兼容接口要求 `x-opencode-session` 请求头。Multi
 | `POST /api/ai/sessions` | 新建会话 `{title?}` |
 | `GET /api/ai/sessions/:id` | 会话和消息 |
 | `DELETE /api/ai/sessions/:id` | 删除会话及消息 |
-| `POST /api/ai/sessions/:id/messages` | 发送消息 `{message}`，返回本轮消息和回复 |
+| `POST /api/ai/sessions/:id/messages` | 发送消息 `{message, mediaIds?, documents?}`（附件见「对话附件」），返回本轮消息和回复 |
 | `GET /api/batch/jobs` | 最近批量任务 |
 | `GET /api/batch/jobs/:id` | 批量任务进度 |
 | `POST /api/batch/render` | 创建批量渲染任务 |

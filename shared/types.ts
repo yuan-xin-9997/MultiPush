@@ -1095,6 +1095,30 @@ export interface AiToolCall {
   function: { name: string; arguments: string }
 }
 
+/** One attachment on an AI chat message: a media asset or a text document. */
+export interface AiMessageAttachment {
+  kind: 'image' | 'video' | 'document'
+  name: string
+  mimeType: string
+  size: number
+  /** Media asset id for image/video attachments; tools accept it directly. */
+  mediaId?: string
+  url?: string
+  width?: number | null
+  height?: number | null
+  duration?: number | null
+  /** Extracted plain text for document attachments (capped on save). */
+  text?: string
+}
+
+export interface AiSendMessageInput {
+  message: string
+  /** Image/video media asset ids already uploaded to the media library. */
+  mediaIds?: string[]
+  /** Text documents read client-side; the server caps each text again. */
+  documents?: Array<{ name: string; mimeType: string; size?: number; text?: string }>
+}
+
 export interface AiMessage {
   id: string
   role: 'user' | 'assistant' | 'tool'
@@ -1105,6 +1129,7 @@ export interface AiMessage {
   toolArguments?: unknown
   toolResult?: unknown
   createdAt: string
+  attachments?: AiMessageAttachment[]
 }
 
 export interface AiSession {

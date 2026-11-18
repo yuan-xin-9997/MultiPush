@@ -13,7 +13,17 @@ const settingsSchema = z.object({
 }).strict()
 
 const sessionSchema = z.object({ title: z.string().trim().max(80).optional() }).strict()
-const messageSchema = z.object({ message: z.string().trim().min(1, '请输入消息').max(20_000, '单条消息最多 20000 个字符') }).strict()
+const documentSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  mimeType: z.string().trim().max(100).default('text/plain'),
+  size: z.number().int().min(0).max(50_000_000).optional(),
+  text: z.string().max(100_000, '单个文档文本最多 10 万字符'),
+}).strict()
+const messageSchema = z.object({
+  message: z.string().max(20_000, '单条消息最多 20000 个字符').default(''),
+  mediaIds: z.array(z.uuid()).max(10, '一次最多 10 个图片或视频附件').optional(),
+  documents: z.array(documentSchema).max(5, '一次最多 5 个文档附件').optional(),
+}).strict().refine(input => input.message.trim().length > 0 || (input.mediaIds?.length ?? 0) + (input.documents?.length ?? 0) > 0, { message: '请输入消息或先上传附件' })
 
 export function createAiRouter(service: AiService): Router {
   const router = Router()
@@ -36,7 +46,7 @@ export function createAiRouter(service: AiService): Router {
   router.delete('/sessions/:id', asyncHandler((req, res) => { service.deleteSession(currentUser(req).id, req.params.id); res.json({ ok: true }) }))
   router.post('/sessions/:id/messages', asyncHandler(async (req, res) => {
     const input = parseInput(messageSchema, req.body)
-    res.json(await service.chat(currentUser(req).id, req.params.id, input.message))
+    res.json(await service.chat(currentUser(req).id, req.params.id, input))
   }))
 
   return router
