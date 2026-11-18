@@ -217,9 +217,7 @@ export class VideoService {
     const base = path.basename(filename)
     if (base !== filename) throw new ApiError(400, 'invalid_media', '素材文件名无效')
     return path.join(this.config.uploadsDir, base)
-  }
-
-  private mapClips(clips: StoredVideoClip[], userId: string) {
+  }  private mapClips(clips: StoredVideoClip[], userId: string) {
     if (clips.length === 0) return []
     const mediaIds = [...new Set(clips.map((clip) => clip.mediaId))]
     const media = mediaIds.map((id) => this.database.getMedia(userId, id))
@@ -426,6 +424,18 @@ export async function probeVideoFile(filePath: string, ffprobePath: string): Pro
   } catch {
     return null
   }
+}
+
+/**
+ * URL of the most recent completed export for a video content, used by the
+ * render pipeline so 渲染记录 can preview the exported cut. Returns null for
+ * article contents or when nothing has been exported yet.
+ */
+export function latestExportOutputUrl(database: Database, userId: string, contentId: string): string | null {
+  const record = database
+    .listVideoExports(userId, contentId)
+    .find((item) => item.status === 'completed' && item.outputMedia)
+  return record?.outputMedia?.url ?? null
 }
 
 /**

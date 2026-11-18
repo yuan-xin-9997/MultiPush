@@ -79,6 +79,7 @@ try {
     })
   ).json()
   assert.ok(registration.token, `registration failed: ${JSON.stringify(registration)}`)
+  const token = registration.token
 
   browser = await chromium.launch({ executablePath: chrome, headless: true })
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -131,17 +132,35 @@ try {
   const panelText = await page.locator('.video-exports-panel').innerText()
   assert.match(panelText, /下载成片/, 'export panel offers download')
 
-  // Server side: the exported media exists and the timeline got persisted.
-  const outputs = [...await import('node:fs').then((fs) => fs.readdirSync(path.join(dataDir, 'uploads')))]
-    .filter((name) => name.endsWith('.mp4') && !name.startsWith('media-') && name !== 'clip_a.mp4' && name !== 'clip_b.mp4')
-  assert.ok(outputs.length >= 1, `expected an exported mp4 in uploads, got ${outputs.join(',')}`)
-  const size = statSync(path.join(dataDir, 'uploads', outputs[0])).size
-  assert.ok(size > 10_000, `exported file too small: ${size}`)
-
+  // Server side: the exported media exists (found via the API, since uploads
+  // use random uuid filenames) and the timeline got persisted.
+  const contentIdFromUrl = url.split('/').pop()
+  const exportsData = await (await fetch(`${base}/api/contents/${contentIdFromUrl}/video/exports`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })).json()
+  const completedExport = exportsData.exports?.find((item) => item.status === 'completed' && item.outputMedia)
+  assert.ok(completedExport, 'expected a completed export with output media')
+  const outputName = completedExport.outputMedia.filename
+  const outputSize = statSync(path.join(dataDir, 'uploads', outputName)).size
+  assert.ok(outputSize > 10_000, `exported file too small: ${outputSize}`)
   await page.screenshot({ path: path.join(output, 'workspace.png'), fullPage: false })
+
+  // Render the video content: the exported cut must preview inside 渲染记录.
+  await page.goto(`${base}/render?contentId=${contentIdFromUrl}`)
+  await until(async () => (await page.locator('.render-stage .phone-shell video').count()) > 0, 'WeChat preview should embed the exported video', 60_000)
+  await page.screenshot({ path: path.join(output, 'render-wechat.png') })
+  const wechatVideo = page.locator('.render-stage .phone-shell video').first()
+  const videoSrc = await wechatVideo.getAttribute('src')
+  assert.ok(videoSrc && videoSrc.includes(outputName), `WeChat preview should use the exported cut, got ${videoSrc}`)
+
+  // Douyin: switch to the video-note preview and check the player.
+  await page.locator('.render-tab', { hasText: '抖音' }).click()
+  await until(async () => (await page.locator('.douyin-media-video').count()) > 0, 'Douyin preview should show the exported video', 30_000)
+  await page.screenshot({ path: path.join(output, 'render-douyin.png') })
+
   assert.equal(errors.length, 0, `page errors: ${errors.join(' | ')}`)
 
-  console.log('✓ 视频工作台 UI 冒烟全部通过')
+  console.log('✓ 视频工作台 UI 冒烟全部通过（含渲染记录视频预览）')
 } catch (error) {
   console.error(error)
   process.exitCode = 1

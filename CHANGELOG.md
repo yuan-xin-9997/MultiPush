@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 2026-11-19 · 渲染记录预览视频内容的导出成片
+
+**改了什么**
+
+- 智能渲染在渲染视频内容（`kind: video`）时，自动把**最近一次导出成功的成片**作为正文开头的视频注入渲染快照：
+  - 公众号 / 知乎 / 少数派 / 博客等长文平台：正文顶部出现内嵌视频播放器（绝对地址 `<video controls>`），渲染工作台手机壳预览可直接播放；
+  - 抖音：自动以视频笔记竖屏预览，文案保持纯文本不含视频地址；
+  - 小红书：自动切换到「视频笔记」预览模式；
+  - 不支持视频的平台（微博 / 头条 / 百家号 / 豆瓣 / 掘金 / 简书）保持原有「视频将在发布时忽略/移除」提示。
+- 没有导出过成片时渲染行为不变；渲染记录保存生成时刻的成片快照，重新导出后再次渲染即获得新成片；注入只发生在渲染快照，不修改视频内容正文。
+- AI 创作与批量渲染 / 批量发布走同一管线，行为一致。
+
+**实现**
+
+- `RenderInput` 新增可选 `videoUrl`；`renderers/index.ts` 在渲染前把成片包装成 `<figure><video controls></video></figure>` 前置到 contentHtml（只使用 sanitize 白名单属性）。
+- `video.ts` 新增 `latestExportOutputUrl()`（最近完成的导出 → 输出素材 URL）；`routes/renders.ts`、`ai.ts`、`batch.ts`（批量渲染/发布）统一传入。
+
+**验证**
+
+- `server/test/renderers.test.ts` 新增 3 组断言：公众号注入成片（绝对地址、位于正文之前、meta.videoCount=1）、抖音/小红书视频笔记模式（文案不含视频地址）、无成片/图文内容不受影响；`npm test`：server 39 个文件 / 344 项 + web 20 项全部通过。
+- `npm run smoke:video` 增加「渲染记录包含导出成片（wechat/douyin/xiaohongshu）」「公众号渲染含内嵌视频播放器」检查，本地与线上均通过。
+- `npm run smoke:video-ui` 增加渲染预览检查并截图：公众号手机壳内嵌成片播放器、抖音竖屏视频笔记预览（`artifacts/video-workspace-check/render-wechat.png`、`render-douyin.png`）。
+- 已部署复核：线上创建视频内容 → 导出成片 → 渲染，工作台预览可见成片播放器。
+
 ## 2026-11-18 · AI 创作助手支持上传图片 / 视频 / 文档附件
 
 **改了什么**

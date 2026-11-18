@@ -269,6 +269,47 @@ describe('renderPlatforms', () => {
     expect(result.warnings.some((warning) => warning.includes('视频'))).toBe(true)
   })
 
+  describe('video contents with an exported cut', () => {
+    function videoInput(platforms: Parameters<typeof input>[0], videoUrl: string | null) {
+      const base = input(platforms, {
+        kind: 'video',
+        contentHtml: '<p>这条视频记录了一次完整的创作流程。</p>',
+        videoCount: 2,
+      })
+      return { ...base, videoUrl }
+    }
+
+    it('injects the exported cut as the leading video on WeChat', async () => {
+      const [result] = await renderPlatforms(videoInput(['wechat'], '/uploads/export-cut.mp4'))
+      expect(result.videos).toEqual(['http://192.168.0.111:34080/uploads/export-cut.mp4'])
+      expect(result.meta.videoCount).toBe(1)
+      const $ = load(result.html)
+      expect($('video[src*="export-cut.mp4"][controls]')).toHaveLength(1)
+      // The video figure comes before the body text.
+      const html = result.html
+      expect(html.indexOf('export-cut.mp4')).toBeLessThan(html.indexOf('创作流程'))
+    })
+
+    it('drives Douyin and Xiaohongshu video-note previews from the exported cut', async () => {
+      const [douyin, xiaohongshu] = await renderPlatforms(videoInput(['douyin', 'xiaohongshu'], '/uploads/export-cut.mp4'))
+      expect(douyin.videos[0]).toBe('http://192.168.0.111:34080/uploads/export-cut.mp4')
+      expect(douyin.warnings.some((warning) => warning.includes('视频素材'))).toBe(true)
+      // The caption text must stay plain — no video URL inside.
+      expect(douyin.text).not.toContain('export-cut')
+      expect(xiaohongshu.previewMode).toBe('video')
+      expect(xiaohongshu.videos).toHaveLength(1)
+    })
+
+    it('warns platforms without video publishing and keeps articles untouched', async () => {
+      const [weibo, article] = await renderPlatforms(videoInput(['weibo', 'zhihu'], '/uploads/export-cut.mp4'))
+      expect(weibo.warnings.some((warning) => warning.includes('视频'))).toBe(true)
+      // Without a videoUrl the render must not gain any video.
+      const [plainZhihu] = await renderPlatforms(input(['zhihu'], { kind: 'video', contentHtml: '<p>正文</p>' }))
+      expect(plainZhihu.videos).toEqual([])
+      expect(plainZhihu.html).not.toContain('<video')
+    })
+  })
+
   it('renders Zhihu Markdown and HTML', async () => {
     const [result] = await renderPlatforms(input(['zhihu']))
     expect(result.previewMode).toBe('article')

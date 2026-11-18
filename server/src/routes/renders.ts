@@ -5,6 +5,7 @@ import type { AppConfig } from '../config'
 import type { Database } from '../db'
 import { ApiError, asyncHandler, notFound } from '../errors'
 import { renderPlatforms } from '../renderers'
+import { latestExportOutputUrl } from '../video'
 import { parseInput, renderListQuerySchema, renderRequestSchema } from '../validation'
 import { platformAdjustmentSchema, renderPlatformParamsSchema } from '../validation'
 import { adjustPlatformRender } from '../render-adjustment'
@@ -54,6 +55,8 @@ export function createRendersRouter(database: Database, config: AppConfig): Rout
           options,
           authorName: user.displayName || user.username,
           baseUrl,
+          // Video contents embed their latest exported cut so 渲染记录 previews it.
+          videoUrl: latestExportOutputUrl(database, user.id, input.contentId),
         })
       } catch (error) {
         console.error('[multipush] render failed:', error)

@@ -31,7 +31,7 @@ const RENDERERS: Record<PlatformId, PlatformRenderer> = {
 }
 
 /**
- * Render the requested platforms in input order.
+ * Render the requested platforms in request order.
  *
  * Each platform is isolated: one platform's failure is reported with its
  * platform id so the API can return an actionable error. The rendering rules
@@ -45,14 +45,24 @@ export async function renderPlatforms(input: RenderInput): Promise<PlatformRende
   const platforms = Array.from(new Set(input.platforms))
   const results: PlatformRender[] = []
 
+  // Video contents carry their exported cut (成片) as the leading figure so
+  // every platform renderer treats it like a normal video in the document.
+  const content = input.videoUrl
+    ? {
+        ...input.content,
+        contentHtml: `${videoFigureHtml(input.videoUrl)}${input.content.contentHtml ?? ''}`,
+      }
+    : input.content
+  const effectiveInput: RenderInput = { ...input, content }
+
   for (const platform of platforms) {
     const renderer = RENDERERS[platform]
     if (!renderer) {
       throw new Error(`不支持的平台：${platform}`)
     }
     try {
-      const authorName = input.options.authorName?.trim() || input.authorName
-      results.push({ ...await renderer({ ...input, authorName, platforms }, context), sourceUpdatedAt: input.content.updatedAt, authorName })
+      const authorName = effectiveInput.options.authorName?.trim() || effectiveInput.authorName
+      results.push({ ...await renderer({ ...effectiveInput, authorName, platforms }, context), sourceUpdatedAt: effectiveInput.content.updatedAt, authorName })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`渲染${platform}失败：${message}`)
@@ -60,6 +70,12 @@ export async function renderPlatforms(input: RenderInput): Promise<PlatformRende
   }
 
   return results
+}
+
+/** Minimal, sanitize-safe video figure (only attributes the allow-list keeps). */
+function videoFigureHtml(url: string): string {
+  const escaped = url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+  return `<figure><video src="${escaped}" controls="controls"></video></figure>`
 }
 
 export type { RenderInput, RendererContext, PlatformRenderer } from './types'

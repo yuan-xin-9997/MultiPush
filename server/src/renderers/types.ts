@@ -7,6 +7,12 @@ export interface RenderInput {
   authorName: string
   /** Absolute base URL, e.g. http://192.168.0.111:34080 (no trailing slash). */
   baseUrl: string
+  /**
+   * Exported cut of a video content (latest completed 导出成片), injected as
+   * the leading figure so every platform renderer sees a normal `<video>` in
+   * the document. Null for article contents or when nothing was exported.
+   */
+  videoUrl?: string | null
 }
 
 export type RenderPlatforms = (input: RenderInput) => Promise<PlatformRender[]>

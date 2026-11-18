@@ -157,6 +157,21 @@ async function main() {
       check(output.status === 200 || output.status === 206, '成片可通过 /uploads 访问（Range）')
       const size = Number(finished.outputMedia.size ?? 0)
       check(size > 10_000, `成片大小 ${Math.round(size / 1024)}KB`)
+
+      // Render the video content: the exported cut must be previewable.
+      const render = await request('/api/renders', {
+        method: 'POST',
+        token,
+        body: { contentId, platforms: ['wechat', 'douyin', 'xiaohongshu'] },
+      })
+      const results = render.data?.render?.results ?? []
+      const exportedUrl = finished.outputMedia.url
+      check(results.every((item) => (item.videos ?? []).some((url) => String(url).includes(exportedUrl.split('/').pop()))),
+        '渲染记录包含导出成片（wechat/douyin/xiaohongshu）')
+      const douyin = results.find((item) => item.platform === 'douyin')
+      check(douyin?.html?.includes(exportedUrl.split('/').pop()) || (douyin?.videos ?? []).length > 0, '抖音渲染含成片引用')
+      const wechat = results.find((item) => item.platform === 'wechat')
+      check(wechat?.html?.includes('<video'), '公众号渲染含内嵌视频播放器')
     }
     if (finished?.status === 'failed') {
       console.error(`  导出失败原因：${finished.message}`)

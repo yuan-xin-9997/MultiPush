@@ -26,6 +26,7 @@ import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { decryptPublisherSecret, encryptPublisherSecret, loadPublisherKey } from './publisher-session'
 import { defaultContentTitle, deriveContentMetrics, normalizeTags, plainTextFromContent } from './content-utils'
 import { renderPlatforms } from './renderers'
+import { latestExportOutputUrl } from './video'
 import type { WechatService } from './wechat'
 import type { ZhihuService } from './zhihu'
 import type { SspaiService } from './sspai'
@@ -1061,6 +1062,7 @@ export class AiService {
       options,
       authorName: user?.displayName || user?.username || 'MultiPush',
       baseUrl: this.baseUrl(),
+      videoUrl: latestExportOutputUrl(this.database, userId, contentId),
     })
     const render = this.database.createRender(userId, { contentId, contentTitle: content.title, platforms, options, results })
     return {

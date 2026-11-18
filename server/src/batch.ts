@@ -11,6 +11,7 @@ import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
 import { renderPlatforms } from './renderers'
+import { latestExportOutputUrl } from './video'
 import type { WechatService } from './wechat'
 import type { ZhihuService } from './zhihu'
 import type { SspaiService } from './sspai'
@@ -164,6 +165,7 @@ export class BatchService {
           options: input.options ?? {},
           authorName,
           baseUrl,
+          videoUrl: latestExportOutputUrl(this.database, userId, content.id),
         })
         const render = this.database.createRender(userId, {
           contentId: content.id,
@@ -216,6 +218,7 @@ export class BatchService {
           options: input.options ?? {},
           authorName,
           baseUrl,
+          videoUrl: latestExportOutputUrl(this.database, userId, content.id),
         })
         const render = this.database.createRender(userId, {
           contentId: content.id,
