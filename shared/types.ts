@@ -704,6 +704,7 @@ export interface BaijiahaoAccount {
   status: 'disconnected' | 'connected' | 'expired'
   name: string | null
   checkedAt: string | null
+  message?: string
 }
 
 export interface BaijiahaoLogin {

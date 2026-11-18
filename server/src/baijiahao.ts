@@ -69,6 +69,11 @@ export class BaijiahaoService {
         this.save(userId, result.state, result.identity)
         return { status: 'connected', name: result.identity.name, checkedAt: now() }
       } catch (error) {
+        if (error instanceof ApiError && error.code === 'baijiahao_account_unbound') {
+          const latest = this.database.getBaijiahaoAccount(userId)
+          if (latest) this.database.saveBaijiahaoAccount(userId, { ...latest, status: 'expired', checkedAt: now() })
+          return { status: 'expired', name: current.name, checkedAt: now(), message: error.message }
+        }
         if (error instanceof ApiError && error.code === 'baijiahao_session_expired' && this.database.getBaijiahaoAccount(userId)?.encryptedSession === current.encryptedSession) {
           this.database.saveBaijiahaoAccount(userId, { ...current, status: 'expired', checkedAt: now() })
           return { status: 'expired', name: current.name, checkedAt: now() }
