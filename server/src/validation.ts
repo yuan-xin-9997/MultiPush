@@ -77,6 +77,7 @@ const contentTagsSchema = z.array(z.string().max(200))
 
 export const contentInputSchema = z.object({
   title: z.string().max(500, '标题最多 500 个字符').optional(),
+  kind: z.enum(['article', 'video']).optional(),
   bookId: z.string().trim().min(1, '知识库 ID 不能为空').max(100).nullable().optional(),
   contentJson: contentJsonSchema.optional(),
   contentHtml: z.string().optional(),
@@ -99,10 +100,29 @@ export const contentListQuerySchema = z.object({
   favorite: booleanQuery,
   trash: booleanQuery,
   q: z.string().trim().max(200, '搜索关键词最多 200 个字符').optional(),
+  kind: z.enum(['article', 'video']).optional(),
   sort: z.enum(['updated_desc', 'created_desc', 'title_asc']).optional().default('updated_desc'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 })
+
+const clipTrimSchema = z.number().min(0, '剪辑起点不能为负').max(86_400, '剪辑起点最大 24 小时')
+const clipDurationSchema = z.number().min(0.05, '片段最短 0.05 秒').max(86_400, '片段最长 24 小时')
+
+export const videoTimelineSchema = z.object({
+  clips: z.array(
+    z.object({
+      mediaId: z.string().trim().min(1, '视频素材 ID 不能为空').max(100),
+      trimStart: clipTrimSchema.optional(),
+      trimEnd: clipDurationSchema.nullable().optional(),
+      duration: clipDurationSchema.nullable().optional(),
+    }),
+  ).max(60, '时间线最多 60 个片段'),
+})
+
+export const videoExportParamsSchema = z.object({ id: z.string().max(100), exportId: z.string().max(100) })
+export const videoContentParamsSchema = z.object({ id: z.string().max(100) })
+export const videoExportListQuerySchema = z.object({}).partial()
 
 export const permanentQuerySchema = z.object({
   permanent: booleanQuery,

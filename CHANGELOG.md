@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## 2026-11-18 · 新增视频内容与系统内剪辑（服务端 ffmpeg）
+
+**改了什么**
+
+- 新增内容类型 `video`（视频为主，带标题和正文文案）：内容库新增「新建视频」入口；视频内容带角标，点击进入独立的全屏视频工作台 `/video/:id`；图文编辑器误入会自动跳转。
+- 视频工作台支持一次上传一段或多段视频（MP4/WebM/MOV，单段 ≤200MB，带进度条），上传后进入剪辑时间线；正文按空行分段存储为 HTML 段落，标题/正文/标签与时间线自动保存。
+- 系统内剪辑：预览播放器（逐段/整条播放）、片段列表（入点/出点数字输入 + 「设入点/设出点」按钮）、时间线总览条、上移/下移、删除片段（不删素材）、复制内容时同步复制时间线。
+- 「导出成片」：服务端 ffmpeg 按时间线逐段裁剪并统一规格（H.264/AAC、30fps、yuv420p、偶数尺寸、缺音轨补静音），再 concat 合并为 `+faststart` MP4；异步任务含进度与失败原因，重启后任务标记失败；成片自动登记为视频素材，可直接用于抖音视频笔记发布。
+- AI 创作可操控剪辑：新增工具 `get_video_project`、`update_video_timeline`、`export_video`、`get_video_export`，`list_contents`/`create_content` 支持 `kind`；系统提示增加视频剪辑工作流。
+- 服务端能力探测：未安装 ffmpeg/ffprobe 时剪辑仍可保存，导出给出明确提示（页面顶部横幅 + 接口 503）。
+
+**实现**
+
+- 共享类型：`ContentKind`、`VideoClip(Detail/Input)`、`VideoProject`、`VideoExport`、`VideoCapability`；`ContentSummary.kind`、`MediaAsset` 探测元数据。
+- 数据库（增量迁移，user_version 18）：`contents.kind`、`media.meta_json`、`video_projects`（timeline_json）、`video_exports`；`video_count` 保存时间线时同步。
+- 后端：`server/src/video.ts`（ffprobe 解析、ffmpeg 命令构建、导出队列、进度上报）、`server/src/routes/video.ts`、媒体上传内联探测 + `GET /api/media/:id/probe`、内容路由 kind 支持。
+- 前端：`web/src/features/video/VideoWorkspacePage.tsx` + `video.css`、`api.video` 命名空间、内容库新建/跳转/角标、App 路由。
+- 文档：新增 `docs/VIDEO_CONTENT.md`，同步 README、AI 创作说明、产品规格、架构说明与 `.env.example`（FFMPEG_PATH/FFPROBE_PATH）。
+
+**验证**
+
+- `npm run typecheck`（server + web）通过；`npm run build` 通过。
+- `npm test`：server 38 个文件 / 317 项全部通过（含真实 ffmpeg 导出集成测试）；web 20 项通过。
+- `server/test/video.test.ts`：时间线持久化与用户隔离、修剪裁剪校验（发现并修复了片段缺省起点继承上片段的 bug）、图文内容拒绝剪辑、ffmpeg 命令构建（显式终点/补静音/总时长）、ffprobe JSON 解析；装有 ffmpeg 的环境执行真实导出集成测试：两段混合规格素材（有音轨 320×240 + 无音轨 640×480）→ 裁剪合并 → 输出 3.0s 320×240 H.264+AAC，缺失媒体同步报 400、丢失文件异步任务失败原因正确。
+- `node scripts/smoke-video.mjs`（新增，`npm run smoke:video`）：对真实服务完成 注册 → 建视频内容 → 上传两段（含 ffprobe 时长）→ 保存时间线 → 读取项目 → 图文拒绝剪辑 → 导出成片（Range 访问 + 大小校验）→ 回收站清理，全部通过。
+- `node scripts/smoke-video-ui.mjs`（新增，`npm run smoke:video-ui`，headless Chrome）：登录 → 内容库「新建视频」→ 工作台打开 → 页面上传两段 → 修剪出点 → 上移调序 → 标题自动保存 → 导出成片完成并可下载，页面无 JS 错误；截图在 `artifacts/video-workspace-check/`。
+- 待部署后在服务器复核 http://192.168.0.111:34080 的同一流程（服务器已预装 ffmpeg 6.1.1）。
+
 ## 2026-11-17 · 修复豆瓣登录二维码获取失败
 
 - 豆瓣登录页默认打开短信登录，二维码模式需要 `?prefer_login_way=qrcode`；此前直接读取页面导致找不到二维码。

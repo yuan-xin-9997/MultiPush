@@ -4,6 +4,7 @@ import {
   ArrowDownWideNarrow,
   ChevronLeft,
   ChevronRight,
+  Clapperboard,
   Download,
   FilePlus2,
   FolderInput,
@@ -208,7 +209,7 @@ export default function LibraryPage() {
 
   const actions: DocumentActions = useMemo(
     () => ({
-      open: (item) => navigate(`/editor/${item.id}`),
+      open: (item) => navigate(item.kind === 'video' ? `/video/${item.id}` : `/editor/${item.id}`),
       toggleFavorite: (item) => {
         void api.contents
           .setFavorite(item.id, !item.favorite)
@@ -267,13 +268,17 @@ export default function LibraryPage() {
     [navigate, reload],
   )
 
-  async function createDocument() {
+  async function createDocument(kind: 'article' | 'video' = 'article') {
     try {
       const targetBookId = mode === 'book' && activeBookId !== UNFILED_BOOK_ID ? activeBookId : null
-      const { content } = await api.contents.create({ title: '无标题文档', bookId: targetBookId })
-      navigate(`/editor/${content.id}`)
+      const { content } = await api.contents.create({
+        title: kind === 'video' ? '无标题视频' : '无标题文档',
+        kind,
+        bookId: targetBookId,
+      })
+      navigate(kind === 'video' ? `/video/${content.id}` : `/editor/${content.id}`)
     } catch (error) {
-      toast.error(getErrorMessage(error, '创建文档失败'))
+      toast.error(getErrorMessage(error, '创建内容失败'))
     }
   }
 
@@ -477,7 +482,11 @@ export default function LibraryPage() {
                   <Upload size={16} />
                   导入
                 </button>
-                <button type="button" className="btn btn-primary" onClick={() => void createDocument()}>
+                <button type="button" className="btn" onClick={() => void createDocument('video')}>
+                  <Clapperboard size={16} />
+                  新建视频
+                </button>
+                <button type="button" className="btn btn-primary" onClick={() => void createDocument('article')}>
                   <FilePlus2 size={16} />
                   新建文档
                 </button>
@@ -697,9 +706,13 @@ export default function LibraryPage() {
               action={
                 !isTrash ? (
                   <div className="btn-group">
-                    <button type="button" className="btn btn-primary" onClick={() => void createDocument()}>
+                    <button type="button" className="btn btn-primary" onClick={() => void createDocument('article')}>
                       <Plus size={16} />
                       新建文档
+                    </button>
+                    <button type="button" className="btn" onClick={() => void createDocument('video')}>
+                      <Clapperboard size={16} />
+                      新建视频
                     </button>
                     <button type="button" className="btn" onClick={() => fileInputRef.current?.click()}>
                       <Upload size={16} />

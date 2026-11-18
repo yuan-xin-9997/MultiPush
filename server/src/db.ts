@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type {
   Book,
   ContentDetail,
+  ContentKind,
   ContentListResult,
   ContentStatus,
   ContentSummary,
@@ -17,6 +18,10 @@ import type {
   RenderRecord,
   RichTextJson,
   User,
+  VideoClip,
+  VideoClipDetail,
+  VideoExport,
+  VideoExportStatus,
   WechatPublication,
   ZhihuPublication,
   XhsPublication,
@@ -124,6 +129,13 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`)
 }
 
+/** Effective seconds a stored clip plays after its trim is applied. */
+function clipTrimDuration(clip: StoredVideoClip): number {
+  if (clip.trimEnd !== null) return Math.max(0, clip.trimEnd - clip.trimStart)
+  if (clip.duration !== null) return Math.max(0, clip.duration - clip.trimStart)
+  return 0
+}
+
 export interface UserWithPassword extends User {
   passwordHash: string
 }
@@ -154,6 +166,7 @@ export interface UpdateBookValues {
 
 export interface ContentWriteValues {
   title: string
+  kind: ContentKind
   bookId: string | null
   contentJson: RichTextJson
   contentHtml: string
@@ -175,6 +188,7 @@ export interface ContentListOptions {
   favorite: boolean
   trash: boolean
   q?: string
+  kind?: ContentKind
   sort: 'updated_desc' | 'created_desc' | 'title_asc'
   page: number
   pageSize: number
@@ -186,6 +200,44 @@ export interface CreateMediaValues {
   originalName: string
   mimeType: string
   size: number
+  /** ffprobe metadata for videos; stored as JSON in media.meta_json. */
+  meta?: MediaProbeMeta | null
+}
+
+/** Lightweight probe result persisted next to a video media asset. */
+export interface MediaProbeMeta {
+  duration?: number | null
+  width?: number | null
+  height?: number | null
+  hasAudio?: boolean
+  videoCodec?: string | null
+  audioCodec?: string | null
+}
+
+/** A timeline row as stored inside video_projects.timeline_json. */
+export interface StoredVideoClip {
+  id: string
+  mediaId: string
+  trimStart: number
+  trimEnd: number | null
+  duration: number | null
+}
+
+export interface SaveVideoProjectValues {
+  clips: StoredVideoClip[]
+}
+
+export interface CreateVideoExportValues {
+  contentId: string
+  timeline: StoredVideoClip[]
+  totalDuration: number
+}
+
+export interface UpdateVideoExportValues {
+  status?: VideoExportStatus
+  progress?: number
+  message?: string
+  outputMediaId?: string | null
 }
 
 export interface CreateRenderValues {
@@ -326,6 +378,7 @@ export class Database {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         book_id TEXT REFERENCES books(id) ON DELETE SET NULL,
+        kind TEXT NOT NULL DEFAULT 'article' CHECK (kind IN ('article', 'video')),
         title TEXT NOT NULL,
         excerpt TEXT NOT NULL DEFAULT '',
         content_json TEXT NOT NULL DEFAULT '{}',
@@ -355,9 +408,34 @@ export class Database {
         original_name TEXT NOT NULL,
         mime_type TEXT NOT NULL,
         size INTEGER NOT NULL,
+        meta_json TEXT,
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_media_user_created ON media(user_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS video_projects (
+        content_id TEXT PRIMARY KEY REFERENCES contents(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        timeline_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_video_projects_user ON video_projects(user_id, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS video_exports (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        content_id TEXT NOT NULL REFERENCES contents(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+        progress INTEGER NOT NULL DEFAULT 0,
+        message TEXT NOT NULL DEFAULT '',
+        timeline_json TEXT NOT NULL DEFAULT '[]',
+        output_media_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_video_exports_user_created ON video_exports(user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_video_exports_content ON video_exports(content_id, created_at DESC);
 
       CREATE TABLE IF NOT EXISTS renders (
         id TEXT PRIMARY KEY,
@@ -822,9 +900,10 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_jianshu_resolutions_publication ON jianshu_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 17;
+      PRAGMA user_version = 18;
     `)
     this.ensureContentSyncColumns()
+    this.ensureVideoColumns()
     this.ensureDoubanPublicationColumns()
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     this.run(`UPDATE douyin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先核实抖音发布结果，避免重复发布。', nowIso()])
@@ -853,12 +932,29 @@ export class Database {
       ['服务已重启，请先核对简书草稿与文章发布结果，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE batch_jobs SET status = 'failed', message = ?, updated_at = ? WHERE status IN ('queued', 'running')`,
       ['服务已重启，批量任务已中断，请重新提交。', nowIso()])
+    this.failRunningVideoExports()
   }
 
   /** Older Douban tables had no draft mode; add it without rewriting rows. */
   private ensureDoubanPublicationColumns(): void {
     const columns = new Set(this.all('PRAGMA table_info(douban_publications)').map((row) => text(row.name)))
     if (!columns.has('mode')) this.database.exec("ALTER TABLE douban_publications ADD COLUMN mode TEXT NOT NULL DEFAULT 'publish'")
+  }
+
+  /**
+   * Additive migration for video contents: `contents.kind`, `media.meta_json`
+   * and the video project/export tables. Older databases keep working and
+   * existing rows default to the article kind.
+   */
+  private ensureVideoColumns(): void {
+    const contentColumns = new Set(this.all('PRAGMA table_info(contents)').map((row) => text(row.name)))
+    if (!contentColumns.has('kind')) {
+      this.database.exec("ALTER TABLE contents ADD COLUMN kind TEXT NOT NULL DEFAULT 'article'")
+    }
+    const mediaColumns = new Set(this.all('PRAGMA table_info(media)').map((row) => text(row.name)))
+    if (!mediaColumns.has('meta_json')) {
+      this.database.exec('ALTER TABLE media ADD COLUMN meta_json TEXT')
+    }
   }
 
   /** Additive migration: older databases keep working and are backfilled once. */
@@ -1096,6 +1192,7 @@ export class Database {
   private mapContentSummary(row: Row): ContentSummary {
     return {
       id: text(row.id),
+      kind: row.kind === 'video' ? 'video' : 'article',
       bookId: nullableText(row.book_id),
       bookName: nullableText(row.book_name),
       title: text(row.title),
@@ -1164,6 +1261,11 @@ export class Database {
       params.push(options.bookId)
     }
 
+    if (options.kind) {
+      where.push('c.kind = ?')
+      params.push(options.kind)
+    }
+
     const search = (options.q ?? '').trim()
     if (search) {
       const pattern = `%${escapeLike(search)}%`
@@ -1209,13 +1311,14 @@ export class Database {
     const createdAt = nowIso()
     this.run(
       `INSERT INTO contents
-        (id, user_id, book_id, title, excerpt, content_json, content_html, content_html_hash, content_json_stale,
+        (id, user_id, book_id, kind, title, excerpt, content_json, content_html, content_html_hash, content_json_stale,
          cover_image, tags_json, status, favorite, word_count, image_count, video_count, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
       [
         id,
         userId,
         values.bookId,
+        values.kind === 'video' ? 'video' : 'article',
         values.title,
         values.excerpt,
         JSON.stringify(values.contentJson ?? {}),
@@ -1241,12 +1344,13 @@ export class Database {
   updateContent(userId: string, contentId: string, values: ContentWriteValues): ContentDetail | null {
     const changes = this.run(
       `UPDATE contents SET
-        book_id = ?, title = ?, excerpt = ?, content_json = ?, content_html = ?, content_html_hash = ?,
+        book_id = ?, kind = ?, title = ?, excerpt = ?, content_json = ?, content_html = ?, content_html_hash = ?,
         content_json_stale = ?, cover_image = ?, tags_json = ?, status = ?, favorite = ?, word_count = ?,
         image_count = ?, video_count = ?, updated_at = ?
        WHERE id = ? AND user_id = ?`,
       [
         values.bookId,
+        values.kind === 'video' ? 'video' : 'article',
         values.title,
         values.excerpt,
         JSON.stringify(values.contentJson ?? {}),
@@ -1305,6 +1409,7 @@ export class Database {
   // ---------------------------------------------------------------- media
 
   private mapMedia(row: Row): MediaAsset {
+    const meta = parseJson(row.meta_json) as MediaProbeMeta | null
     return {
       id: text(row.id),
       kind: row.kind === 'video' ? 'video' : 'image',
@@ -1313,6 +1418,9 @@ export class Database {
       mimeType: text(row.mime_type),
       size: numberValue(row.size),
       url: `/uploads/${text(row.filename)}`,
+      duration: meta && typeof meta.duration === 'number' ? meta.duration : null,
+      width: meta && typeof meta.width === 'number' ? meta.width : null,
+      height: meta && typeof meta.height === 'number' ? meta.height : null,
       createdAt: text(row.created_at),
     }
   }
@@ -1321,9 +1429,10 @@ export class Database {
     const id = randomUUID()
     const createdAt = nowIso()
     this.run(
-      `INSERT INTO media (id, user_id, kind, filename, original_name, mime_type, size, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, userId, values.kind, values.filename, values.originalName, values.mimeType, values.size, createdAt],
+      `INSERT INTO media (id, user_id, kind, filename, original_name, mime_type, size, meta_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, userId, values.kind, values.filename, values.originalName, values.mimeType, values.size,
+        values.meta ? JSON.stringify(values.meta) : null, createdAt],
     )
     return {
       id,
@@ -1333,8 +1442,16 @@ export class Database {
       mimeType: values.mimeType,
       size: values.size,
       url: `/uploads/${values.filename}`,
+      duration: values.meta?.duration ?? null,
+      width: values.meta?.width ?? null,
+      height: values.meta?.height ?? null,
       createdAt,
     }
+  }
+
+  /** Store or refresh ffprobe metadata for a media asset (no-op when absent). */
+  updateMediaMeta(userId: string, mediaId: string, meta: MediaProbeMeta): boolean {
+    return this.run('UPDATE media SET meta_json = ? WHERE id = ? AND user_id = ?', [JSON.stringify(meta), mediaId, userId]) > 0
   }
 
   listMedia(userId: string): MediaAsset[] {
@@ -1355,6 +1472,152 @@ export class Database {
 
   deleteMedia(userId: string, mediaId: string): boolean {
     return this.run('DELETE FROM media WHERE id = ? AND user_id = ?', [mediaId, userId]) > 0
+  }
+
+  // ---------------------------------------------------------------- video projects
+
+  private mapStoredClips(value: unknown): StoredVideoClip[] {
+    if (!Array.isArray(value)) return []
+    const clips: StoredVideoClip[] = []
+    for (const raw of value) {
+      if (!raw || typeof raw !== 'object') continue
+      const record = raw as Record<string, unknown>
+      const mediaId = typeof record.mediaId === 'string' ? record.mediaId : null
+      if (!mediaId) continue
+      const trimStart = typeof record.trimStart === 'number' && record.trimStart >= 0 ? record.trimStart : 0
+      const trimEnd = typeof record.trimEnd === 'number' && record.trimEnd > trimStart ? record.trimEnd : null
+      clips.push({
+        id: typeof record.id === 'string' && record.id ? record.id : randomUUID(),
+        mediaId,
+        trimStart,
+        trimEnd,
+        duration: typeof record.duration === 'number' && record.duration > 0 ? record.duration : null,
+      })
+    }
+    return clips
+  }
+
+  private mapClipDetails(clips: StoredVideoClip[], userId: string): VideoClipDetail[] {
+    if (clips.length === 0) return []
+    const mediaIds = [...new Set(clips.map((clip) => clip.mediaId))]
+    const placeholders = mediaIds.map(() => '?').join(',')
+    const rows = this.all(`SELECT * FROM media WHERE user_id = ? AND id IN (${placeholders})`, [userId, ...mediaIds])
+    const mediaById = new Map(rows.map((row) => [text(row.id), this.mapMedia(row)]))
+    return clips.map((clip) => ({
+      ...clip,
+      trimDuration: clipTrimDuration(clip),
+      media: mediaById.get(clip.mediaId) ?? null,
+    }))
+  }
+
+  /** Timeline row for a content; an empty project is returned when never saved. */
+  getVideoProjectRow(userId: string, contentId: string): { clips: StoredVideoClip[]; updatedAt: string } {
+    const row = this.get('SELECT timeline_json, updated_at FROM video_projects WHERE content_id = ? AND user_id = ?', [contentId, userId])
+    if (!row) return { clips: [], updatedAt: '' }
+    return { clips: this.mapStoredClips(parseJson(row.timeline_json)), updatedAt: text(row.updated_at) }
+  }
+
+  saveVideoProject(userId: string, contentId: string, values: SaveVideoProjectValues): StoredVideoClip[] {
+    const now = nowIso()
+    this.transaction(() => {
+      this.run(
+        `INSERT INTO video_projects (content_id, user_id, timeline_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(content_id) DO UPDATE SET timeline_json = excluded.timeline_json, updated_at = excluded.updated_at`,
+        [contentId, userId, JSON.stringify(values.clips), now, now],
+      )
+      this.run('UPDATE contents SET video_count = ?, updated_at = ? WHERE id = ? AND user_id = ?', [
+        values.clips.length, now, contentId, userId,
+      ])
+    })
+    return values.clips
+  }
+
+  /** Copy the timeline to a duplicated content (content duplicate feature). */
+  copyVideoProject(userId: string, fromContentId: string, toContentId: string): void {
+    const source = this.get('SELECT timeline_json FROM video_projects WHERE content_id = ? AND user_id = ?', [fromContentId, userId])
+    if (!source) return
+    const now = nowIso()
+    this.run(
+      `INSERT INTO video_projects (content_id, user_id, timeline_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [toContentId, userId, text(source.timeline_json), now, now],
+    )
+  }
+
+  // ---------------------------------------------------------------- video exports
+
+  private mapVideoExport(row: Row): VideoExport {
+    const clips = this.mapClipDetails(this.mapStoredClips(parseJson(row.timeline_json)), text(row.user_id))
+    const outputMediaId = nullableText(row.output_media_id)
+    const outputMedia = outputMediaId ? this.getMedia(text(row.user_id), outputMediaId) : null
+    return {
+      id: text(row.id),
+      contentId: text(row.content_id),
+      status: text(row.status) as VideoExportStatus,
+      progress: numberValue(row.progress),
+      message: text(row.message),
+      clips,
+      totalDuration: clips.reduce((sum, clip) => sum + clip.trimDuration, 0),
+      outputMedia,
+      createdAt: text(row.created_at),
+      updatedAt: text(row.updated_at),
+    }
+  }
+
+  createVideoExport(userId: string, values: CreateVideoExportValues): VideoExport {
+    const id = randomUUID()
+    const createdAt = nowIso()
+    this.run(
+      `INSERT INTO video_exports (id, user_id, content_id, status, progress, message, timeline_json, created_at, updated_at)
+       VALUES (?, ?, ?, 'queued', 0, '', ?, ?, ?)`,
+      [id, userId, values.contentId, JSON.stringify(values.timeline), createdAt, createdAt],
+    )
+    const created = this.getVideoExport(userId, id)
+    if (!created) throw new Error('Failed to create video export')
+    return created
+  }
+
+  updateVideoExport(userId: string, exportId: string, values: UpdateVideoExportValues): VideoExport | null {
+    const current = this.get('SELECT * FROM video_exports WHERE id = ? AND user_id = ?', [exportId, userId])
+    if (!current) return null
+    this.run(
+      `UPDATE video_exports SET status = ?, progress = ?, message = ?, output_media_id = ?, updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+      [
+        values.status ?? text(current.status),
+        values.progress !== undefined ? Math.max(0, Math.min(100, Math.round(values.progress))) : numberValue(current.progress),
+        values.message ?? text(current.message),
+        values.outputMediaId !== undefined ? values.outputMediaId : nullableText(current.output_media_id),
+        nowIso(),
+        exportId,
+        userId,
+      ],
+    )
+    return this.getVideoExport(userId, exportId)
+  }
+
+  getVideoExport(userId: string, exportId: string): VideoExport | null {
+    const row = this.get('SELECT * FROM video_exports WHERE id = ? AND user_id = ?', [exportId, userId])
+    return row ? this.mapVideoExport(row) : null
+  }
+
+  listVideoExports(userId: string, contentId?: string): VideoExport[] {
+    const rows = contentId
+      ? this.all('SELECT * FROM video_exports WHERE user_id = ? AND content_id = ? ORDER BY created_at DESC, id DESC LIMIT 30', [userId, contentId])
+      : this.all('SELECT * FROM video_exports WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId])
+    return rows.map((row) => this.mapVideoExport(row))
+  }
+
+  deleteVideoExport(userId: string, exportId: string): boolean {
+    return this.run('DELETE FROM video_exports WHERE id = ? AND user_id = ?', [exportId, userId]) > 0
+  }
+
+  /** Interrupted exports can never resume after a restart. */
+  failRunningVideoExports(): void {
+    this.run(`UPDATE video_exports SET status = 'failed', message = ?, updated_at = ?
+      WHERE status IN ('queued', 'running')`,
+    ['服务已重启，导出任务已中断，请重新导出。', nowIso()])
   }
 
   // -------------------------------------------------------------- renders

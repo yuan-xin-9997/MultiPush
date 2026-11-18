@@ -1416,3 +1416,30 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ---- video content badges ---- */
+.document-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--douyin, #fe2c55);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.document-cover .document-kind-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  box-shadow: var(--shadow-xs);
+}
+
+.document-row-title .document-kind-badge {
+  margin-right: 8px;
+  transform: translateY(-1px);
+}

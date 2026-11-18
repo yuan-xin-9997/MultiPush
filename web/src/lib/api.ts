@@ -21,6 +21,10 @@ import type {
   PlatformAdjustment,
   PlatformRender,
   User,
+  VideoCapability,
+  VideoClipInput,
+  VideoExport,
+  VideoProject,
   WechatAccount,
   WechatLogin,
   WechatPublication,
@@ -233,6 +237,7 @@ export const api = {
           favorite: query.favorite,
           trash: query.trash,
           q: query.q,
+          kind: query.kind,
           sort: query.sort,
           page: query.page,
           pageSize: query.pageSize,
@@ -263,7 +268,26 @@ export const api = {
     upload: (file: File, onProgress?: (percent: number) => void) =>
       uploadWithProgress<{ media: MediaAsset }>('/api/media', file, onProgress),
     list: () => request<{ media: MediaAsset[] }>('/api/media'),
+    probe: (id: string) => request<{ probe: { duration: number | null; width: number | null; height: number | null; hasAudio: boolean; videoCodec: string | null; audioCodec: string | null; fps: number | null; formatName: string | null } }>(`/api/media/${encodeURIComponent(id)}/probe`),
     remove: (id: string) => request<{ ok: true }>(`/api/media/${id}`, { method: 'DELETE' }),
+  },
+
+  video: {
+    getProject: (contentId: string) =>
+      request<{ project: VideoProject; capability: VideoCapability }>(`/api/contents/${encodeURIComponent(contentId)}/video`, { cache: 'no-store' }),
+    saveTimeline: (contentId: string, clips: VideoClipInput[]) =>
+      request<{ project: VideoProject }>(`/api/contents/${encodeURIComponent(contentId)}/video/timeline`, {
+        method: 'PUT',
+        body: JSON.stringify({ clips }),
+      }),
+    createExport: (contentId: string) =>
+      request<{ export: VideoExport }>(`/api/contents/${encodeURIComponent(contentId)}/video/export`, { method: 'POST' }),
+    listExports: (contentId: string) =>
+      request<{ exports: VideoExport[] }>(`/api/contents/${encodeURIComponent(contentId)}/video/exports`, { cache: 'no-store' }),
+    getExport: (exportId: string) =>
+      request<{ export: VideoExport }>(`/api/video-exports/${encodeURIComponent(exportId)}`, { cache: 'no-store' }),
+    deleteExport: (exportId: string) =>
+      request<{ ok: true }>(`/api/video-exports/${encodeURIComponent(exportId)}`, { method: 'DELETE' }),
   },
 
   platforms: {

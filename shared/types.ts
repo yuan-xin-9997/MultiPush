@@ -10,6 +10,9 @@ export type PlatformId = 'wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao
 
 export type ContentStatus = 'draft' | 'ready'
 
+/** A content is either a rich-text article or a video-first note. */
+export type ContentKind = 'article' | 'video'
+
 export type MediaKind = 'image' | 'video'
 
 export type RenderPreviewMode = 'article' | 'cards' | 'video' | 'vertical'
@@ -219,6 +222,7 @@ export interface BookInput {
 
 export interface ContentSummary {
   id: string
+  kind: ContentKind
   bookId: string | null
   bookName: string | null
   title: string
@@ -256,6 +260,7 @@ export interface ContentListQuery {
   favorite?: boolean
   trash?: boolean
   q?: string
+  kind?: ContentKind
   sort?: 'updated_desc' | 'created_desc' | 'title_asc'
   page?: number
   pageSize?: number
@@ -263,6 +268,7 @@ export interface ContentListQuery {
 
 export interface ContentInput {
   title?: string
+  kind?: ContentKind
   bookId?: string | null
   contentJson?: RichTextJson
   contentHtml?: string
@@ -281,7 +287,76 @@ export interface MediaAsset {
   mimeType: string
   size: number
   url: string
+  /** Probe metadata for videos, when ffprobe was available at upload time. */
+  duration?: number | null
+  width?: number | null
+  height?: number | null
   createdAt: string
+}
+
+// ---------------------------------------------------------------- video editing
+
+/**
+ * One editable segment inside a video content's timeline. A timeline is an
+ * ordered list of clips; the exported video plays them back to back with each
+ * clip trimmed to `[trimStart, trimEnd ?? duration]`.
+ */
+export interface VideoClip {
+  id: string
+  mediaId: string
+  /** Trim start in seconds within the source video. */
+  trimStart: number
+  /** Trim end in seconds; `null` means "until the end of the source". */
+  trimEnd: number | null
+  /** Source duration in seconds when known (probe or browser metadata). */
+  duration: number | null
+}
+
+export interface VideoClipDetail extends VideoClip {
+  /** Effective playable seconds after the trim is applied. */
+  trimDuration: number
+  /** The referenced media asset, or null when it was deleted. */
+  media: MediaAsset | null
+}
+
+export interface VideoClipInput {
+  mediaId: string
+  trimStart?: number
+  trimEnd?: number | null
+  /** Client-measured source duration in seconds, used when the server has no ffprobe. */
+  duration?: number | null
+}
+
+export interface VideoProject {
+  contentId: string
+  clips: VideoClipDetail[]
+  /** Sum of trim durations in seconds. */
+  totalDuration: number
+  updatedAt: string
+}
+
+export type VideoExportStatus = 'queued' | 'running' | 'completed' | 'failed'
+
+export interface VideoExport {
+  id: string
+  contentId: string
+  status: VideoExportStatus
+  /** 0-100, best effort while ffmpeg reports progress. */
+  progress: number
+  message: string
+  /** Snapshot of the timeline used for this export. */
+  clips: VideoClipDetail[]
+  totalDuration: number
+  outputMedia: MediaAsset | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Server-side ffmpeg availability reported to the workspace UI. */
+export interface VideoCapability {
+  ffmpeg: boolean
+  ffprobe: boolean
+  version: string | null
 }
 
 export type RenderOptions = {

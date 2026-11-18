@@ -1,5 +1,5 @@
 import type { KeyboardEvent, MouseEvent } from 'react'
-import { Folder, Star } from 'lucide-react'
+import { Clapperboard, Folder, Star } from 'lucide-react'
 import type { ContentSummary } from '@shared/types'
 import { formatDateTime, relativeTime } from '@/lib/utils'
 import { formatNumber } from '@/lib/format'
@@ -44,6 +44,12 @@ export default function DocumentCard({ item, mode, selected, actions, onToggleSe
     >
       <div className="document-cover">
         <DocumentCover image={item.coverImage} title={title} />
+        {item.kind === 'video' ? (
+          <span className="document-kind-badge" title="视频内容">
+            <Clapperboard size={13} />
+            视频
+          </span>
+        ) : null}
         <label
           className="document-select"
           onClick={(event) => event.stopPropagation()}
@@ -96,7 +102,11 @@ export default function DocumentCard({ item, mode, selected, actions, onToggleSe
         <span className="document-footer-time" title={formatDateTime(isTrash ? item.deletedAt : item.updatedAt)}>
           {isTrash ? `删除于 ${relativeTime(item.deletedAt)}` : relativeTime(item.updatedAt)}
         </span>
-        <span className="document-wordcount">{formatNumber(item.wordCount)} 字</span>
+        <span className="document-wordcount">
+          {item.kind === 'video'
+            ? `${formatNumber(item.videoCount)} 段视频`
+            : `${formatNumber(item.wordCount)} 字`}
+        </span>
         <DocumentMenu item={item} mode={mode} actions={actions} />
       </div>
     </article>

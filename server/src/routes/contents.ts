@@ -33,6 +33,7 @@ function createValues(database: Database, userId: string, input: ContentInput): 
   })
   return {
     title: defaultContentTitle(input.title),
+    kind: input.kind === 'video' ? 'video' : 'article',
     bookId: input.bookId ? resolveBookId(database, userId, input.bookId) : null,
     contentJson,
     contentHtml,
@@ -45,7 +46,8 @@ function createValues(database: Database, userId: string, input: ContentInput): 
     favorite: input.favorite ?? false,
     wordCount: metrics.wordCount,
     imageCount: metrics.imageCount,
-    videoCount: metrics.videoCount,
+    // Video clips are tracked by the timeline, not by scanning body HTML.
+    videoCount: input.kind === 'video' ? 0 : metrics.videoCount,
   }
 }
 
@@ -94,6 +96,7 @@ function updateValues(
 
   return {
     title: input.title !== undefined ? defaultContentTitle(input.title) : current.title,
+    kind: current.kind,
     bookId:
       input.bookId !== undefined
         ? input.bookId === null
@@ -111,7 +114,9 @@ function updateValues(
     favorite: input.favorite ?? current.favorite,
     wordCount: metrics.wordCount,
     imageCount: metrics.imageCount,
-    videoCount: metrics.videoCount,
+    // Timeline clips (video contents) are managed by the video routes and
+    // must survive body edits.
+    videoCount: current.kind === 'video' ? current.videoCount : metrics.videoCount,
   }
 }
 
@@ -128,6 +133,7 @@ export function createContentsRouter(database: Database): Router {
         favorite: query.favorite ?? false,
         trash: query.trash ?? false,
         q: query.q && query.q.length > 0 ? query.q : undefined,
+        kind: query.kind,
         sort: query.sort,
         page: query.page,
         pageSize: query.pageSize,
@@ -206,6 +212,7 @@ export function createContentsRouter(database: Database): Router {
       if (!original) throw notFound('内容不存在')
       const copy = database.createContent(user.id, {
         title: `${original.title}（副本）`,
+        kind: original.kind,
         bookId: original.bookId,
         contentJson: original.contentJson,
         contentHtml: original.contentHtml,
@@ -220,6 +227,8 @@ export function createContentsRouter(database: Database): Router {
         imageCount: original.imageCount,
         videoCount: original.videoCount,
       })
+      // Video contents carry their clip timeline over to the copy.
+      database.copyVideoProject(user.id, original.id, copy.id)
       res.json({ content: copy })
     }),
   )

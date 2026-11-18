@@ -1,5 +1,5 @@
 import type { KeyboardEvent, MouseEvent } from 'react'
-import { Folder, Star } from 'lucide-react'
+import { Clapperboard, Folder, Star } from 'lucide-react'
 import type { ContentSummary } from '@shared/types'
 import { cn, formatDateTime, relativeTime } from '@/lib/utils'
 import { formatNumber } from '@/lib/format'
@@ -56,6 +56,12 @@ export default function DocumentRow({ item, mode, selected, actions, onToggleSel
         </div>
         <div className="document-row-copy">
           <div className="document-row-title" title={title}>
+            {item.kind === 'video' ? (
+              <span className="document-kind-badge" title="视频内容">
+                <Clapperboard size={12} />
+                视频
+              </span>
+            ) : null}
             {title}
           </div>
           <div className="document-row-excerpt">{item.excerpt || '暂无摘要'}</div>
@@ -76,7 +82,9 @@ export default function DocumentRow({ item, mode, selected, actions, onToggleSel
         {item.tags.length > 2 ? <span className="tag document-tag-more">+{item.tags.length - 2}</span> : null}
       </div>
 
-      <div className="document-row-cell document-row-words">{formatNumber(item.wordCount)} 字</div>
+      <div className="document-row-cell document-row-words">
+        {item.kind === 'video' ? `${formatNumber(item.videoCount)} 段视频` : `${formatNumber(item.wordCount)} 字`}
+      </div>
 
       <div className="document-row-cell document-row-time" title={formatDateTime(isTrash ? item.deletedAt : item.updatedAt)}>
         {isTrash ? relativeTime(item.deletedAt) : relativeTime(item.updatedAt)}

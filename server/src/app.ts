@@ -50,8 +50,10 @@ import { HaloBlogDriver, type BlogDriver } from './blog-halo'
 import { createBlogRouter } from './routes/blog'
 import { BatchService } from './batch'
 import { AiService } from './ai'
+import { VideoService } from './video'
 import { createBatchRouter } from './routes/batch'
 import { createAiRouter } from './routes/ai'
+import { createVideoRouter } from './routes/video'
 import { SmsLoginManager } from './sms-login'
 import { createPlatformSmsRouter } from './routes/platform-sms'
 
@@ -164,7 +166,9 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.blog = blog
   const batch = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao, douban, juejin, jianshu)
   app.locals.batch = batch
-  const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, batch)
+  const video = new VideoService(database, config)
+  app.locals.video = video
+  const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, batch, video)
   app.locals.ai = ai
   const smsLogin = new SmsLoginManager({
     zhihu: { importPublisherSession: (userId, state) => zhihu.importPublisherSession(userId, state) },
@@ -193,6 +197,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/books', requireAuth, createBooksRouter(database))
   app.use('/api/contents', requireAuth, createContentsRouter(database))
   app.use('/api/media', requireAuth, createMediaRouter(database, config))
+  app.use('/api', createVideoRouter(database, video, requireAuth))
   app.use('/api/renders', requireAuth, createRendersRouter(database, config))
   app.use('/api/wechat', requireAuth, createWechatRouter(wechat))
   app.use('/api/douyin', requireAuth, createDouyinRouter(douyin))

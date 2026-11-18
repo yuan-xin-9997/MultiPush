@@ -8,6 +8,7 @@
 
 - 新建、修改、读取文章；
 - 读取知识库、内容、素材、渲染记录和发布记录；
+- 创建视频内容并操控剪辑：查看/修改剪辑时间线（修剪、调序、增删片段）、触发导出并跟踪导出进度；
 - 为文章生成公众号、小红书、知乎、微博、今日头条、抖音、少数派和个人博客排版；
 - 保存平台草稿、正式发布、删除平台草稿；
 - 创建批量渲染和批量发布任务，并查询任务进度。
@@ -48,13 +49,26 @@ OpenCode Go 的 OpenAI 兼容接口要求 `x-opencode-session` 请求头。Multi
 
 对话记录按用户保存在 `ai_sessions` / `ai_messages`。每轮最多执行 8 轮工具调用，单轮总时长上限 6 分钟。工具包括：
 
-- `get_system_overview`、`list_books`、`list_contents`、`get_content`、`list_media`
+- `get_system_overview`、`list_books`、`list_contents`（支持 `kind` 筛选图文/视频）、`get_content`、`list_media`
 - `create_content`、`update_content`
+- `get_video_project`、`update_video_timeline`、`export_video`、`get_video_export`
 - `render_content`、`get_render`、`list_renders`
 - `list_publications`、`publish_article`、`delete_draft`
 - `batch_render`、`batch_publish`、`get_batch_job`
 
 发布是有外部影响的操作。系统提示要求模型只在用户明确要求时发布，默认优先保存草稿；公众号正式发表可能仍需管理员在本系统扫码确认。出现「结果待核实」时不要重复提交，应先到发布管理核实。
+
+### AI 操控视频剪辑
+
+视频内容（`kind: video`）的剪辑由服务端 ffmpeg 完成，AI 通过以下流程操控：
+
+1. `list_contents`（`kind: "video"`）找到目标视频内容；
+2. `get_video_project` 读取当前时间线：片段列表（素材名、入点/出点、时长）、总时长和服务器 ffmpeg 能力；
+3. `update_video_timeline` 整体替换时间线：`clips` 数组的顺序就是成片顺序，每项 `{mediaId, trimStart?, trimEnd?}`（单位：秒，`trimEnd: null` 表示保留到素材结尾），可实现修剪、调序、删除和追加；
+4. `export_video` 触发服务端导出成片（异步任务），`get_video_export` 跟踪进度；完成后成片自动存入素材库，返回 `outputMediaId`；
+5. 需要发布抖音视频笔记时，用 `publish_article`（`videoMediaId` 传成片素材 ID）。
+
+示例指令：「帮我把《XX vlog》开头 3 秒剪掉，两个片段调换顺序，然后导出成片」。
 
 ## 批量任务
 

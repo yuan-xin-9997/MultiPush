@@ -875,6 +875,11 @@ export default function EditorPage() {
       .get(id)
       .then(({ content: detail }) => {
         if (cancelled) return
+        // Video contents have their own full-screen workspace.
+        if (detail.kind === 'video') {
+          navigate(`/video/${detail.id}`, { replace: true })
+          return
+        }
         setContent(detail)
         setTitle(detail.title)
         setBookId(detail.bookId ?? '')

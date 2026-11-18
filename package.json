@@ -33,7 +33,9 @@
     "smoke:sms-login-selectors": "npx tsx scripts/smoke-sms-login-selectors.mts",
     "smoke:douban": "npm run build && node scripts/smoke-douban-ui.mjs",
     "smoke:juejin-jianshu": "npm run build && node scripts/smoke-juejin-jianshu-ui.mjs",
-    "smoke:draft-modes": "npm run build && node scripts/smoke-draft-modes-ui.mjs"
+    "smoke:draft-modes": "npm run build && node scripts/smoke-draft-modes-ui.mjs",
+    "smoke:video": "node scripts/smoke-video.mjs",
+    "smoke:video-ui": "npm run build && node scripts/smoke-video-ui.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

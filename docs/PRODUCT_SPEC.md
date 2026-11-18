@@ -81,12 +81,12 @@ docs/                    文档
 
 ### 3.3 内容库
 
-- 头部：面包屑/标题、文档数、搜索框、排序、视图切换、新建按钮。
-- 文档卡片：标题、摘要、封面缩略图、标签、所属知识库、更新时间、字数、收藏按钮、更多菜单（渲染、复制、移动、删除）。
+- 头部：面包屑/标题、文档数、搜索框、排序、视图切换、新建按钮（新建图文 / 新建视频）。
+- 文档卡片：标题、摘要、封面缩略图、标签、所属知识库、更新时间、字数、收藏按钮、更多菜单（渲染、复制、移动、删除）；视频内容带「视频」角标并显示片段数。
 - 列表视图：表格样式，适合快速扫读。
 - 回收站：只显示已删除；支持恢复、彻底删除（二次确认）。
 - 空状态友好；加载骨架屏；操作 toast 反馈。
-- 点击卡片进入 `/editor/:id`；新建先创建空文档再跳转。
+- 点击卡片进入 `/editor/:id`；视频内容进入 `/video/:id`；新建先创建空内容再跳转。
 
 #### 导入 / 导出
 
@@ -186,9 +186,9 @@ docs/                    文档
 
 ### 内容
 
-- `GET /api/contents?bookId=&favorite=true&trash=true&q=&sort=updated_desc|created_desc|title_asc&page=1&pageSize=20` → `ContentListResult`
+- `GET /api/contents?bookId=&favorite=true&trash=true&q=&kind=article|video&sort=updated_desc|created_desc|title_asc&page=1&pageSize=20` → `ContentListResult`
   - 默认排除回收站；`trash=true` 只返回回收站；`bookId=unfiled` 返回未分组。
-- `POST /api/contents` `ContentInput` → `{ content: ContentDetail }`（标题默认“无标题文档”）
+- `POST /api/contents` `ContentInput`（含 `kind: "article" | "video"`）→ `{ content: ContentDetail }`（图文默认标题“无标题文档”，视频默认“无标题视频”）
 - `GET /api/contents/:id` → `{ content: ContentDetail }`（回收站中的文档也可读取，用于恢复前查看）
 - `PATCH /api/contents/:id` `ContentInput` → `{ content: ContentDetail }`
 - `DELETE /api/contents/:id` → 软删除 `{ ok: true }`；`?permanent=true` 彻底删除。
@@ -196,7 +196,16 @@ docs/                    文档
 - `POST /api/contents/:id/duplicate` → `{ content }`（标题追加“副本”）
 - `POST /api/contents/:id/favorite` `{ favorite: boolean }` → `{ content: ContentSummary }`
 
-后端计算：`excerpt`（未显式提供时取纯文本前 160 字）、`wordCount`（中文按字、英文按词）、`imageCount`、`videoCount`。标签去重、去空、最多 10 个，每个最长 24 字。
+后端计算：`excerpt`（未显式提供时取纯文本前 160 字）、`wordCount`（中文按字、英文按词）、`imageCount`、`videoCount`（视频内容取时间线片段数）。标签去重、去空、最多 10 个，每个最长 24 字。
+
+### 视频剪辑
+
+- `GET /api/contents/:id/video` → `{ project, capability }`：时间线片段（含素材信息、入/出点、时长）与服务器 ffmpeg/ffprobe 能力。
+- `PUT /api/contents/:id/video/timeline` `{ clips: [{mediaId, trimStart?, trimEnd?, duration?}] }` → `{ project }`：整体替换时间线，顺序即成片顺序；入/出点单位为秒，服务端按素材时长裁剪非法值。
+- `POST /api/contents/:id/video/export` → `{ export }`：按当前时间线创建异步导出任务（服务端 ffmpeg 逐段裁剪 + 统一规格 + concat 合并）。
+- `GET /api/contents/:id/video/exports` → `{ exports }`；`GET /api/video-exports/:exportId` → `{ export }`（状态/进度/输出素材）；`DELETE /api/video-exports/:exportId` 删除记录。
+- `GET /api/media/:id/probe` → `{ probe }`：ffprobe 探测视频素材（时长/分辨率/音轨/编码）。
+- 仅 `kind=video` 的内容支持时间线；其他内容返回 400。详见 [视频内容说明](VIDEO_CONTENT.md)。
 
 ### 媒体
 

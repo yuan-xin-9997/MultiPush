@@ -22,9 +22,11 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/juejin    掘金扫码登录、草稿/文章发布与核实
   ├─ routes/jianshu   简书 Cookie 连接、草稿/文章发布与核实
   ├─ routes/ai        AI 配置、会话、消息与工具调用
+  ├─ routes/video     视频内容剪辑时间线与导出任务
   ├─ routes/batch     批量渲染 / 批量发布任务
   ├─ sms-login.ts     共享短信登录浏览器流程与会话导入
   ├─ ai.ts            OpenAI 兼容模型客户端与业务工具
+  ├─ video.ts         ffprobe 探测 + ffmpeg 剪辑/合并导出队列（异步、单并发）
   ├─ batch.ts         顺序批量任务执行器
   ├─ renderers/*      平台规则渲染（纯函数，服务端）
   └─ db.ts            node:sqlite（WAL），单文件 DATA_DIR/multipush.sqlite
@@ -36,8 +38,10 @@ Express (single Node process, 0.0.0.0:34080)
 | --- | --- | --- |
 | `users` | id, username, email, password_hash, display_name, avatar_url | 唯一用户名/邮箱；bcrypt |
 | `books` | id, user_id, name, description, color | 知识库/分组 |
-| `contents` | id, user_id, book_id, title, content_json, content_html, excerpt, cover_image, tags, status, favorite, word_count, image_count, video_count, deleted_at | Tiptap JSON + HTML 双存；软删除 |
-| `media` | id, user_id, filename, original_name, mime_type, size, kind | 文件在 `DATA_DIR/uploads` |
+| `contents` | id, user_id, book_id, kind, title, content_json, content_html, excerpt, cover_image, tags, status, favorite, word_count, image_count, video_count, deleted_at | Tiptap JSON + HTML 双存；软删除；`kind` 区分图文/视频 |
+| `media` | id, user_id, filename, original_name, mime_type, size, kind, meta_json | 文件在 `DATA_DIR/uploads`；视频含 ffprobe 元数据 |
+| `video_projects` | content_id, user_id, timeline_json | 视频内容剪辑时间线（有序片段，引用 media 资产） |
+| `video_exports` | id, user_id, content_id, status, progress, message, timeline_json, output_media_id | 视频导出异步任务（服务端 ffmpeg） |
 | `renders` | id, user_id, content_id, platforms, options_json, result_json | 渲染历史；结果完整存储 |
 | `weibo_*` | accounts / publications / resolutions | 微博会话、发布记录与人工核实 |
 | `toutiao_*` | accounts / publications / resolutions | 今日头条会话、文章发布记录与人工核实 |
@@ -91,7 +95,7 @@ export interface ContentEnhancer {
 
 ## 前端结构
 
-- 路由：登录/注册、应用壳（AI 创作/内容库/渲染/发布）、全屏编辑器；内容库多选后可打开批量渲染/发布弹窗。
+- 路由：登录/注册、应用壳（AI 创作/内容库/渲染/发布）、全屏编辑器、全屏视频工作台（`/video/:id`：预览播放器 + 片段时间线 + 导出）；内容库多选后可打开批量渲染/发布弹窗。
 - 状态：`AuthContext` + 页面局部状态；无全局状态库。
 - API：`web/src/lib/api.ts` 唯一入口，401 统一清理 token。
 - 导入导出：`web/src/lib/content-io.ts` 纯浏览器解析（marked / turndown / JSZip），不经过服务器。

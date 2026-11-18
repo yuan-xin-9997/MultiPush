@@ -7,6 +7,7 @@ import LoginPage from '@/features/auth/LoginPage'
 import RegisterPage from '@/features/auth/RegisterPage'
 import LibraryPage from '@/features/library/LibraryPage'
 import EditorPage from '@/features/editor/EditorPage'
+import VideoWorkspacePage from '@/features/video/VideoWorkspacePage'
 import RenderPage from '@/features/render/RenderPage'
 import PublishPage from '@/features/publish/PublishPage'
 import AiPage from '@/features/ai/AiPage'
@@ -42,6 +43,14 @@ export default function App() {
         element={
           <Protected>
             <EditorPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/video/:id"
+        element={
+          <Protected>
+            <VideoWorkspacePage />
           </Protected>
         }
       />
