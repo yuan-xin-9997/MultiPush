@@ -179,6 +179,13 @@ describe('AI settings and chat', () => {
     expect(status).toBe('failed')
     expect(database.listVideoExports(user.id, videoContent.id)[0]?.message).toContain('素材文件已丢失')
     expect(database.getContentSummary(user.id, videoContent.id)?.videoCount).toBe(1)
+    // export_video waits for the terminal state instead of returning "queued",
+    // so the model sees the failure in the same round.
+    const exportTool = result.session.messages.find(message => message.role === 'tool' && message.toolName === 'export_video')
+    expect(exportTool).toBeTruthy()
+    const exportResult = JSON.stringify(exportTool?.toolResult)
+    expect(exportResult).toContain('"status":"failed"')
+    expect(exportResult).toContain('素材文件已丢失')
     expect(result.reply.content).toContain('导出')
   })
 })

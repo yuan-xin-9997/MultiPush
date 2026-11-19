@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 2026-11-19 · AI 创作不再因工具调用轮数上限中断视频导出
+
+**改了什么**
+
+- 修复线上问题：AI 新建视频内容并导出成片时，`export_video` 后轮询两次 `get_video_export`（31% → 67%）就触发「已达到单次对话的工具调用上限」——8 轮预算被"了解素材→建内容→查时间线→导出→轮询"的正常工作流耗尽，而成片在最后一次轮询后 1.7 秒才完成。
+- 单轮工具调用轮数上限 `MAX_TOOL_ROUNDS` 8 → 16（`server/src/ai.ts`），多步创作工作流不再中途被截断；原有 6 分钟单轮 deadline 仍兜底。
+- `export_video` 内置等待：触发导出后最多等待 30 秒，短素材（几秒成片）在**同一轮**直接返回 `completed` + `outputMediaId`，模型无需再轮询；长任务超时后返回最新 `queued/running` 状态，交给 `get_video_export` 继续查询。
+- `export_video` / `get_video_export` 返回结构统一（新增 `progress`、`message`、`totalDuration`）；系统提示与工具描述同步更新等待与轮询策略。
+
+**验证**
+
+- `server/test/ai.test.ts` 增加断言：`export_video` 等待到终态后才返回，工具结果携带 `status:"failed"` 与失败原因（媒体丢失路径）；`npm run typecheck`、server 40 文件 / 362 项 + web 2 文件 / 20 项全部通过。
+- Jenkins 部署后线上复核：AI 建视频内容 → 导出一轮内返回 completed 并汇报成片素材 ID。
+
 ## 2026-11-19 · 渲染记录预览视频内容的导出成片
 
 **改了什么**
