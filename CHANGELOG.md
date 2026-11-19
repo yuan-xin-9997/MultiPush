@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## 2026-11-19 · AI 大模型多 Key / 多提供商高可用
+
+**改了什么**
+
+- 新增服务器提供商池：支持多个提供商按有序回退链排列，每个提供商配置多个 API Key（按优先级），且每个 Key 可单独覆盖 base_url；提供商、模型和 Key 全部来自 `AI_PROVIDERS_JSON` 或受保护的 `DATA_DIR/ai-providers.json`（也可用 `AI_PROVIDERS_FILE`），旧版 `OPENCODE_GO_API_KEY` / `OPENCODE_GO_API_KEYS` 继续兼容。
+- 同一提供商内 Key 自动轮换：402、429 额度类错误（含 OpenCode `GoUsageLimitError`）判定额度不足，401/403 判定 Key 失效，二者冷却并切换；429 限流单独处理，优先临时轮换或等待重试，不把 Key 判定为失效；模型保持不变，当前请求自动用新 Key 重试。
+- 跨提供商回退：某提供商全部 Key 不可用或连续失败达到阈值时熔断该提供商并切到下一个；优先使用 `modelMap` 等价映射，其次同家族/同级别模型，最后目标提供商默认模型；回复上方展示实际使用的提供商、模型和脱敏 Key，并标注切换原因。
+- 冷却与探活：Key/提供商冷却状态持久化到 `ai_provider_key_states` / `ai_provider_states`，后台定时最小请求探活，恢复后按优先级自动回到主 Key/主提供商。
+- 新增「高可用」面板（AI 创作页顶部/侧栏入口）：查看每个提供商和 Key 的优先级、脱敏标识、状态（可用/冷却/额度不足/失效/待探活）、冷却时间、成功/失败/额度/认证/限流次数、Token 用量；支持「检测全部 Key」和单提供商测试；展示切换/恢复记录与最近请求的实际路由。
+- 新增审计：`ai_failover_events` 记录每次 Key/提供商切换、冷却、限流轮换和恢复（时间、原因、前后提供商/Key 脱敏标识、模型映射）；`ai_provider_requests` 记录每次请求的提供商、模型、脱敏 Key、状态、HTTP 状态、耗时和 Token。Key 明文不写数据库、不写日志、不返回前端。
+- 新增 `GET /api/ai/gateway`、`POST /api/ai/gateway/probe`；`POST /api/ai/settings/test` 改走高可用网关并返回 `routing`；`AiChatResult` 增加本轮实际路由 `routing`。
+- 新增配置模板 `server/ai-providers.example.json`，更新 README、AI 创作、架构、产品规格与部署文档；新增 `npm run smoke:ai-gateway` 浏览器回归。
+
+**验证**
+
+- `npm run typecheck`、`npm test`：server 42 个文件 / 384 项、web 2 个文件 / 20 项全部通过；`npm run build` 通过。
+- 新增 `server/test/ai-gateway.test.ts`（16 项）覆盖额度不足/401/429 限流区分、单 Key 限流等待重试、跨提供商映射、熔断跳过后恢复、探活回到最高优先级、账号配置回退、配置加载与文件权限、状态/审计不泄露明文；`server/test/ai-gateway-routes.test.ts`（4 项）覆盖鉴权、`no-store`、探活参数；`server/test/ai.test.ts` 增加切换后会话历史完整和工具轨迹保留断言。
+- 真实 OpenCode Key 联调：账号1（额度已耗尽）+ 账号2（有额度）按优先级配置，请求命中账号1 的 `HTTP 429 GoUsageLimitError` 后自动切到账号2，模型保持 `deepseek-v4.1-flash`，回复成功，事件记录 Key 脱敏 `oc_sk_e…tK-T`；继续第二轮直接使用账号2，历史 4 条完整。
+- 跨提供商联调：停用 OpenCode Go（只保留耗尽 Key），配置本地备用提供商，自动回退并按 `modelMap` 把 `deepseek-v4.1-flash` 映射为 `mock-fallback-model`，6 条会话历史完整；`provider_switch` 记录映射前后模型。
+- 真实浏览器 1440×1000 / 390×844 验证高可用面板、探活、切换记录和最近请求；DOM 无 Key 明文，移动端无横向溢出；`npm run smoke:ai-gateway` 通过并输出截图到 `artifacts/ai-gateway-check/`。
+
+**部署**
+
+- 待 Jenkins 构建与生产复核。
+
 ## 2026-11-19 · 移动端 AI 创作页布局优化
 
 **改了什么**

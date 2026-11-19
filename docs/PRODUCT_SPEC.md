@@ -149,7 +149,10 @@ docs/                    文档
 
 - 左侧会话列表、设置入口和新建会话；主区域为消息流与输入框。
 - 设置弹窗配置 OpenAI 兼容接口地址、模型、API Key 和温度；API Key 只显示“已保存”，不回显明文。
-- 工具调用以可折叠轨迹展示参数和结果；助手正文支持多轮对话。
+- 服务器可配置有多个提供商、每个提供商多个 API Key 的提供商池；账号配置优先，其后按 `providers` 顺序回退。
+- 额度不足、失效或限流时自动轮换同提供商 Key；提供商全部不可用时自动回退到下一个提供商，并按模型等价映射保持模型能力；Key 与提供商冷却后定期探活，恢复后回到最高优先级。
+- 「高可用」面板展示每个 Key 的状态（可用/冷却/额度不足/失效）、用量、切换与恢复记录、最近请求的实际路由；完整 Key 不在页面、URL、日志或数据库中出现。
+- 工具调用以可折叠轨迹展示参数和结果；助手正文支持多轮对话；回复上方显示本次实际使用的提供商、模型、脱敏 Key，切换时标注原因。
 - 未配置模型时显示配置引导，不允许发送消息。
 - 工具可读写当前用户数据，并调用现有渲染、发布和批量任务服务。
 
@@ -235,7 +238,9 @@ docs/                    文档
 
 - `GET /api/ai/settings` → `{ settings: AiSettings }`（不返回 Key）
 - `PUT /api/ai/settings` `{ baseUrl, model, apiKey?, temperature? }` → `{ settings }`
-- `POST /api/ai/settings/test` → `{ ok, message, model }`
+- `POST /api/ai/settings/test` → `{ ok, message, model, routing }`
+- `GET /api/ai/gateway` → `{ gateway: AiGatewayStatus }`（提供商/Key 状态、切换记录、最近请求，均脱敏）
+- `POST /api/ai/gateway/probe` `{ providerId? }` → `{ probes, gateway }`（最小请求探活并刷新状态）
 - `GET /api/ai/sessions` → `{ sessions: AiSession[] }`
 - `POST /api/ai/sessions` `{ title? }` → `{ session }`
 - `GET /api/ai/sessions/:id` → `{ session: AiSessionDetail }`（含消息与工具轨迹）

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { Bot, CheckCircle2, ChevronDown, FileText, Film, LoaderCircle, MessageSquarePlus, Paperclip, Send, Settings2, Sparkles, Trash2, Wrench, X } from 'lucide-react'
+import { Bot, CheckCircle2, ChevronDown, FileText, Film, LoaderCircle, MessageSquarePlus, Paperclip, Send, Settings2, ShieldCheck, Sparkles, Trash2, Wrench, X } from 'lucide-react'
 import { toast } from 'sonner'
-import type { AiMessage, AiMessageAttachment, AiSession, AiSessionDetail, AiSettings } from '@shared/types'
+import type { AiMessage, AiMessageAttachment, AiRoutingInfo, AiSession, AiSessionDetail, AiSettings } from '@shared/types'
 import { absoluteUrl, api } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { formatDateTime } from '@/lib/utils'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
+import AiGatewayPanel from './AiGatewayPanel'
 import './ai.css'
 
 const OPENCODE_GO = { baseUrl: 'https://opencode.ai/inference/go/openai/v1', model: 'deepseek-v4.1-flash', label: 'OpenCode Go' }
@@ -16,6 +17,20 @@ const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024
 const ATTACHMENT_ACCEPT = ['image/*', 'video/*', ...DOCUMENT_EXTENSIONS.map(ext => `.${ext}`)].join(',')
+
+const ROUTE_REASONS: Record<string, string> = {
+  quota_exhausted: '额度不足',
+  unauthorized: 'Key 失效',
+  rate_limited: '触发限流',
+  provider_error: '服务异常',
+  network_error: '网络错误',
+  model_unavailable: '模型不可用',
+  provider_bad_request: '请求被拒绝',
+  keys_unavailable: '提供商 Key 全部不可用',
+  consecutive_failures: '连续失败',
+  primary_unavailable: '主提供商暂不可用',
+  primary_cooling: '主提供商冷却中',
+}
 
 const QUICK_PROMPTS = [
   '写一篇关于「用 AI 提升内容创作效率」的文章，保存到内容库，并生成公众号和知乎排版。',
@@ -56,6 +71,8 @@ export default function AiPage() {
   const [session, setSession] = useState<AiSessionDetail | null>(null)
   const [loadingSession, setLoadingSession] = useState(false)
   const [sending, setSending] = useState(false)
+  const [lastRouting, setLastRouting] = useState<AiRoutingInfo | null>(null)
+  const [gatewayOpen, setGatewayOpen] = useState(false)
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<AiMessageAttachment[]>([])
   const [uploadingAttachments, setUploadingAttachments] = useState(0)
@@ -232,6 +249,7 @@ export default function AiPage() {
       setSession(current => current ? { ...current, messages: [...current.messages, optimistic] } : current)
       const result = await api.ai.sendMessage(target, { message: text, ...(mediaIds.length ? { mediaIds } : {}), ...(documents.length ? { documents } : {}) })
       setSession(result.session)
+      if (result.routing) setLastRouting(result.routing)
       setSessions(current => current.map(item => item.id === result.session.id ? { ...item, title: result.session.title, updatedAt: result.session.updatedAt } : item))
     } catch (cause) {
       setError(getErrorMessage(cause, 'AI 请求失败'))
@@ -258,8 +276,12 @@ export default function AiPage() {
         </div>
         <button type="button" className={`ai-settings-chip ${configured ? 'is-ready' : ''}`} onClick={openSettings}>
           <Settings2 size={15} />
-          <span><strong>{configured ? settings?.label || settings?.model || '已配置模型' : '配置大模型'}</strong><small>{configured ? `${settings?.model ?? ''} · 点击修改接口和 Key` : '支持 OpenAI 兼容接口'}</small></span>
+          <span><strong>{configured ? settings?.label || settings?.model || '已配置模型' : '配置大模型'}</strong><small>{configured ? `${settings?.model ?? ''} · ${settings?.keys ?? 1} 个 Key${settings?.fallback ? ' · 自动回退' : ''}` : '支持 OpenAI 兼容接口'}</small></span>
           <ChevronDown size={14} />
+        </button>
+        <button type="button" className="ai-gateway-chip" onClick={() => setGatewayOpen(true)}>
+          <ShieldCheck size={15} />
+          <span><strong>高可用</strong><small>{configured ? `${settings?.providers ?? 1} 个提供商 · Key 状态与切换记录` : '配置 Key 池与回退'}</small></span>
         </button>
         <div className="ai-session-list">
           {sessions.length ? sessions.map(item => (
@@ -278,8 +300,15 @@ export default function AiPage() {
       <section className="ai-main" aria-label="对话">
         <header className="ai-main-head">
           <div><h2 title={session?.title || '新的 AI 会话'}>{session?.title || '新的 AI 会话'}</h2><p>{configured ? `${settings?.label ? `${settings.label} · ` : ''}模型：${settings?.model}` : '尚未配置大模型'}</p></div>
-          <button type="button" className="btn btn-sm" onClick={openSettings}><Settings2 size={14} />模型设置</button>
+          <button type="button" className="btn btn-sm" onClick={() => setGatewayOpen(true)} aria-label="模型高可用"><ShieldCheck size={14} /><span className="ai-btn-label">高可用</span></button>
+          <button type="button" className="btn btn-sm" onClick={openSettings} aria-label="模型设置"><Settings2 size={14} /><span className="ai-btn-label">模型设置</span></button>
         </header>
+        {lastRouting ? (
+          <div className={`ai-route-note ${lastRouting.fallback ? 'is-fallback' : ''}`}>
+            <ShieldCheck size={12} />
+            <span>本次请求：{lastRouting.providerLabel} · {lastRouting.model} · Key {lastRouting.keyLabel}（{lastRouting.keyMasked}）{lastRouting.fallback ? ` · 已自动切换（${ROUTE_REASONS[lastRouting.reason ?? ''] ?? lastRouting.reason ?? '故障转移'}）` : ''}</span>
+          </div>
+        ) : null}
 
         {!configured ? (
           <div className="ai-config-empty">
@@ -375,6 +404,8 @@ export default function AiPage() {
           </div>
         </div>
       </Modal>
+
+      <AiGatewayPanel open={gatewayOpen} onClose={() => setGatewayOpen(false)} />
 
       <ConfirmDialog open={!!deleteSession} title="删除这个会话？" description={<><strong>{deleteSession?.title}</strong><p>会话消息会从系统中删除，不影响已创建的文章、渲染和发布记录。</p></>} confirmLabel="删除会话" loading={deleting} onConfirm={removeSession} onClose={() => setDeleteSession(null)} />
     </div>

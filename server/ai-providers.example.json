@@ -1,0 +1,51 @@
+{
+  "providers": [
+    {
+      "id": "opencode-go",
+      "label": "OpenCode Go",
+      "baseUrl": "https://opencode.ai/inference/go/openai/v1",
+      "defaultModel": "deepseek-v4.1-flash",
+      "models": ["deepseek-v4.1-flash"],
+      "keys": [
+        {
+          "id": "account-1",
+          "label": "账号1",
+          "apiKey": "oc_sk_REPLACE_WITH_ACCOUNT_1_KEY"
+        },
+        {
+          "id": "account-2",
+          "label": "账号2",
+          "apiKey": "oc_sk_REPLACE_WITH_ACCOUNT_2_KEY"
+        }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "label": "DeepSeek 官方",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "defaultModel": "deepseek-chat",
+      "models": ["deepseek-chat"],
+      "keys": [
+        {
+          "id": "official",
+          "label": "官方 Key",
+          "apiKey": "sk-REPLACE_WITH_DEEPSEEK_KEY"
+        }
+      ]
+    }
+  ],
+  "modelMap": {
+    "opencode-go/deepseek-v4.1-flash": {
+      "deepseek": "deepseek-chat"
+    }
+  },
+  "probeIntervalMs": 300000,
+  "maxProviderFailures": 3,
+  "cooldowns": {
+    "quotaMs": 1800000,
+    "authMs": 1800000,
+    "rateLimitMs": 30000,
+    "transientMs": 20000,
+    "providerMs": 120000
+  }
+}

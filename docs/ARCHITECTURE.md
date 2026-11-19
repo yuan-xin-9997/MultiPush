@@ -21,11 +21,13 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/douban    豆瓣日记扫码登录、图片转存、发布与核实
   ├─ routes/juejin    掘金扫码登录、草稿/文章发布与核实
   ├─ routes/jianshu   简书 Cookie 连接、草稿/文章发布与核实
-  ├─ routes/ai        AI 配置、会话、消息与工具调用
+  ├─ routes/ai        AI 配置、会话、消息、工具调用与高可用管理入口
   ├─ routes/video     视频内容剪辑时间线与导出任务
   ├─ routes/batch     批量渲染 / 批量发布任务
   ├─ sms-login.ts     共享短信登录浏览器流程与会话导入
-  ├─ ai.ts            OpenAI 兼容模型客户端与业务工具
+  ├─ ai.ts            AI 会话、工具编排与业务工具
+  ├─ ai-gateway.ts    多提供商/多 Key 回退、模型映射、冷却探活与路由审计
+  ├─ ai-provider-config.ts 提供商池 JSON 解析（环境变量/受保护文件/旧版单 Key）
   ├─ video.ts         ffprobe 探测 + ffmpeg 剪辑/合并导出队列（异步、单并发）
   ├─ batch.ts         顺序批量任务执行器
   ├─ renderers/*      平台规则渲染（纯函数，服务端）
@@ -51,9 +53,23 @@ Express (single Node process, 0.0.0.0:34080)
 | `jianshu_*` | accounts / publications / resolutions | 简书会话、草稿/文章发布记录与人工核实 |
 | `ai_settings` | user_id, encrypted_api_key, base_url, model, temperature | 每用户大模型配置；Key AES-256-GCM 加密 |
 | `ai_sessions` / `ai_messages` | id, user_id, title / session_id, role, content, tool_calls_json, tool_result_json | AI 会话、消息与工具轨迹 |
+| `ai_provider_key_states` | provider_id, key_id, state, cooldown_until, 计数器, tokens | 每个 Key 的冷却状态与用量（不存 Key 明文） |
+| `ai_provider_states` | provider_id, state, cooldown_until, consecutive_failures | 提供商熔断状态 |
+| `ai_failover_events` | user_id, session_id, kind, reason, from/to provider/key（脱敏）, model, target_model | Key/提供商切换、冷却、恢复审计 |
+| `ai_provider_requests` | user_id, session_id, provider, model, key（脱敏）, status, duration, tokens | 每次实际请求的路由记录 |
 | `batch_jobs` | id, user_id, kind, status, total, done, input_json, items_json | 批量渲染/发布任务与每项进度 |
 
-所有业务表都有 `user_id`，查询必须带当前用户条件；跨用户访问统一返回 404。
+所有业务表都有 `user_id`，查询必须带当前用户条件；跨用户访问统一返回 404。提供商池 Key 只存在于进程环境或受保护配置文件，数据库仅保存脱敏后的 Key 标识与状态。
+
+## AI 高可用调用链
+
+1. `AiService.chat()` 从 `ai_settings` 读取账号覆盖配置（若存在），否则为空；
+2. `AiGateway.complete()` 构建「账号配置（可选）→ 服务器提供商池」有序链；
+3. 按提供商顺序、Key 优先级挑选未冷却的 Key，使用该提供商的模型或 `modelMap` 映射模型发起请求；
+4. 额度不足（402 / 429 + quota 类错误）、认证失败（401/403）、限流（429）、临时异常（5xx/网络）分别更新 Key 冷却状态；同一提供商全部 Key 不可用或连续失败达到阈值时冷却提供商；
+5. 失败后自动尝试下一个 Key/提供商，当前请求不中断；成功后将实际路由写入 `ai_provider_requests`，切换动作写入 `ai_failover_events`；
+6. 后台定时器对冷却到期的 Key/提供商发起最小探活请求，成功后恢复为可用，下次调用自动回到最高优先级；
+7. `GET /api/ai/gateway` 汇总状态、切换记录和请求记录供「高可用」面板展示，所有 Key 均脱敏。
 
 ## 渲染流水线
 

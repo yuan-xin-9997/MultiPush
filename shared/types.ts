@@ -1080,6 +1080,12 @@ export interface AiSettings {
   /** Where the active configuration comes from: the user's saved settings or server defaults. */
   source?: 'user' | 'server'
   label?: string
+  /** Number of providers in the effective fallback chain (account override included). */
+  providers?: number
+  /** Number of API keys in the effective fallback chain. */
+  keys?: number
+  /** True when the server configured a cross-provider fallback chain. */
+  fallback?: boolean
 }
 
 export interface AiSettingsInput {
@@ -1143,9 +1149,141 @@ export interface AiSessionDetail extends AiSession {
   messages: AiMessage[]
 }
 
+/** Actual provider/model/key used by one provider call (never exposes the key). */
+export interface AiRoutingInfo {
+  providerId: string
+  providerLabel: string
+  model: string
+  /** Model the user asked for, before any equivalence mapping. */
+  requestedModel: string
+  keyId: string
+  keyLabel: string
+  keyMasked: string
+  /** True when a key or provider switch happened before this call succeeded. */
+  fallback: boolean
+  /** Stable reason code of the first switch (quota_exhausted, unauthorized, ...). */
+  reason: string | null
+  /** Number of failed attempts before the successful one. */
+  attempts: number
+}
+
+export type AiKeyState = 'available' | 'cooling' | 'exhausted' | 'invalid'
+export type AiProviderState = 'available' | 'cooling'
+
+export interface AiGatewayKeyStatus {
+  providerId: string
+  providerLabel: string
+  keyId: string
+  keyLabel: string
+  maskedKey: string
+  /** 1-based priority inside the provider. */
+  priority: number
+  state: AiKeyState
+  reason: string | null
+  cooldownUntil: string | null
+  successCount: number
+  failureCount: number
+  quotaFailures: number
+  authFailures: number
+  rateLimits: number
+  tokensIn: number
+  tokensOut: number
+  lastUsedAt: string | null
+  lastError: string | null
+}
+
+export interface AiGatewayProviderStatus {
+  id: string
+  label: string
+  baseUrl: string
+  defaultModel: string
+  models: string[]
+  source: 'config' | 'user'
+  state: AiProviderState
+  reason: string | null
+  cooldownUntil: string | null
+  consecutiveFailures: number
+  lastError: string | null
+  keys: AiGatewayKeyStatus[]
+}
+
+export type AiFailoverEventKind =
+  | 'key_switch'
+  | 'provider_switch'
+  | 'key_cooldown'
+  | 'provider_cooldown'
+  | 'key_recovery'
+  | 'provider_recovery'
+  | 'rate_limited'
+
+export interface AiFailoverEvent {
+  id: string
+  at: string
+  kind: AiFailoverEventKind
+  reason: string
+  detail: string | null
+  sessionId: string | null
+  fromProviderId: string | null
+  fromProviderLabel: string | null
+  fromKeyId: string | null
+  fromKeyLabel: string | null
+  fromKeyMasked: string | null
+  toProviderId: string | null
+  toProviderLabel: string | null
+  toKeyId: string | null
+  toKeyLabel: string | null
+  toKeyMasked: string | null
+  model: string | null
+  targetModel: string | null
+}
+
+export interface AiProviderRequest {
+  id: string
+  at: string
+  sessionId: string | null
+  providerId: string
+  providerLabel: string
+  model: string
+  keyId: string
+  keyLabel: string
+  keyMasked: string
+  status: 'success' | 'failed'
+  httpStatus: number | null
+  errorCode: string | null
+  durationMs: number
+  tokensIn: number
+  tokensOut: number
+}
+
+export interface AiGatewayStatus {
+  configured: boolean
+  /** Where the provider pool came from: environment, protected file, or legacy single-provider env. */
+  source: 'env' | 'file' | 'legacy' | 'override' | 'none'
+  warning: string | null
+  probeIntervalMs: number
+  updatedAt: string
+  providers: AiGatewayProviderStatus[]
+  events: AiFailoverEvent[]
+  requests: AiProviderRequest[]
+}
+
+export interface AiProbeResult {
+  providerId: string
+  providerLabel: string
+  keyId: string
+  keyLabel: string
+  maskedKey: string
+  model: string
+  ok: boolean
+  message: string
+  latencyMs: number
+}
+
 export interface AiChatResult {
   session: AiSessionDetail
   reply: AiMessage
+  /** Routing of the last provider call in this turn; omitted when the reply was produced locally. */
+  routing?: AiRoutingInfo
 }
 
 export type BatchJobKind = 'render' | 'publish'

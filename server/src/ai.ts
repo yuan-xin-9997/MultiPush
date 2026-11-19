@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   AiChatResult,
+  AiGatewayStatus,
   AiMessage,
   AiMessageAttachment,
+  AiProbeResult,
+  AiRoutingInfo,
   AiSendMessageInput,
   AiSession,
   AiSessionDetail,
@@ -39,6 +42,8 @@ import type { DoubanService } from './douban'
 import type { JuejinService } from './juejin'
 import type { JianshuService } from './jianshu'
 import type { VideoService } from './video'
+import { AiGateway, type PreferredAiProvider } from './ai-gateway'
+import { normalizeAiBaseUrl } from './ai-provider-config'
 
 /**
  * Provider↔tool rounds per user message. Generous enough for multi-step
@@ -50,7 +55,6 @@ const MAX_TOOL_ROUNDS = 16
 const EXPORT_WAIT_MS = 30_000
 const MAX_HISTORY_MESSAGES = 80
 const MAX_TOOL_RESULT_CHARS = 60_000
-const PROVIDER_TIMEOUT_MS = 120_000
 /** Attachment limits: images/videos are media assets, documents are inline text. */
 const MAX_MEDIA_ATTACHMENTS = 10
 const MAX_DOCUMENTS = 5
@@ -81,11 +85,6 @@ interface ToolDefinition {
     description: string
     parameters: JsonObject
   }
-}
-
-interface ProviderResult {
-  content: string
-  toolCalls: AiToolCall[]
 }
 
 function object(value: unknown): JsonObject {
@@ -134,21 +133,6 @@ function cleanHtml(html: string): string {
     }
   })
   return $('body').html() || ''
-}
-
-function normalizeAiBaseUrl(value: string): string {
-  const trimmed = value.trim()
-  let url: URL
-  try { url = new URL(trimmed) } catch { throw new ApiError(400, 'ai_base_url', '大模型接口地址格式不正确') }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new ApiError(400, 'ai_base_url', '大模型接口地址必须是 http(s) 且不能包含用户名或密码')
-  if (url.search || url.hash) throw new ApiError(400, 'ai_base_url', '大模型接口地址不能包含查询参数或锚点')
-  if (['169.254.169.254', 'metadata.google.internal', '0.0.0.0'].includes(url.hostname)) throw new ApiError(400, 'ai_base_url', '不允许连接该地址')
-  url.pathname = url.pathname.replace(/\/+$/, '')
-  return url.href.replace(/\/+$/, '')
-}
-
-function chatEndpoint(baseUrl: string): string {
-  return /\/chat\/completions$/i.test(baseUrl) ? baseUrl : `${baseUrl}/chat/completions`
 }
 
 function toolOk(data: unknown): JsonObject {
@@ -489,6 +473,7 @@ export const AI_TOOLS: ToolDefinition[] = [
 export class AiService {
   private readonly key: Buffer
   private readonly active = new Set<string>()
+  readonly gateway: AiGateway
 
   constructor(
     private readonly database: Database,
@@ -507,14 +492,40 @@ export class AiService {
     private readonly video: VideoService,
   ) {
     this.key = loadPublisherKey(config.dataDir, 'ai')
+    this.gateway = new AiGateway(database, config)
   }
+
+  startProber(): void { this.gateway.startProber() }
+  close(): void { this.gateway.close() }
 
   settings(userId: string): AiSettings {
     const record = this.database.getAiSettings(userId)
-    if (record) return { configured: true, baseUrl: record.baseUrl, model: record.model, temperature: record.temperature, hasApiKey: true, source: 'user', label: '账号自定义配置' }
+    const poolProviders = this.config.aiProviders?.providers.length ?? 0
+    const poolKeys = this.config.aiProviders?.providers.reduce((total, provider) => total + provider.keys.length, 0) ?? 0
+    if (record) {
+      const providers = poolProviders + 1
+      const keys = poolKeys + 1
+      return { configured: true, baseUrl: record.baseUrl, model: record.model, temperature: record.temperature, hasApiKey: true, source: 'user', label: '账号自定义配置', providers, keys, fallback: providers > 1 }
+    }
+    const provider = this.config.aiProviders?.providers[0]
+    if (provider) {
+      const first = provider.keys[0]
+      return {
+        configured: true,
+        baseUrl: first?.baseUrl ?? provider.baseUrl,
+        model: provider.defaultModel,
+        temperature: 0.7,
+        hasApiKey: true,
+        source: 'server',
+        label: provider.label,
+        providers: poolProviders,
+        keys: poolKeys,
+        fallback: poolProviders > 1,
+      }
+    }
     const defaults = this.config.aiDefaults
-    if (defaults) return { configured: true, baseUrl: defaults.baseUrl, model: defaults.model, temperature: 0.7, hasApiKey: true, source: 'server', label: defaults.label }
-    return { configured: false, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', temperature: 0.7, hasApiKey: false }
+    if (defaults) return { configured: true, baseUrl: defaults.baseUrl, model: defaults.model, temperature: 0.7, hasApiKey: true, source: 'server', label: defaults.label, providers: 1, keys: 1, fallback: false }
+    return { configured: false, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', temperature: 0.7, hasApiKey: false, providers: 0, keys: 0, fallback: false }
   }
 
   saveSettings(userId: string, input: AiSettingsInput): AiSettings {
@@ -529,39 +540,60 @@ export class AiService {
     if (!apiKey && !current) throw new ApiError(400, 'ai_api_key', '请填写 API Key')
     const encryptedApiKey = apiKey ? encryptPublisherSecret(apiKey, this.key, userId) : current!.encryptedApiKey
     this.database.saveAiSettings(userId, { encryptedApiKey, baseUrl, model, temperature })
+    // A new/changed key should be attempted immediately instead of inheriting
+    // the old key's cooldown.
+    this.gateway.resetUserProvider(userId)
     return this.settings(userId)
   }
 
   deleteSettings(userId: string): void {
     this.database.deleteAiSettings(userId)
+    this.gateway.resetUserProvider(userId)
   }
 
-  private credentials(userId: string): { baseUrl: string; model: string; temperature: number; apiKey: string } {
+  /** The account-level override; the gateway falls back to the server pool behind it. */
+  private userPreferred(userId: string): PreferredAiProvider | null {
     const record = this.database.getAiSettings(userId)
-    if (!record) {
-      const defaults = this.config.aiDefaults
-      if (defaults) return { baseUrl: defaults.baseUrl, model: defaults.model, temperature: 0.7, apiKey: defaults.apiKey }
-      throw new ApiError(409, 'ai_not_configured', '请先在 AI 创作页配置大模型接口和 API Key')
-    }
+    if (!record) return null
     try {
       return {
         baseUrl: record.baseUrl,
         model: record.model,
         temperature: record.temperature,
         apiKey: decryptPublisherSecret<string>(record.encryptedApiKey, this.key, userId),
+        label: '账号自定义配置',
       }
     } catch {
       throw new ApiError(409, 'ai_key_invalid', '大模型 API Key 无法解密，请重新配置')
     }
   }
 
-  async testSettings(userId: string): Promise<{ ok: true; message: string; model: string }> {
-    const credentials = this.credentials(userId)
-    const result = await this.provider(credentials, [
-      { role: 'system', content: '只回复 OK。' },
-      { role: 'user', content: 'ping' },
-    ], undefined, 16, `test-${userId.slice(0, 8)}`)
-    return { ok: true, message: result.content || '连接成功', model: credentials.model }
+  async testSettings(userId: string): Promise<{ ok: true; message: string; model: string; routing: AiRoutingInfo }> {
+    const preferred = this.userPreferred(userId)
+    const result = await this.gateway.complete({
+      userId,
+      sessionId: `test-${userId.slice(0, 8)}`,
+      messages: [
+        { role: 'system', content: '只回复 OK。' },
+        { role: 'user', content: 'ping' },
+      ],
+      temperature: preferred?.temperature ?? 0.7,
+      maxTokens: 16,
+      preferred,
+    })
+    return { ok: true, message: result.content || '连接成功', model: result.routing.model, routing: result.routing }
+  }
+
+  gatewayStatus(userId: string): AiGatewayStatus {
+    let preferred: PreferredAiProvider | null = null
+    // A corrupt account key must not block the management page; the server
+    // pool remains visible and the user can re-save the key.
+    try { preferred = this.userPreferred(userId) } catch { preferred = null }
+    return this.gateway.status(userId, preferred)
+  }
+
+  async probeGateway(userId: string, providerId?: string): Promise<AiProbeResult[]> {
+    return this.gateway.probe(userId, this.userPreferred(userId), providerId)
   }
 
   listSessions(userId: string): AiSession[] { return this.database.listAiSessions(userId) }
@@ -636,21 +668,46 @@ export class AiService {
     const text = (input.message || '').trim()
     if (text.length > 20_000) throw new ApiError(400, 'ai_message_too_long', '单条消息最多 20000 个字符')
     if (!text && !attachments.length) throw new ApiError(400, 'ai_message_empty', '请输入消息或先上传附件')
-    const credentials = this.credentials(userId)
+    const preferred = this.userPreferred(userId)
     const storedText = text || (attachments.length ? `（消息包含 ${attachments.length} 个附件）` : '')
     this.database.createAiMessage(userId, sessionId, { role: 'user', content: storedText, attachments: attachments.length ? attachments : undefined })
     this.database.updateAiSession(userId, sessionId, session.title === '新会话' ? { title: (text || attachments[0]?.name || '新会话').slice(0, 36) } : { touch: true })
 
     let history = this.database.listAiMessages(userId, sessionId)
     const deadline = Date.now() + 6 * 60_000
+    let routing: AiRoutingInfo | undefined
+    let turnFallback = false
+    let turnReason: string | null = null
+    let turnAttempts = 0
+    let attemptBaseline = 0
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       if (Date.now() > deadline) throw new ApiError(504, 'ai_timeout', '本轮 AI 操作超过 6 分钟，请缩小任务范围后重试')
       const providerMessages = await this.providerMessages(history)
-      const response = await this.provider(credentials, providerMessages, AI_TOOLS, undefined, sessionId)
+      const response = await this.gateway.complete({
+        userId,
+        sessionId,
+        messages: providerMessages,
+        tools: AI_TOOLS,
+        temperature: preferred?.temperature ?? 0.7,
+        preferred,
+      })
+      routing = response.routing
+      turnAttempts += response.routing.attempts
+      if (!attemptBaseline) attemptBaseline = response.routing.attempts
+      if (response.routing.fallback) {
+        turnFallback = true
+        turnReason = turnReason ?? response.routing.reason
+      }
       if (!response.toolCalls.length) {
         const reply = this.database.createAiMessage(userId, sessionId, { role: 'assistant', content: response.content || '（模型没有返回文字内容）' })
         this.database.updateAiSession(userId, sessionId, { touch: true })
-        return { session: this.getSession(userId, sessionId), reply }
+        const finalRouting = routing && (turnFallback || turnAttempts > attemptBaseline ? {
+          ...routing,
+          fallback: turnFallback,
+          reason: turnReason ?? routing.reason,
+          attempts: turnAttempts,
+        } : routing)
+        return { session: this.getSession(userId, sessionId), reply, ...(finalRouting ? { routing: finalRouting } : {}) }
       }
       this.database.createAiMessage(userId, sessionId, {
         role: 'assistant',
@@ -676,7 +733,13 @@ export class AiService {
       content: '已达到单次对话的工具调用上限，请继续发送消息或缩小任务范围。',
     })
     this.database.updateAiSession(userId, sessionId, { touch: true })
-    return { session: this.getSession(userId, sessionId), reply }
+    const finalRouting = routing && turnFallback ? {
+      ...routing,
+      fallback: true,
+      reason: turnReason ?? routing.reason,
+      attempts: turnAttempts,
+    } : routing
+    return { session: this.getSession(userId, sessionId), reply, ...(finalRouting ? { routing: finalRouting } : {}) }
   }
 
   private parseArguments(call: AiToolCall): JsonObject {
@@ -759,53 +822,6 @@ export class AiService {
     } catch {
       return null
     }
-  }
-
-  private async provider(
-    credentials: { baseUrl: string; model: string; temperature: number; apiKey: string },
-    messages: ProviderMessage[],
-    tools?: ToolDefinition[],
-    maxTokens?: number,
-    sessionId?: string,
-  ): Promise<ProviderResult> {
-    let response: Response
-    const headers: Record<string, string> = { Authorization: `Bearer ${credentials.apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'MultiPush/2.0' }
-    if (/opencode\.ai\/inference\/go/i.test(credentials.baseUrl)) headers['x-opencode-session'] = `multipush-${sessionId || 'default'}`
-    try {
-      response = await fetch(chatEndpoint(credentials.baseUrl), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: credentials.model,
-          messages,
-          temperature: credentials.temperature,
-          stream: false,
-          ...(tools ? { tools, tool_choice: 'auto' } : {}),
-          ...(maxTokens ? { max_tokens: maxTokens } : {}),
-        }),
-        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
-      })
-    } catch (error) {
-      throw new ApiError(502, 'ai_provider_unreachable', `无法连接大模型接口：${error instanceof Error ? error.message : '网络错误'}`)
-    }
-    if (!response.ok) {
-      const detail = clampText(await response.text().catch(() => ''), 500)
-      throw new ApiError(502, 'ai_provider_error', `大模型请求失败（HTTP ${response.status}）${detail ? `：${detail}` : ''}`)
-    }
-    const payload = object(await response.json().catch(() => null))
-    const choices = payload.choices
-    const choice = Array.isArray(choices) ? object(choices[0]) : {}
-    const message = object(choice.message)
-    const content = typeof message.content === 'string' ? message.content : ''
-    const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
-    const toolCalls: AiToolCall[] = rawCalls.flatMap((raw) => {
-      const call = object(raw)
-      const fn = object(call.function)
-      return typeof call.id === 'string' && typeof fn.name === 'string' && typeof fn.arguments === 'string'
-        ? [{ id: call.id, type: 'function' as const, function: { name: fn.name, arguments: fn.arguments } }]
-        : []
-    })
-    return { content, toolCalls }
   }
 
   private async runTool(userId: string, name: string, args: JsonObject): Promise<JsonObject> {

@@ -19,6 +19,7 @@ import { loadConfig } from '../src/config'
 import { openDatabase, type Database } from '../src/db'
 import { decryptPublisherSecret, loadPublisherKey } from '../src/publisher-session'
 import { VideoService } from '../src/video'
+import { parseAiProvidersConfig, type AiProvidersConfig } from '../src/ai-provider-config'
 import type { PlatformRender } from '../../shared/types'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -27,9 +28,9 @@ function response(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } })
 }
 
-function setup(defaults?: { apiKey: string; baseUrl: string; model: string; label: string }) {
+function setup(defaults?: { apiKey: string; baseUrl: string; model: string; label: string }, aiProviders?: AiProvidersConfig) {
   const directory = mkdtempSync(path.join(tmpdir(), 'multipush-ai-'))
-  const config = loadConfig({ dataDir: directory, nodeEnv: 'test', jwtSecret: 'ai-test-secret', ...(defaults ? { aiDefaults: defaults } : {}) })
+  const config = loadConfig({ dataDir: directory, nodeEnv: 'test', jwtSecret: 'ai-test-secret', ...(defaults ? { aiDefaults: defaults } : {}), ...(aiProviders ? { aiProviders } : {}) })
   const database = openDatabase(':memory:')
   const user = database.createUser({ username: 'alice', email: 'alice@example.com', displayName: 'Alice', passwordHash: 'hash' })
   const wechat = { publish: vi.fn(), remove: vi.fn() } as unknown as WechatService
@@ -373,5 +374,86 @@ describe('AI attachments', () => {
     const toolMessage = result.session.messages.find(message => message.role === 'tool')
     expect(toolMessage?.toolResult).toMatchObject({ ok: false, error: { code: 'ai_media_kind' } })
     expect(calls).toBeGreaterThanOrEqual(2)
+  })
+})
+
+
+describe('AI high availability integration', () => {
+  function gatewayPool() {
+    return parseAiProvidersConfig({
+      providers: [
+        {
+          id: 'alpha',
+          label: 'Alpha 云',
+          baseUrl: 'https://alpha.example/v1',
+          defaultModel: 'alpha-flash',
+          models: ['alpha-flash'],
+          keys: [
+            { id: 'a1', label: '账号1', apiKey: 'sk-alpha-key-111111111111' },
+            { id: 'a2', label: '账号2', apiKey: 'sk-alpha-key-222222222222' },
+          ],
+        },
+        {
+          id: 'beta',
+          label: 'Beta 官方',
+          baseUrl: 'https://beta.example/v1',
+          defaultModel: 'beta-pro',
+          models: ['beta-pro'],
+          keys: [{ id: 'b1', label: '官方 Key', apiKey: 'sk-beta-key-111111111111' }],
+        },
+      ],
+      modelMap: { 'alpha/alpha-flash': { beta: 'beta-pro' } },
+      cooldowns: { quotaMs: 60_000, authMs: 60_000, rateLimitMs: 30_000, transientMs: 20_000, providerMs: 60_000 },
+    })
+  }
+
+  it('switches keys inside the chat turn and keeps the session history for the next turn', async () => {
+    const { database, user, service, session } = setup(undefined, gatewayPool())
+    expect(service.settings(user.id)).toMatchObject({ configured: true, source: 'server', label: 'Alpha 云', providers: 2, keys: 3, fallback: true })
+    let calls = 0
+    const bodies: Array<{ model: string; messages: Array<{ role: string; content: unknown }> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      calls += 1
+      bodies.push(JSON.parse(String(init?.body)))
+      if (calls === 1) {
+        return response({ type: 'error', error: { type: 'GoUsageLimitError', message: 'usage limit reached' } }, 429)
+      }
+      return response({ choices: [{ message: { role: 'assistant', content: calls === 2 ? '第一次回答' : '第二次回答' } }] })
+    }))
+    const first = await service.chat(user.id, session.id, { message: '第一句话' })
+    expect(first.routing).toMatchObject({ providerId: 'alpha', model: 'alpha-flash', keyId: 'a2', fallback: true, reason: 'quota_exhausted' })
+    expect(first.reply.content).toBe('第一次回答')
+    expect(first.session.messages.map(message => message.role)).toEqual(['user', 'assistant'])
+
+    const second = await service.chat(user.id, session.id, { message: '第二句话' })
+    expect(second.reply.content).toBe('第二次回答')
+    expect(second.session.messages.map(message => message.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
+    expect(second.session.messages[0].content).toBe('第一句话')
+    // The second provider call carries the full prior history.
+    const secondBody = bodies[bodies.length - 1]
+    expect(secondBody.model).toBe('alpha-flash')
+    expect(secondBody.messages.some(message => message.role === 'assistant' && message.content === '第一次回答')).toBe(true)
+    expect(secondBody.messages.some(message => message.role === 'user' && message.content === '第一句话')).toBe(true)
+
+    const events = database.listAiFailoverEvents(user.id, 20)
+    expect(events.some(event => event.kind === 'key_switch' && event.sessionId === session.id)).toBe(true)
+    const requests = database.listAiProviderRequests(user.id, 20)
+    expect(requests.some(request => request.status === 'failed' && request.keyId === 'a1')).toBe(true)
+    expect(JSON.stringify(requests)).not.toContain('sk-alpha-key-111111111111')
+  })
+
+  it('falls back to the next provider with a mapped model and keeps the tool trace', async () => {
+    const { user, service, session } = setup(undefined, gatewayPool())
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      if (calls <= 2) return response({ type: 'error', error: { type: 'GoUsageLimitError', message: 'usage limit reached' } }, 429)
+      if (calls === 3) return response(toolCall('list_contents', { pageSize: 1 }))
+      return response({ choices: [{ message: { role: 'assistant', content: '备用提供商已完成查询。' } }] })
+    }))
+    const result = await service.chat(user.id, session.id, { message: '看看我的内容库' })
+    expect(result.routing).toMatchObject({ providerId: 'beta', model: 'beta-pro', requestedModel: 'alpha-flash', fallback: true })
+    expect(result.session.messages.map(message => message.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
+    expect(result.reply.content).toContain('备用提供商')
   })
 })

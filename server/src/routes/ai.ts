@@ -13,6 +13,7 @@ const settingsSchema = z.object({
 }).strict()
 
 const sessionSchema = z.object({ title: z.string().trim().max(80).optional() }).strict()
+const probeSchema = z.object({ providerId: z.string().trim().min(1).max(120).optional() }).strict()
 const documentSchema = z.object({
   name: z.string().trim().min(1).max(200),
   mimeType: z.string().trim().max(100).default('text/plain'),
@@ -36,6 +37,14 @@ export function createAiRouter(service: AiService): Router {
   }))
   router.delete('/settings', asyncHandler((req, res) => { service.deleteSettings(currentUser(req).id); res.json({ ok: true }) }))
   router.post('/settings/test', asyncHandler(async (req, res) => { res.json(await service.testSettings(currentUser(req).id)) }))
+
+  router.get('/gateway', asyncHandler((req, res) => { res.json({ gateway: service.gatewayStatus(currentUser(req).id) }) }))
+  router.post('/gateway/probe', asyncHandler(async (req, res) => {
+    const input = parseInput(probeSchema, req.body ?? {})
+    const userId = currentUser(req).id
+    const probes = await service.probeGateway(userId, input.providerId)
+    res.json({ probes, gateway: service.gatewayStatus(userId) })
+  }))
 
   router.get('/sessions', asyncHandler((req, res) => { res.json({ sessions: service.listSessions(currentUser(req).id) }) }))
   router.post('/sessions', asyncHandler((req, res) => {

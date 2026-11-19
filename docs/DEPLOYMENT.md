@@ -50,7 +50,7 @@ systemd multipush.service（User=jenkins）→ 0.0.0.0:34080
 | `/opt/MultiPush/JenkinsConfig/health.mjs` | 服务器端健康检查脚本 | `install` 覆盖 |
 | `/opt/MultiPush/package.json` | 应用元数据 | `install` 覆盖 |
 | `/opt/MultiPush/DEPLOYED_COMMIT` | 最近部署的 commit | 原子写入 |
-| `/opt/MultiPush/.data/` | SQLite（含 WAL/SHM）、`uploads/`、`.jwt-secret`、`.wechat-session-key`、`.weibo-session-key`、`.toutiao-session-key`、`.ai-session-key` 等平台会话与 AI 密钥 | **绝不删除、不改权限** |
+| `/opt/MultiPush/.data/` | SQLite（含 WAL/SHM）、`uploads/`、`.jwt-secret`、`ai-providers.json`、`.wechat-session-key`、`.weibo-session-key`、`.toutiao-session-key`、`.ai-session-key` 等平台会话与 AI 密钥 | **绝不删除、不改权限** |
 | `/opt/MultiPush/.env` | 可选环境变量 | **绝不删除、不改权限** |
 | `/opt/MultiPush/apps/` | 旧版本遗留目录（如有） | 不自动删除 |
 
@@ -303,18 +303,34 @@ curl -fsS http://127.0.0.1:34080/api/health
 
 浏览器访问 `http://192.168.0.111:34080/`，完成一次注册/登录、创建文档、上传图片，再执行一次部署，确认文档和图片仍在（验证 `.data` 未被删除）。
 
-## AI 默认模型（可选）
+## AI 提供商池与高可用（可选）
 
-AI 创作页按用户保存模型配置。若希望部署后所有用户直接可用，可在 `/opt/MultiPush/.env` 提供服务器默认值：
+AI 创作页按用户保存模型配置。若希望部署后所有用户直接可用，并启用多 Key / 多提供商自动回退，推荐在 `/opt/MultiPush/.data/ai-providers.json` 放置受保护的提供商池文件（`chmod 600`，属主 `jenkins`）：
+
+```bash
+sudo install -m 600 -o jenkins -g jenkins \
+  /path/to/ai-providers.json /opt/MultiPush/.data/ai-providers.json
+sudo systemctl restart multipush.service
+```
+
+文件格式与完整字段见 [`server/ai-providers.example.json`](../server/ai-providers.example.json) 和 [AI 创作说明](AI_CREATION.md#大模型配置与高可用)。也可把完整 JSON 放进 `/opt/MultiPush/.env` 的 `AI_PROVIDERS_JSON=`，或设置 `AI_PROVIDERS_FILE` 指向其他受保护路径。注意 `.env` 和提供商池文件都包含 API Key，必须保持 `600` 权限且不要提交 Git。
+
+兼容旧部署的单 Key 环境变量：
 
 ```dotenv
 OPENCODE_GO_API_KEY=oc_sk_xxx
+# 或同提供商多 Key（逗号分隔）
+OPENCODE_GO_API_KEYS=oc_sk_account1,oc_sk_account2
 AI_DEFAULT_BASE_URL=https://opencode.ai/inference/go/openai/v1
 AI_DEFAULT_MODEL=deepseek-v4.1-flash
 AI_DEFAULT_LABEL=OpenCode Go
 ```
 
-也可使用 `AI_DEFAULT_API_KEY`。服务器默认 Key 不会返回前端；用户在 AI 设置中保存自己的配置后优先使用用户配置。修改 `.env` 后需重启服务。
+也可使用 `AI_DEFAULT_API_KEY`。服务器 Key 不会返回前端；用户在 AI 设置中保存自己的配置后优先使用用户配置。修改 `.env` / 提供商池后需重启服务。
+
+部署后到「AI 创作 → 高可用」执行「检测全部 Key」，确认每个 Key 的结果；再用一次真实对话确认回复上方显示实际使用的提供商、模型和脱敏 Key。若主 Key 已被限流/额度耗尽，服务应自动切到下一个 Key，而非直接报错。
+
+> 提供商池配置是热加载之外的启动配置：新增/删除 Key 后必须重启服务。Key 的冷却状态、成功/失败计数保存在数据库，重启后继续生效。
 
 ## 6. 数据备份与恢复
 
@@ -322,7 +338,7 @@ AI_DEFAULT_LABEL=OpenCode Go
 
 必须备份：
 
-- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`、`.wechat-session-key`、`.weibo-session-key`、`.toutiao-session-key` 等各平台会话密钥，以及 `.ai-session-key`（AI 模型 API Key 加密密钥）。
+- `/opt/MultiPush/.data/`：SQLite 数据库、WAL/SHM、`uploads/`、`.jwt-secret`、`ai-providers.json`（多提供商/多 Key 池，如使用）、`.wechat-session-key`、`.weibo-session-key`、`.toutiao-session-key` 等各平台会话密钥，以及 `.ai-session-key`（AI 模型 API Key 加密密钥）。
 - `/opt/MultiPush/.env`（如存在）。
 - 可选的 systemd unit 与当前 `DEPLOYED_COMMIT`，便于恢复环境。
 

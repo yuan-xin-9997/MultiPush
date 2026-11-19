@@ -50,6 +50,11 @@ import type {
   AiMessageAttachment,
   AiSession,
   AiToolCall,
+  AiFailoverEvent,
+  AiFailoverEventKind,
+  AiKeyState,
+  AiProviderRequest,
+  AiProviderState,
   BatchJob,
   BatchJobItem,
   BatchJobKind,
@@ -293,6 +298,71 @@ export interface CreateAiMessageValues {
   toolArguments?: unknown
   toolResult?: unknown
   attachments?: AiMessageAttachment[]
+}
+
+export interface AiKeyStateRecord {
+  providerId: string
+  keyId: string
+  state: AiKeyState
+  reason: string | null
+  cooldownUntil: string | null
+  successCount: number
+  failureCount: number
+  quotaFailures: number
+  authFailures: number
+  rateLimits: number
+  tokensIn: number
+  tokensOut: number
+  lastUsedAt: string | null
+  lastError: string | null
+  updatedAt: string
+}
+
+export interface AiProviderStateRecord {
+  providerId: string
+  state: AiProviderState
+  reason: string | null
+  cooldownUntil: string | null
+  consecutiveFailures: number
+  lastError: string | null
+  updatedAt: string
+}
+
+export interface CreateAiFailoverEventValues {
+  userId: string | null
+  sessionId?: string | null
+  kind: AiFailoverEventKind
+  reason: string
+  detail?: string | null
+  fromProviderId?: string | null
+  fromProviderLabel?: string | null
+  fromKeyId?: string | null
+  fromKeyLabel?: string | null
+  fromKeyMasked?: string | null
+  toProviderId?: string | null
+  toProviderLabel?: string | null
+  toKeyId?: string | null
+  toKeyLabel?: string | null
+  toKeyMasked?: string | null
+  model?: string | null
+  targetModel?: string | null
+}
+
+export interface CreateAiProviderRequestValues {
+  userId: string
+  sessionId?: string | null
+  providerId: string
+  providerLabel: string
+  model: string
+  keyId: string
+  keyLabel: string
+  keyMasked: string
+  status: 'success' | 'failed'
+  httpStatus?: number | null
+  errorCode?: string | null
+  durationMs: number
+  tokensIn?: number
+  tokensOut?: number
 }
 
 export interface CreateBatchJobValues {
@@ -719,6 +789,74 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_ai_messages_session_created ON ai_messages(session_id, created_at);
+      CREATE TABLE IF NOT EXISTS ai_provider_key_states (
+        provider_id TEXT NOT NULL,
+        key_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('available', 'cooling', 'exhausted', 'invalid')),
+        reason TEXT,
+        cooldown_until TEXT,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        quota_failures INTEGER NOT NULL DEFAULT 0,
+        auth_failures INTEGER NOT NULL DEFAULT 0,
+        rate_limits INTEGER NOT NULL DEFAULT 0,
+        tokens_in INTEGER NOT NULL DEFAULT 0,
+        tokens_out INTEGER NOT NULL DEFAULT 0,
+        last_used_at TEXT,
+        last_error TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider_id, key_id)
+      );
+      CREATE TABLE IF NOT EXISTS ai_provider_states (
+        provider_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state IN ('available', 'cooling')),
+        reason TEXT,
+        cooldown_until TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ai_failover_events (
+        id TEXT PRIMARY KEY,
+        user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+        session_id TEXT,
+        kind TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        detail TEXT,
+        from_provider_id TEXT,
+        from_provider_label TEXT,
+        from_key_id TEXT,
+        from_key_label TEXT,
+        from_key_masked TEXT,
+        to_provider_id TEXT,
+        to_provider_label TEXT,
+        to_key_id TEXT,
+        to_key_label TEXT,
+        to_key_masked TEXT,
+        model TEXT,
+        target_model TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_failover_events_user_created ON ai_failover_events(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS ai_provider_requests (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        session_id TEXT,
+        provider_id TEXT NOT NULL,
+        provider_label TEXT NOT NULL,
+        model TEXT NOT NULL,
+        key_id TEXT NOT NULL,
+        key_label TEXT NOT NULL,
+        key_masked TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
+        http_status INTEGER,
+        error_code TEXT,
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        tokens_in INTEGER NOT NULL DEFAULT 0,
+        tokens_out INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_provider_requests_user_created ON ai_provider_requests(user_id, created_at DESC);
       CREATE TABLE IF NOT EXISTS batch_jobs (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -937,7 +1075,7 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_jianshu_resolutions_publication ON jianshu_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 18;
+      PRAGMA user_version = 19;
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
@@ -2747,6 +2885,191 @@ export class Database {
     const row = this.get('SELECT * FROM ai_messages WHERE id = ? AND user_id = ?', [id, userId])
     if (!row) throw new Error('Failed to create AI message')
     return this.mapAiMessage(row)
+  }
+
+  // ------------------------------------------------- AI high availability
+
+  private mapAiKeyState(row: Row): AiKeyStateRecord {
+    return {
+      providerId: text(row.provider_id),
+      keyId: text(row.key_id),
+      state: row.state as AiKeyState,
+      reason: nullableText(row.reason),
+      cooldownUntil: nullableText(row.cooldown_until),
+      successCount: numberValue(row.success_count),
+      failureCount: numberValue(row.failure_count),
+      quotaFailures: numberValue(row.quota_failures),
+      authFailures: numberValue(row.auth_failures),
+      rateLimits: numberValue(row.rate_limits),
+      tokensIn: numberValue(row.tokens_in),
+      tokensOut: numberValue(row.tokens_out),
+      lastUsedAt: nullableText(row.last_used_at),
+      lastError: nullableText(row.last_error),
+      updatedAt: text(row.updated_at),
+    }
+  }
+
+  getAiKeyState(providerId: string, keyId: string): AiKeyStateRecord | null {
+    const row = this.get('SELECT * FROM ai_provider_key_states WHERE provider_id = ? AND key_id = ?', [providerId, keyId])
+    return row ? this.mapAiKeyState(row) : null
+  }
+
+  listAiKeyStates(): AiKeyStateRecord[] {
+    return this.all('SELECT * FROM ai_provider_key_states').map(row => this.mapAiKeyState(row))
+  }
+
+  saveAiKeyState(record: AiKeyStateRecord): void {
+    this.run(`INSERT INTO ai_provider_key_states (provider_id, key_id, state, reason, cooldown_until, success_count, failure_count,
+        quota_failures, auth_failures, rate_limits, tokens_in, tokens_out, last_used_at, last_error, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(provider_id, key_id) DO UPDATE SET
+        state = excluded.state, reason = excluded.reason, cooldown_until = excluded.cooldown_until,
+        success_count = excluded.success_count, failure_count = excluded.failure_count,
+        quota_failures = excluded.quota_failures, auth_failures = excluded.auth_failures,
+        rate_limits = excluded.rate_limits, tokens_in = excluded.tokens_in, tokens_out = excluded.tokens_out,
+        last_used_at = excluded.last_used_at, last_error = excluded.last_error, updated_at = excluded.updated_at`,
+      [record.providerId, record.keyId, record.state, record.reason, record.cooldownUntil,
+        record.successCount, record.failureCount, record.quotaFailures, record.authFailures, record.rateLimits,
+        record.tokensIn, record.tokensOut, record.lastUsedAt, record.lastError, nowIso()])
+  }
+
+  /** Clear key state for a user's own override after they change the key. */
+  resetAiKeyStates(providerId: string): void {
+    this.run('DELETE FROM ai_provider_key_states WHERE provider_id = ?', [providerId])
+  }
+
+  private mapAiProviderState(row: Row): AiProviderStateRecord {
+    return {
+      providerId: text(row.provider_id),
+      state: row.state as AiProviderState,
+      reason: nullableText(row.reason),
+      cooldownUntil: nullableText(row.cooldown_until),
+      consecutiveFailures: numberValue(row.consecutive_failures),
+      lastError: nullableText(row.last_error),
+      updatedAt: text(row.updated_at),
+    }
+  }
+
+  getAiProviderState(providerId: string): AiProviderStateRecord | null {
+    const row = this.get('SELECT * FROM ai_provider_states WHERE provider_id = ?', [providerId])
+    return row ? this.mapAiProviderState(row) : null
+  }
+
+  saveAiProviderState(record: AiProviderStateRecord): void {
+    this.run(`INSERT INTO ai_provider_states (provider_id, state, reason, cooldown_until, consecutive_failures, last_error, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(provider_id) DO UPDATE SET
+        state = excluded.state, reason = excluded.reason, cooldown_until = excluded.cooldown_until,
+        consecutive_failures = excluded.consecutive_failures, last_error = excluded.last_error, updated_at = excluded.updated_at`,
+      [record.providerId, record.state, record.reason, record.cooldownUntil, record.consecutiveFailures, record.lastError, nowIso()])
+  }
+
+  resetAiProviderState(providerId: string): void {
+    this.run('DELETE FROM ai_provider_states WHERE provider_id = ?', [providerId])
+  }
+
+  /** Full reset for a user override provider (keys + provider state). */
+  resetAiProviderScope(providerId: string): void {
+    this.resetAiKeyStates(providerId)
+    this.resetAiProviderState(providerId)
+  }
+
+  private mapAiFailoverEvent(row: Row): AiFailoverEvent {
+    return {
+      id: text(row.id),
+      at: text(row.created_at),
+      kind: row.kind as AiFailoverEventKind,
+      reason: text(row.reason),
+      detail: nullableText(row.detail),
+      sessionId: nullableText(row.session_id),
+      fromProviderId: nullableText(row.from_provider_id),
+      fromProviderLabel: nullableText(row.from_provider_label),
+      fromKeyId: nullableText(row.from_key_id),
+      fromKeyLabel: nullableText(row.from_key_label),
+      fromKeyMasked: nullableText(row.from_key_masked),
+      toProviderId: nullableText(row.to_provider_id),
+      toProviderLabel: nullableText(row.to_provider_label),
+      toKeyId: nullableText(row.to_key_id),
+      toKeyLabel: nullableText(row.to_key_label),
+      toKeyMasked: nullableText(row.to_key_masked),
+      model: nullableText(row.model),
+      targetModel: nullableText(row.target_model),
+    }
+  }
+
+  createAiFailoverEvent(values: CreateAiFailoverEventValues): AiFailoverEvent {
+    const id = randomUUID()
+    this.run(`INSERT INTO ai_failover_events (id, user_id, session_id, kind, reason, detail,
+        from_provider_id, from_provider_label, from_key_id, from_key_label, from_key_masked,
+        to_provider_id, to_provider_label, to_key_id, to_key_label, to_key_masked, model, target_model, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, values.userId, values.sessionId ?? null, values.kind, values.reason, values.detail ?? null,
+        values.fromProviderId ?? null, values.fromProviderLabel ?? null, values.fromKeyId ?? null,
+        values.fromKeyLabel ?? null, values.fromKeyMasked ?? null,
+        values.toProviderId ?? null, values.toProviderLabel ?? null, values.toKeyId ?? null,
+        values.toKeyLabel ?? null, values.toKeyMasked ?? null,
+        values.model ?? null, values.targetModel ?? null, nowIso()])
+    this.pruneAiGatewayRecords(values.userId)
+    const row = this.get('SELECT * FROM ai_failover_events WHERE id = ?', [id])
+    if (!row) throw new Error('Failed to create AI failover event')
+    return this.mapAiFailoverEvent(row)
+  }
+
+  /** User-owned events plus system recovery events (user_id IS NULL). */
+  listAiFailoverEvents(userId: string, limit = 50): AiFailoverEvent[] {
+    const size = Math.max(1, Math.min(200, limit))
+    return this.all(`SELECT * FROM ai_failover_events WHERE user_id = ? OR user_id IS NULL
+      ORDER BY created_at DESC, rowid DESC LIMIT ?`, [userId, size]).map(row => this.mapAiFailoverEvent(row))
+  }
+
+  private mapAiProviderRequest(row: Row): AiProviderRequest {
+    return {
+      id: text(row.id),
+      at: text(row.created_at),
+      sessionId: nullableText(row.session_id),
+      providerId: text(row.provider_id),
+      providerLabel: text(row.provider_label),
+      model: text(row.model),
+      keyId: text(row.key_id),
+      keyLabel: text(row.key_label),
+      keyMasked: text(row.key_masked),
+      status: row.status === 'failed' ? 'failed' : 'success',
+      httpStatus: row.http_status === null || row.http_status === undefined ? null : numberValue(row.http_status),
+      errorCode: nullableText(row.error_code),
+      durationMs: numberValue(row.duration_ms),
+      tokensIn: numberValue(row.tokens_in),
+      tokensOut: numberValue(row.tokens_out),
+    }
+  }
+
+  createAiProviderRequest(values: CreateAiProviderRequestValues): AiProviderRequest {
+    const id = randomUUID()
+    this.run(`INSERT INTO ai_provider_requests (id, user_id, session_id, provider_id, provider_label, model, key_id, key_label,
+        key_masked, status, http_status, error_code, duration_ms, tokens_in, tokens_out, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, values.userId, values.sessionId ?? null, values.providerId, values.providerLabel, values.model,
+        values.keyId, values.keyLabel, values.keyMasked, values.status, values.httpStatus ?? null,
+        values.errorCode ?? null, values.durationMs, values.tokensIn ?? 0, values.tokensOut ?? 0, nowIso()])
+    this.pruneAiGatewayRecords(values.userId)
+    const row = this.get('SELECT * FROM ai_provider_requests WHERE id = ? AND user_id = ?', [id, values.userId])
+    if (!row) throw new Error('Failed to create AI provider request')
+    return this.mapAiProviderRequest(row)
+  }
+
+  listAiProviderRequests(userId: string, limit = 50): AiProviderRequest[] {
+    const size = Math.max(1, Math.min(200, limit))
+    return this.all('SELECT * FROM ai_provider_requests WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      [userId, size]).map(row => this.mapAiProviderRequest(row))
+  }
+
+  /** Keep audit tables bounded; called after each insert. */
+  private pruneAiGatewayRecords(userId: string | null): void {
+    if (userId) {
+      this.run(`DELETE FROM ai_provider_requests WHERE user_id = ? AND rowid NOT IN (
+        SELECT rowid FROM ai_provider_requests WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 500)`, [userId, userId])
+      this.run(`DELETE FROM ai_failover_events WHERE user_id = ? AND rowid NOT IN (
+        SELECT rowid FROM ai_failover_events WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 300)`, [userId, userId])
+    }
   }
 
   // ---------------------------------------------------------------- batch

@@ -40,7 +40,8 @@
 - **掘金发布**：掘金扫码登录，选择分类与最多 5 个标签，支持保存草稿或直接发布；发布记录与结果人工核实。详见 [掘金发布说明](docs/JUEJIN_PUBLISHING.md)。
 - **简书发布**：简书网页端无扫码登录，使用浏览器 Cookie 连接（不保存密码）；支持保存到默认文集草稿或公开发布，发布记录与结果人工核实。详见 [简书发布说明](docs/JIANSHU_PUBLISHING.md)。
 - **草稿删除**：微信公众号、公众号贴图、知乎、少数派和个人博客的发布记录支持删除草稿，并同步删除平台后台的对应草稿；已发表内容不会被删除。抖音/头条/百家号/微博/豆瓣的草稿记录目前只删除本地记录，平台草稿需到对应后台清理。
-- **AI 创作**：新增 AI 创作页，可按账号配置 OpenAI 兼容大模型接口、模型与 API Key；对话中可读取知识库、内容、素材、渲染和发布记录，并通过工具写文章、生成多平台排版、保存草稿、正式发布及创建批量任务；支持通过工具操控视频内容的剪辑时间线（修剪、调序、增删片段、导出成片）；对话支持上传图片/视频（自动进素材库、可视觉识别、一键插入文章或建视频时间线）与文本文档（全文作为写作素材）。详见 [AI 创作说明](docs/AI_CREATION.md)。
+- **AI 创作**：AI 创作页可按账号配置 OpenAI 兼容大模型接口、模型与 API Key；对话中可读取知识库、内容、素材、渲染和发布记录，并通过工具写文章、生成多平台排版、保存草稿、正式发布及创建批量任务；支持通过工具操控视频内容的剪辑时间线（修剪、调序、增删片段、导出成片）；对话支持上传图片/视频（自动进素材库、可视觉识别、一键插入文章或建视频时间线）与文本文档（全文作为写作素材）。
+- **AI 高可用**：服务器可配置多个提供商，每个提供商多个 API Key；额度不足、失效或限流时自动轮换 Key；整个提供商不可用时按有序链回退，并通过模型等价映射保持模型能力；Key/提供商冷却与定期探活、切换审计和每次请求的实际路由均可在「高可用」面板查看。详见 [AI 创作说明](docs/AI_CREATION.md#大模型配置与高可用)。
 - **批量任务**：内容库多选后支持批量渲染和批量发布；任务在服务端顺序执行并持久保存进度，可查看每篇内容的排版、发布状态和失败原因。
 - **本地桌面版**：Electron 客户端支持 Windows 10+（x64）与 macOS（Intel / Apple Silicon 通用包），内置前端、Node 后端与 SQLite，完全在本机运行；首次启动直接注册本地账号，无需服务器、SMTP 或邮箱验证码。
 - **图注修复说明**：见 [docs/FIGURE_CAPTION_FIX.md](docs/FIGURE_CAPTION_FIX.md) 与 [CHANGELOG.md](CHANGELOG.md)。
@@ -52,7 +53,7 @@
 | --- | --- |
 | 前端 | React 19、TypeScript、Vite 7、React Router 6、Tiptap 2、纯 CSS |
 | 后端 | Node.js 22、Express 4、TypeScript、`node:sqlite`、JWT、bcryptjs、multer |
-| 渲染 | 服务端规则模板（cheerio / sanitize-html / turndown），不依赖外部 AI；AI 创作使用用户自配置的 OpenAI 兼容模型 |
+| 渲染 | 服务端规则模板（cheerio / sanitize-html / turndown），不依赖外部 AI；AI 创作通过高可用网关调用用户配置或服务器提供商池的 OpenAI 兼容模型 |
 | 下载 | html-to-image（小红书卡片）、JSZip |
 | 桌面端 | Electron 45、electron-builder、Playwright Electron 冒烟测试 |
 | 部署 | esbuild 单文件后端、Jenkins Pipeline、systemd、GitHub Actions 桌面构建 |
@@ -116,10 +117,14 @@ npm start
 | `DOUBAN_BROWSER_PATH` | 自动探测 | 豆瓣发布使用的 Chrome / Chromium 路径 |
 | `JUEJIN_BROWSER_PATH` | 自动探测 | 掘金发布使用的 Chrome / Chromium 路径 |
 | `JIANSHU_BROWSER_PATH` | 自动探测 | 简书发布使用的 Chrome / Chromium 路径 |
-| `OPENCODE_GO_API_KEY` | 未设置 | AI 创作默认模型的 API Key；配置后默认使用 OpenCode Go |
-| `AI_DEFAULT_BASE_URL` | OpenCode Go 地址 | 默认模型接口地址，可覆盖 |
-| `AI_DEFAULT_MODEL` | `deepseek-v4.1-flash` | 默认模型名称 |
-| `AI_DEFAULT_LABEL` | `OpenCode Go` | AI 页面显示的默认配置名称 |
+| `AI_PROVIDERS_JSON` | 未设置 | AI 提供商池完整 JSON；支持多提供商、多 Key、模型映射（优先级最高） |
+| `AI_PROVIDERS_FILE` | `DATA_DIR/ai-providers.json` | 受保护的提供商池 JSON 文件路径；建议 `chmod 600` |
+| `OPENCODE_GO_API_KEY` | 未设置 | 旧版单 Key；未配置提供商池时使用 OpenCode Go |
+| `OPENCODE_GO_API_KEYS` | 未设置 | 旧版同提供商多 Key，逗号/空白分隔 |
+| `AI_DEFAULT_API_KEY` | 未设置 | 旧版通用单 Key，优先于 `OPENCODE_GO_API_KEY` |
+| `AI_DEFAULT_BASE_URL` | OpenCode Go 地址 | 旧版默认模型接口地址 |
+| `AI_DEFAULT_MODEL` | `deepseek-v4.1-flash` | 旧版默认模型名称 |
+| `AI_DEFAULT_LABEL` | `OpenCode Go` | 旧版 AI 页面显示的默认配置名称 |
 | `WECHAT_BROWSER_PATH` | 自动探测 | 服务器 Chrome / Chromium 可执行文件绝对路径 |
 
 数据目录结构：
@@ -142,6 +147,7 @@ npm start
   .wechat-session-key
   .zhihu-session-key
   .ai-session-key
+  ai-providers.json     # 可选：受保护的多提供商/多 Key 池（chmod 600）
 ```
 
 ## 目录结构

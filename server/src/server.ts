@@ -24,6 +24,11 @@ export async function startMultiPushServer(overrides: ConfigOverrides = {}): Pro
   let app: Express
   try {
     app = createApp(config, database)
+    // Periodic key/provider probes recover cooling entries in the background.
+    app.locals.ai?.startProber()
+    if (app.locals.ai) {
+      console.log(`[multipush] ai providers=${app.locals.ai.gateway.providerCount} keys=${app.locals.ai.gateway.keyCount} source=${config.aiProvidersSource}`)
+    }
   } catch (error) {
     database.close()
     throw error
@@ -77,6 +82,7 @@ export async function startMultiPushServer(overrides: ConfigOverrides = {}): Pro
     try { await app.locals.sspai.close() } catch { /* ignore */ }
     try { await app.locals.blog.close() } catch { /* ignore */ }
     try { await app.locals.batch.close() } catch { /* ignore */ }
+    try { app.locals.ai?.close() } catch { /* ignore */ }
     try { await app.locals.smsLogin.close() } catch { /* ignore */ }
     try { database.close() } catch { /* ignore */ }
   }
