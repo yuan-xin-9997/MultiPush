@@ -1,14 +1,16 @@
 // Mobile-viewport UI smoke for the AI creation page. Isolated fixtures only; never calls a real LLM.
 // Build first: npm run build && node scripts/smoke-ai-mobile-ui.mjs
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import express from 'express'
+import multer from 'multer'
 import { chromium } from 'playwright-core'
 
 const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'artifacts', 'ai-mobile-check')
 mkdirSync(output, { recursive: true })
 const time = new Date().toISOString()
+writeFileSync(path.join(output, 'fixture.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7XkAAAAASUVORK5CYII=', 'base64'))
 const user = { id: 'alice', username: 'alice', email: 'alice@example.com', displayName: 'Alice', createdAt: time }
 const settings = { configured: true, baseUrl: 'https://ai.example.com/v1', model: 'deepseek-v4.1-flash', temperature: 0.7, hasApiKey: true, label: 'OpenCode Go' }
 const messages = [
@@ -31,9 +33,13 @@ app.post('/api/ai/sessions', (_req, res) => res.status(201).json({ session: sess
 app.get('/api/ai/sessions/session-1', (_req, res) => res.json({ session: sessionDetail() }))
 app.get('/api/ai/sessions/session-2', (_req, res) => res.json({ session: sessionDetail() }))
 app.post('/api/ai/sessions/session-1/messages', (req, res) => {
-  messages.push({ id: `user-${messages.length + 1}`, role: 'user', content: req.body.message || '', createdAt: time })
+  messages.push({ id: `user-${messages.length + 1}`, role: 'user', content: req.body.message || '', createdAt: time, ...(req.body.mediaIds?.length ? { attachments: req.body.mediaIds.map((mediaId, index) => ({ kind: 'image', name: `fixture-${index}.png`, mimeType: 'image/png', size: 100, mediaId, url: '/uploads/fixture.png', width: 32, height: 32 })) } : {}) })
   messages.push({ id: `assistant-${messages.length + 1}`, role: 'assistant', content: '好的，我先把两段素材裁成 10 秒内的对比短片，稍等。', createdAt: time })
   res.json({ session: sessionDetail(), reply: messages[messages.length - 1] })
+})
+const upload = multer({ storage: multer.memoryStorage() })
+app.post('/api/media', upload.single('file'), (req, res) => {
+  res.json({ media: { id: `media-${messages.length + 1}`, kind: 'image', filename: 'fixture.bin', originalName: req.file?.originalname ?? 'fixture.png', mimeType: 'image/png', size: 100, url: '/uploads/fixture.png', width: 32, height: 32, duration: null, createdAt: time } })
 })
 app.use(express.static(path.join(root, 'web', 'dist')))
 app.get('*', (_req, res) => res.sendFile(path.join(root, 'web', 'dist', 'index.html')))
@@ -104,6 +110,11 @@ try {
   // Touch keyboards: Enter should not send; the send button must work.
   const pointerFine = await page.evaluate(() => matchMedia('(pointer: fine)').matches)
   await page.getByPlaceholder(/告诉 AI 你想写什么/).fill('我希望两个素材剪辑成一个 10s 内的视频')
+  // Attach an image: the pending chip must honor the mobile max-width (cascade check).
+  await page.getByLabel('上传附件').setInputFiles(path.join(output, 'fixture.png'))
+  await page.locator('.ai-attachment-chip').waitFor()
+  assert.equal(await page.locator('.ai-attachment-chip').evaluate(el => getComputedStyle(el).maxWidth), '150px', '移动端附件芯片应使用 150px 上限（未被文件后面的基础规则覆盖）')
+  await page.screenshot({ path: path.join(output, 'mobile-390-attachment.png') })
   if (!pointerFine) {
     await page.keyboard.press('Enter')
     await page.waitForTimeout(300)
@@ -111,6 +122,7 @@ try {
   }
   await page.getByRole('button', { name: '发送' }).click()
   await page.getByText('好的，我先把两段素材裁成 10 秒内的对比短片，稍等。').waitFor()
+  assert.equal(await page.locator('.ai-message.is-user').last().locator('.ai-attachment').count(), 1, '发送后用户气泡应携带附件')
   await page.screenshot({ path: path.join(output, 'mobile-390.png') })
 
   const after = await page.evaluate(() => ({
