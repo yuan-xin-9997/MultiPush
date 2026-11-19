@@ -15,15 +15,18 @@
 
 **验证**
 
-- `npm run typecheck`、`npm test`：server 42 个文件 / 384 项、web 2 个文件 / 20 项全部通过；`npm run build` 通过。
-- 新增 `server/test/ai-gateway.test.ts`（16 项）覆盖额度不足/401/429 限流区分、单 Key 限流等待重试、跨提供商映射、熔断跳过后恢复、探活回到最高优先级、账号配置回退、配置加载与文件权限、状态/审计不泄露明文；`server/test/ai-gateway-routes.test.ts`（4 项）覆盖鉴权、`no-store`、探活参数；`server/test/ai.test.ts` 增加切换后会话历史完整和工具轨迹保留断言。
+- `npm run typecheck`、`npm test`：server 42 个文件 / 385 项、web 2 个文件 / 20 项全部通过；`npm run build` 通过。
+- 新增 `server/test/ai-gateway.test.ts`（17 项）覆盖额度不足/401/429 限流区分、单 Key 限流等待重试、跨提供商映射、熔断跳过后恢复、探活回到最高优先级、账号配置回退、配置加载与文件权限、状态/审计不泄露明文；`server/test/ai-gateway-routes.test.ts`（4 项）覆盖鉴权、`no-store`、探活参数；`server/test/ai.test.ts` 增加切换后会话历史完整和工具轨迹保留断言。
 - 真实 OpenCode Key 联调：账号1（额度已耗尽）+ 账号2（有额度）按优先级配置，请求命中账号1 的 `HTTP 429 GoUsageLimitError` 后自动切到账号2，模型保持 `deepseek-v4.1-flash`，回复成功，事件记录 Key 脱敏 `oc_sk_e…tK-T`；继续第二轮直接使用账号2，历史 4 条完整。
 - 跨提供商联调：停用 OpenCode Go（只保留耗尽 Key），配置本地备用提供商，自动回退并按 `modelMap` 把 `deepseek-v4.1-flash` 映射为 `mock-fallback-model`，6 条会话历史完整；`provider_switch` 记录映射前后模型。
 - 真实浏览器 1440×1000 / 390×844 验证高可用面板、探活、切换记录和最近请求；DOM 无 Key 明文，移动端无横向溢出；`npm run smoke:ai-gateway` 通过并输出截图到 `artifacts/ai-gateway-check/`。
 
 **部署**
 
-- 待 Jenkins 构建与生产复核。
+- Jenkins 构建 #110 成功（提交 `26bb4ad`），部署后 `/opt/MultiPush/.data` 与 `.env` 保留；启动日志 `[multipush] ai providers=1 keys=2 source=file` 确认从受保护配置文件加载了 2 个 Key。
+- 生产环境「检测全部 Key」：账号1 返回 `额度不足（HTTP 429）` 并标记 exhausted，账号2 返回「连接成功」；生产对话使用账号2，模型保持 `deepseek-v4.1-flash`，回复「部署验证成功。」，第二轮历史 4 条完整；验证会话随后删除。
+- 生产 `/api/ai/gateway` 返回 Key 脱敏标识、状态、用量、切换冷却与最近请求，响应中不含 Key 明文。
+- 页面在 1440×1000 与 390×844 下验证通过；`npm run smoke:ai-gateway` 通过并生成 `artifacts/ai-gateway-check/` 截图。
 
 ## 2026-11-19 · 移动端 AI 创作页布局优化
 

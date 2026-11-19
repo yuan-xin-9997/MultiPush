@@ -842,7 +842,7 @@ export class AiGateway {
    * (still cooling), the result must tell the user that the fallback route is
    * active and why. This keeps every request traceable.
    */
-  private withRootFallback(result: GatewayCompletionResult, chain: ChainProvider[]): GatewayCompletionResult {
+  private withRootFallback(result: GatewayCompletionResult, chain: ChainProvider[], input: GatewayCompletionInput): GatewayCompletionResult {
     const root = chain[0]
     if (!root || result.routing.fallback) return result
     const rootKey = root.keys[0]
@@ -850,6 +850,31 @@ export class AiGateway {
     const keyState = rootKey ? this.keyState(root.id, rootKey.id) : null
     const providerState = this.providerState(root.id)
     const reason = keyState?.reason ?? providerState.reason ?? 'primary_unavailable'
+    const from: AttemptRef = {
+      providerId: root.id,
+      providerLabel: root.label,
+      keyId: rootKey?.id ?? '',
+      keyLabel: rootKey?.label ?? '',
+      keyMasked: rootKey?.masked ?? '',
+      model: result.routing.requestedModel,
+    }
+    const to: AttemptRef = {
+      providerId: result.routing.providerId,
+      providerLabel: result.routing.providerLabel,
+      keyId: result.routing.keyId,
+      keyLabel: result.routing.keyLabel,
+      keyMasked: result.routing.keyMasked,
+      model: result.routing.model,
+    }
+    this.logEvent(root.id === result.routing.providerId ? 'key_switch' : 'provider_switch', reason, {
+      userId: input.userId, sessionId: input.sessionId, preferred: input.preferred,
+    }, {
+      detail: '主 Key/提供商处于冷却或不可用，自动使用备用路由',
+      from,
+      to,
+      model: result.routing.requestedModel,
+      targetModel: result.routing.model,
+    })
     return { ...result, routing: { ...result.routing, fallback: true, reason } }
   }
 
@@ -887,7 +912,7 @@ export class AiGateway {
       previous = current
       attempts += 1
       const result = await this.attemptOnce(candidate, input, requestedModel, failures)
-      if (result) return this.withRootFallback(result, chain)
+      if (result) return this.withRootFallback(result, chain, input)
       const failure = failures[failures.length - 1]
       current.failure = failure
       previous = current
@@ -928,7 +953,7 @@ export class AiGateway {
         previous = current
         attempts += 1
         const result = await this.attemptOnce(candidate, input, requestedModel, failures)
-        if (result) return this.withRootFallback(result, chain)
+        if (result) return this.withRootFallback(result, chain, input)
         current.failure = failures[failures.length - 1]
         previous = current
       }

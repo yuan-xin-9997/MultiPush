@@ -17,5 +17,9 @@ desktop/release/
 desktop/server/
 desktop/web-dist/
 
+# AI provider pool contains API keys (must stay local)
+ai-providers.json
+!ai-providers.example.json
+
 # Generated publisher session encryption keys (must stay local)
 **/.*-session-key

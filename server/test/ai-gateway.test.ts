@@ -174,6 +174,21 @@ describe('AI gateway multi-key failover', () => {
     expect(database.getAiKeyState('alpha', 'a1')!.authFailures).toBe(1)
   })
 
+  it('classifies a 403 quota response as exhaustion instead of an invalid key', async () => {
+    const { database, user, gateway } = setup()
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      if (calls === 1) return response({ error: { message: 'monthly usage limit reached' } }, 403)
+      return success('继续')
+    }))
+    const result = await gateway.complete(completeInput(user.id))
+    expect(result.routing.keyId).toBe('a2')
+    expect(result.routing.reason).toBe('quota_exhausted')
+    expect(database.getAiKeyState('alpha', 'a1')!.state).toBe('exhausted')
+    expect(database.getAiKeyState('alpha', 'a1')!.authFailures).toBe(0)
+  })
+
   it('does not mark a rate-limited key as invalid and rotates temporarily', async () => {
     const { database, user, gateway } = setup()
     let calls = 0
@@ -246,7 +261,7 @@ describe('AI gateway provider fallback and model mapping', () => {
   })
 
   it('skips a cooling provider on the next request without hitting it again', async () => {
-    const { user, gateway } = setup()
+    const { database, user, gateway } = setup()
     const urls: string[] = []
     let count = 0
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -257,6 +272,7 @@ describe('AI gateway provider fallback and model mapping', () => {
     }))
     await gateway.complete(completeInput(user.id))
     const before = urls.length
+    const eventsBefore = database.listAiFailoverEvents(user.id, 50).length
     const second = await gateway.complete(completeInput(user.id))
     expect(urls.length).toBe(before + 1)
     expect(urls[urls.length - 1]).toContain('beta.example')
@@ -265,6 +281,16 @@ describe('AI gateway provider fallback and model mapping', () => {
     // routing still shows the active fallback and its reason.
     expect(second.routing.fallback).toBe(true)
     expect(second.routing.reason).toBe('quota_exhausted')
+    const eventsAfter = database.listAiFailoverEvents(user.id, 50)
+    expect(eventsAfter.length).toBeGreaterThan(eventsBefore)
+    expect(eventsAfter[0]).toMatchObject({
+      kind: 'provider_switch',
+      reason: 'quota_exhausted',
+      fromProviderId: 'alpha',
+      toProviderId: 'beta',
+      fromKeyMasked: 'sk-alph…1111',
+      toKeyMasked: 'sk-b…1111',
+    })
   })
 
   it('recovers the highest-priority key after a successful probe', async () => {

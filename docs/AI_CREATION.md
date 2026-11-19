@@ -248,7 +248,7 @@ npm run build
 
 服务端测试覆盖：
 
-- `server/test/ai-gateway.test.ts`：同提供商 Key 轮换、额度不足与 429 限流的区分、401 失效、单 Key 限流等待重试、跨提供商回退与模型映射、提供商熔断跳过后恢复、探活恢复最高优先级 Key、账号配置回退到服务器池、状态/审计接口不泄露明文、配置文件与环境变量加载；
+- `server/test/ai-gateway.test.ts`（17 项）：同提供商 Key 轮换、额度不足与 429 限流的区分、401 失效、单 Key 限流等待重试、跨提供商回退与模型映射、提供商熔断跳过后恢复、探活恢复最高优先级 Key、账号配置回退到服务器池、状态/审计接口不泄露明文、配置文件与环境变量加载；
 - `server/test/ai-gateway-routes.test.ts`：管理接口鉴权、`no-store`、探活参数校验；
 - `server/test/ai.test.ts`：AI 会话在切换 Key / 提供商后历史完整、工具轨迹保留。
 
@@ -257,6 +257,7 @@ npm run build
 - 账号1（额度已耗尽）放在优先级 1、账号2（有额度）放在优先级 2：请求命中账号1 的 `HTTP 429 GoUsageLimitError` 后自动切到账号2，模型保持 `deepseek-v4.1-flash`，回复成功；事件记录 `key_switch` / `key_cooldown`，Key 脱敏为 `oc_sk_e…tK-T`。
 - 在同一会话继续第二轮：直接使用账号2，历史消息完整（4 条），继续对话成功。
 - 停用整个 OpenCode Go 提供商（只保留已耗尽 Key）并配置本地备用提供商：自动回退并按 `modelMap` 把 `deepseek-v4.1-flash` 映射为 `mock-fallback-model`，会话历史 6 条完整保留；`provider_switch` 事件记录映射前后模型。
+- 生产环境 Jenkins #110 部署后：启动日志显示 `providers=1 keys=2 source=file`；探活中账号1 额度不足、账号2 连接成功；真实对话使用账号2 且模型保持 `deepseek-v4.1-flash`，两轮历史 4 条完整；生产 `/api/ai/gateway` 无 Key 明文。
 - 浏览器（1440×1000 与 390×844）打开「高可用」面板：提供商/Key 状态、探活结果、切换记录、最近请求均可见，DOM 中没有 Key 明文，移动端无横向溢出。
 
 页面回归使用真实浏览器验证 AI 页、高可用面板、批量弹窗和发布页。
