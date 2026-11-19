@@ -24,9 +24,10 @@
 
 **部署**
 
-- Jenkins 构建 #110（提交 `26bb4ad`）与 #111（提交 `9296a63`）成功，部署后 `/opt/MultiPush/.data` 与 `.env` 保留；启动日志 `[multipush] ai providers=1 keys=2 source=file` 确认从受保护配置文件加载了 2 个 Key。
+- Jenkins 构建 #110（`26bb4ad`）、#111（`9296a63`）、#112（`48b7d79`）均成功，部署后 `/opt/MultiPush/.data` 与 `.env` 保留；启动日志 `[multipush] ai providers=1 keys=2 source=file` 确认从受保护配置文件加载了 2 个 Key。
 - 生产环境「检测全部 Key」：账号1 返回 `额度不足（HTTP 429）` 并标记 exhausted，账号2 返回「连接成功」；生产对话使用账号2，模型保持 `deepseek-v4.1-flash`，回复「部署验证成功。」，第二轮历史 4 条完整；验证会话随后删除。
-- 生产 `/api/ai/gateway` 返回 Key 脱敏标识、状态、用量、切换冷却与最近请求，响应中不含 Key 明文。
+- 生产 `/api/ai/gateway` 返回 Key 脱敏标识、状态、用量、切换冷却与最近请求，响应中不含 Key 明文；主 Key 冷却时自动使用账号2，并记录 `key_switch`（账号1 → 账号2）事件。
+- 生产浏览器（LAN 地址 `http://192.168.0.111:34080`，1440×1000 与 390×844）复核「高可用」面板：2 个 Key 状态、切换/冷却记录、最近请求均正常，移动端无横向溢出。
 - 页面在 1440×1000 与 390×844 下验证通过；`npm run smoke:ai-gateway` 通过并生成 `artifacts/ai-gateway-check/` 截图。
 
 ## 2026-11-19 · 移动端 AI 创作页布局优化
