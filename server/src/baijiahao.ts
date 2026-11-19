@@ -275,8 +275,15 @@ export class BaijiahaoService {
     const raw = (coverImage ?? '').trim()
     if (!raw || raw.startsWith('#')) return ''
     if (/^data:/i.test(raw) || /^https?:\/\//i.test(raw)) return raw
-    if (!baseUrl) return raw
-    try { return new URL(raw, `${baseUrl.replace(/\/+$/, '')}/`).href } catch { return raw }
+    // Resolve against the configured public origin first: cover paths are
+    // stored root-relative and must land on the origin the body images use,
+    // otherwise they would resolve to the request host (with a port) and fall
+    // out of the owned-origin branch.
+    const bases = [this.config.publicBaseUrl, baseUrl].filter((base): base is string => !!base)
+    for (const base of bases) {
+      try { return new URL(raw, `${base.replace(/\/+$/, '')}/`).href } catch { /* try the next base */ }
+    }
+    return raw
   }
 
   list(userId: string): BaijiahaoPublication[] { return this.database.listBaijiahaoPublications(userId) }
