@@ -277,7 +277,7 @@ export default function AiPage() {
 
       <section className="ai-main" aria-label="对话">
         <header className="ai-main-head">
-          <div><h2>{session?.title || '新的 AI 会话'}</h2><p>{configured ? `${settings?.label ? `${settings.label} · ` : ''}模型：${settings?.model}` : '尚未配置大模型'}</p></div>
+          <div><h2 title={session?.title || '新的 AI 会话'}>{session?.title || '新的 AI 会话'}</h2><p>{configured ? `${settings?.label ? `${settings.label} · ` : ''}模型：${settings?.model}` : '尚未配置大模型'}</p></div>
           <button type="button" className="btn btn-sm" onClick={openSettings}><Settings2 size={14} />模型设置</button>
         </header>
 

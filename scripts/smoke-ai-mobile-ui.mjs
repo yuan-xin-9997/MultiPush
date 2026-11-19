@@ -69,8 +69,18 @@ try {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  await page.goto(`${base}/ai`)
-  await page.getByRole('heading', { name: '新建视频内容，将这两个视频剪辑成一个 MacOS 和 Windows 空格键对比的短片' }).waitFor()
+  // Vite swaps dist assets between goto and the SPA fetch; retry once on that race.
+  const heading = page.getByRole('heading', { name: '新建视频内容，将这两个视频剪辑成一个 MacOS 和 Windows 空格键对比的短片' })
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.goto(`${base}/ai`, { waitUntil: 'domcontentloaded' })
+      await heading.waitFor({ timeout: 10_000 })
+      break
+    } catch (cause) {
+      if (attempt >= 2) throw cause
+      errors.length = 0
+    }
+  }
 
   await page.screenshot({ path: path.join(output, 'mobile-390-before-send.png') })
 
