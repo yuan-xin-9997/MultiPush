@@ -536,8 +536,18 @@ export class AiService {
     const temperature = input.temperature === undefined ? 0.7 : Number(input.temperature)
     if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) throw new ApiError(400, 'ai_temperature', '温度需要在 0 到 2 之间')
     const current = this.database.getAiSettings(userId)
-    const apiKey = input.apiKey?.trim() ?? this.config.aiDefaults?.apiKey?.trim()
-    if (!apiKey && !current) throw new ApiError(400, 'ai_api_key', '请填写 API Key')
+    let apiKey = input.apiKey?.trim()
+    if (!apiKey && !current) {
+      // Reusing the server key is only safe when the user is editing the same
+      // endpoint. Otherwise a custom base URL would receive the server secret.
+      const defaults = this.config.aiDefaults
+      let sameEndpoint = false
+      if (defaults?.baseUrl) {
+        try { sameEndpoint = normalizeAiBaseUrl(defaults.baseUrl) === baseUrl } catch { sameEndpoint = false }
+      }
+      if (defaults?.apiKey && sameEndpoint) apiKey = defaults.apiKey.trim()
+      if (!apiKey) throw new ApiError(400, 'ai_api_key', '请填写 API Key：留空仅可在接口地址与服务器默认地址一致时沿用服务器 Key')
+    }
     const encryptedApiKey = apiKey ? encryptPublisherSecret(apiKey, this.key, userId) : current!.encryptedApiKey
     this.database.saveAiSettings(userId, { encryptedApiKey, baseUrl, model, temperature })
     // A new/changed key should be attempted immediately instead of inheriting

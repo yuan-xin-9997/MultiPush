@@ -87,6 +87,7 @@ import type {
   AiChatResult,
   AiGatewayStatus,
   AiProbeResult,
+  AiRoutingInfo,
   AiSendMessageInput,
   AiSession,
   AiSessionDetail,
@@ -428,7 +429,7 @@ export const api = {
     settings: () => request<{ settings: AiSettings }>('/api/ai/settings', { cache: 'no-store' }),
     saveSettings: (input: AiSettingsInput) => request<{ settings: AiSettings }>('/api/ai/settings', { method: 'PUT', body: JSON.stringify(input) }),
     deleteSettings: () => request<{ ok: true }>('/api/ai/settings', { method: 'DELETE' }),
-    testSettings: () => request<{ ok: true; message: string; model: string }>('/api/ai/settings/test', { method: 'POST' }),
+    testSettings: () => request<{ ok: true; message: string; model: string; routing?: AiRoutingInfo }>('/api/ai/settings/test', { method: 'POST' }),
     gatewayStatus: () => request<{ gateway: AiGatewayStatus }>('/api/ai/gateway', { cache: 'no-store' }),
     probeGateway: (providerId?: string) => request<{ probes: AiProbeResult[]; gateway: AiGatewayStatus }>('/api/ai/gateway/probe', {
       method: 'POST',

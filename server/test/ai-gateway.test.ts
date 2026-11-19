@@ -32,6 +32,10 @@ function unauthorized(): Response {
   return response({ error: { message: 'invalid api key' } }, 401)
 }
 
+function longRateLimitError(): Response {
+  return response({ error: { message: 'rate limit exceeded, please retry later' } }, 429, { 'retry-after': '30' })
+}
+
 function pool(overrides: Partial<ReturnType<typeof rawPool>> = {}): AiProvidersConfig {
   return parseAiProvidersConfig({
     ...rawPool(),
@@ -206,6 +210,29 @@ describe('AI gateway multi-key failover', () => {
     expect(database.listAiFailoverEvents(user.id, 20).some(event => event.kind === 'rate_limited')).toBe(true)
   })
 
+  it('does not retry before the key Retry-After cooldown elapses', async () => {
+    const single = parseAiProvidersConfig({
+      ...rawPool(),
+      providers: [rawPool().providers[0]],
+      modelMap: {},
+    })
+    single.providers[0].keys = [single.providers[0].keys[0]]
+    const { database, user, gateway, advance } = setup(single)
+    const fetchMock = vi.fn(async () => longRateLimitError())
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(gateway.complete(completeInput(user.id))).rejects.toMatchObject({ status: 429, code: 'ai_rate_limited' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const state = database.getAiKeyState('alpha', 'a1')!
+    expect(state.state).toBe('cooling')
+    expect(Date.parse(state.cooldownUntil!)).toBeGreaterThan(Date.now() + 20_000)
+
+    advance(31_000)
+    vi.stubGlobal('fetch', vi.fn(async () => success('限流恢复')))
+    const second = await gateway.complete(completeInput(user.id))
+    expect(second.routing.keyId).toBe('a1')
+    expect(second.routing.fallback).toBe(false)
+  })
+
   it('waits and retries the same key when it is the only one and the provider rate-limits', async () => {
     const single = parseAiProvidersConfig({
       ...rawPool(),
@@ -228,6 +255,24 @@ describe('AI gateway multi-key failover', () => {
 })
 
 describe('AI gateway provider fallback and model mapping', () => {
+  it('treats a request-scoped 400 as a per-request skip without cooling the shared provider', async () => {
+    const { database, user, gateway } = setup()
+    const urls: string[] = []
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(String(url))
+      calls += 1
+      if (calls === 1) return response({ error: { message: 'invalid request parameter: messages too long' } }, 400)
+      return success('备用提供商完成')
+    }))
+    const result = await gateway.complete(completeInput(user.id))
+    expect(urls[0]).toContain('alpha.example')
+    expect(urls[1]).toContain('beta.example')
+    expect(result.routing.providerId).toBe('beta')
+    expect(database.getAiProviderState('alpha')).toBeNull()
+    expect(database.getAiKeyState('alpha', 'a1')).toBeNull()
+  })
+
   it('falls back to the next provider with the mapped model when every key of the first provider is exhausted', async () => {
     const { database, user, gateway } = setup()
     const calls: string[] = []
@@ -291,6 +336,30 @@ describe('AI gateway provider fallback and model mapping', () => {
       fromKeyMasked: 'sk-alph…1111',
       toKeyMasked: 'sk-b…1111',
     })
+  })
+
+  it('falls through to a broader model map when a specific entry has no target', async () => {
+    const config = parseAiProvidersConfig({
+      providers: [
+        { id: 'alpha', label: 'Alpha', baseUrl: 'https://alpha.example/v1', defaultModel: 'm1', models: ['m1'], keys: [{ id: 'a1', label: 'A1', apiKey: 'sk-alpha-key-111111111111' }] },
+        { id: 'beta', label: 'Beta', baseUrl: 'https://beta.example/v1', defaultModel: 'beta-m1', models: ['beta-m1'], keys: [{ id: 'b1', label: 'B1', apiKey: 'sk-beta-key-111111111111' }] },
+        { id: 'gamma', label: 'Gamma', baseUrl: 'https://gamma.example/v1', defaultModel: 'g1', models: ['g1'], keys: [{ id: 'c1', label: 'C1', apiKey: 'sk-gamma-key-111111111111' }] },
+      ],
+      modelMap: { 'alpha/m1': { beta: 'beta-m1' }, '*/*': 'star-model' },
+      cooldowns: { quotaMs: 2_000, authMs: 2_000, rateLimitMs: 1_000, transientMs: 1_000, providerMs: 2_000 },
+    })
+    const { user, gateway } = setup(config)
+    const models: string[] = []
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      calls += 1
+      models.push(request(init).model)
+      if (calls <= 2) return quotaError()
+      return success('Gamma 完成')
+    }))
+    const result = await gateway.complete(completeInput(user.id))
+    expect(models).toEqual(['m1', 'beta-m1', 'star-model'])
+    expect(result.routing).toMatchObject({ providerId: 'gamma', model: 'star-model', requestedModel: 'm1' })
   })
 
   it('recovers the highest-priority key after a successful probe', async () => {
@@ -357,6 +426,37 @@ describe('AI gateway account override and status', () => {
     expect(result.routing.keyMasked).not.toContain('sk-user-private-key-999999')
   })
 
+  it('probes an account override before reusing it after cooldown', async () => {
+    const { user, gateway, advance } = setup()
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      return calls === 1 ? unauthorized() : success('服务器池接手')
+    }))
+    const preferred = {
+      baseUrl: 'https://user.example/v1',
+      model: 'user-model',
+      apiKey: 'sk-user-private-key-999999',
+      temperature: 0.3,
+      label: '账号自定义配置',
+    }
+    const first = await gateway.complete({ ...completeInput(user.id), preferred })
+    expect(first.routing.providerId).toBe('alpha')
+    advance(2_500)
+
+    const bodies: Array<{ model?: string; max_tokens?: number }> = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as { model?: string; max_tokens?: number })
+      return success('账号 Key 恢复')
+    }))
+    const second = await gateway.complete({ ...completeInput(user.id), preferred })
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).toMatchObject({ model: 'user-model', max_tokens: 16 })
+    expect(bodies[1]).toMatchObject({ model: 'user-model' })
+    expect(second.routing.providerId).toBe(`user:${user.id}`)
+    expect(second.routing.fallback).toBe(false)
+  })
+
   it('exposes masked status, events and requests for the management page', async () => {
     const { user, gateway } = setup()
     let calls = 0
@@ -378,6 +478,14 @@ describe('AI gateway account override and status', () => {
     expect(serialized).not.toContain('sk-alpha-key-111111111111')
     expect(serialized).not.toContain('sk-alpha-key-222222222222')
     expect(serialized).not.toContain('sk-beta-key-111111111111')
+  })
+
+  it('throttles repeated manual probes per user', async () => {
+    const { user, gateway } = setup()
+    vi.stubGlobal('fetch', vi.fn(async () => success('探活成功')))
+    const first = await gateway.probe(user.id)
+    expect(first.length).toBeGreaterThan(0)
+    await expect(gateway.probe(user.id)).rejects.toMatchObject({ status: 429, code: 'ai_probe_rate_limited' })
   })
 
   it('throws a clear 429 when every key is rate-limited', async () => {

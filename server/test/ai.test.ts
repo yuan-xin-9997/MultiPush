@@ -214,10 +214,18 @@ describe('Server default AI provider', () => {
     const { user, service, database, directory } = setup({
       apiKey: 'sk-server-default', baseUrl: 'https://opencode.ai/inference/go/openai/v1', model: 'deepseek-v4.1-flash', label: 'OpenCode Go',
     })
-    const settings = service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'custom-model' })
-    expect(settings).toMatchObject({ configured: true, source: 'user', baseUrl: 'https://api.example.com/v1', model: 'custom-model' })
+    const settings = service.saveSettings(user.id, { baseUrl: 'https://opencode.ai/inference/go/openai/v1', model: 'custom-model' })
+    expect(settings).toMatchObject({ configured: true, source: 'user', baseUrl: 'https://opencode.ai/inference/go/openai/v1', model: 'custom-model' })
     const record = database.getAiSettings(user.id)!
     expect(decryptPublisherSecret<string>(record.encryptedApiKey, loadPublisherKey(directory, 'ai'), user.id)).toBe('sk-server-default')
+  })
+
+  it('does not send a server key to a different endpoint when the user leaves the key blank', () => {
+    const { user, service } = setup({
+      apiKey: 'sk-server-default', baseUrl: 'https://opencode.ai/inference/go/openai/v1', model: 'deepseek-v4.1-flash', label: 'OpenCode Go',
+    })
+    expect(() => service.saveSettings(user.id, { baseUrl: 'https://evil.example/v1', model: 'custom-model' }))
+      .toThrowError(/留空仅可在接口地址与服务器默认地址一致/)
   })
 })
 

@@ -151,7 +151,15 @@ export default function AiPage() {
         setTesting(true)
         try {
           const testResult = await api.ai.testSettings()
-          toast.success(`连接成功：${testResult.model || result.settings.model}`)
+          const routing = testResult.routing
+          const target = routing ? `${routing.providerLabel} · ${routing.model}` : (testResult.model || result.settings.model)
+          if (routing?.fallback && result.settings.source === 'user') {
+            toast.warning(`连接成功，但账号 Key 不可用，已自动使用 ${routing.providerLabel} / ${routing.keyLabel}（${ROUTE_REASONS[routing.reason ?? ''] ?? routing.reason ?? '自动切换'}）`)
+          } else if (routing?.fallback) {
+            toast.warning(`连接成功（已使用备用路由 ${target} / ${routing.keyLabel}）`)
+          } else {
+            toast.success(`连接成功：${target}`)
+          }
         } finally { setTesting(false) }
       } else toast.success('大模型配置已保存')
       setSettingsOpen(false)
@@ -393,9 +401,9 @@ export default function AiPage() {
           {settings?.source === 'server' ? <p className="ai-key-note"><CheckCircle2 size={14} />当前使用服务器默认配置；保存后优先使用当前账号的配置。</p> : null}
           <label className="publish-field">接口地址<input className="input" type="url" value={form.baseUrl} placeholder="https://api.deepseek.com/v1" onChange={event => setForm(current => ({ ...current, baseUrl: event.target.value }))} /></label>
           <label className="publish-field">模型名称<input className="input" value={form.model} placeholder="deepseek-chat" onChange={event => setForm(current => ({ ...current, model: event.target.value }))} /></label>
-          <label className="publish-field">API Key<input className="input" type="password" value={form.apiKey} autoComplete="off" placeholder={settings?.source === 'server' ? '使用服务器默认 Key，留空沿用' : settings?.hasApiKey ? '已保存，留空表示不修改' : 'sk-…'} onChange={event => setForm(current => ({ ...current, apiKey: event.target.value }))} /></label>
+          <label className="publish-field">API Key<input className="input" type="password" value={form.apiKey} autoComplete="off" placeholder={settings?.source === 'server' ? '使用服务器默认 Key（接口地址须与服务器一致）' : settings?.hasApiKey ? '已保存，留空表示不修改' : 'sk-…'} onChange={event => setForm(current => ({ ...current, apiKey: event.target.value }))} /></label>
           <label className="publish-field">温度<input className="input" type="number" min={0} max={2} step={0.1} value={form.temperature} onChange={event => setForm(current => ({ ...current, temperature: Number(event.target.value) }))} /><small>0 更稳定，1 更有创造性</small></label>
-          {settings?.hasApiKey ? <p className="ai-key-note"><CheckCircle2 size={14} />{settings.source === 'server' ? 'API Key 由服务器环境变量提供，页面不会显示明文。' : 'API Key 已加密保存，页面不会显示明文。'}</p> : null}
+          {settings?.hasApiKey ? <p className="ai-key-note"><CheckCircle2 size={14} />{settings.source === 'server' ? 'API Key 由服务器配置提供，页面不会显示明文；留空仅在接口地址与服务器默认一致时沿用。' : 'API Key 已加密保存，页面不会显示明文。'}</p> : null}
           {settingsError ? <p className="ai-error" role="alert">{settingsError}</p> : null}
           <div className="ai-settings-actions">
             <button type="button" className="btn" onClick={() => setSettingsOpen(false)} disabled={saving}>取消</button>

@@ -23,7 +23,6 @@ const PROVIDER_TIMEOUT_MS = 120_000
 const PROBE_TIMEOUT_MS = 30_000
 const PROBE_MAX_TOKENS = 16
 const MAX_COOLDOWN_MS = 6 * 60 * 60_000
-const RATE_LIMIT_RETRY_LIMIT = 3_000
 const DEFAULT_RATE_LIMIT_WAIT_MS = 3_000
 const PROBE_MAX_PER_TICK = 6
 
@@ -261,7 +260,8 @@ export class AiGateway {
   private readonly keyStates = new Map<string, RuntimeKey>()
   private readonly providerStates = new Map<string, RuntimeProvider>()
   private timer: NodeJS.Timeout | null = null
-  private probing = false
+  private probeInFlight = false
+  private readonly lastProbeAt = new Map<string, number>()
 
   constructor(
     private readonly database: Database,
@@ -451,11 +451,14 @@ export class AiGateway {
     const keys = [`${sourceProviderId}/${requestedModel}`, `${sourceProviderId}/*`]
     if (sourceProviderId.startsWith('user:')) keys.push(`user/${requestedModel}`, 'user/*')
     keys.push(`*/${requestedModel}`, '*/*')
-    const targets = keys.map(key => map[key]).find(Boolean)
-    if (typeof targets === 'string' && targets) return { model: targets, via: 'map' }
-    if (targets && typeof targets === 'object') {
-      const mapped = targets[target.id] || targets['*']
-      if (mapped) return { model: mapped, via: 'map' }
+    for (const key of keys) {
+      const targets = map[key]
+      if (!targets) continue
+      if (typeof targets === 'string' && targets) return { model: targets, via: 'map' }
+      if (targets && typeof targets === 'object') {
+        const mapped = targets[target.id] || targets['*']
+        if (mapped) return { model: mapped, via: 'map' }
+      }
     }
     const family = modelFamily(requestedModel)
     if (family) {
@@ -548,13 +551,11 @@ export class AiGateway {
     if (failure.kind === 'quota') {
       runtime.state = 'exhausted'
       runtime.quotaFailures += 1
-      const backoff = Math.min(this.cooldowns.quotaMs * 2 ** Math.min(runtime.quotaFailures - 1, 6), MAX_COOLDOWN_MS)
-      runtime.cooldownUntil = now + backoff
+      runtime.cooldownUntil = now + Math.min(this.cooldowns.quotaMs, MAX_COOLDOWN_MS)
     } else if (failure.kind === 'auth') {
       runtime.state = 'invalid'
       runtime.authFailures += 1
-      const backoff = Math.min(this.cooldowns.authMs * 2 ** Math.min(runtime.authFailures - 1, 6), MAX_COOLDOWN_MS)
-      runtime.cooldownUntil = now + backoff
+      runtime.cooldownUntil = now + Math.min(this.cooldowns.authMs, MAX_COOLDOWN_MS)
     } else if (failure.kind === 'rate_limit') {
       runtime.state = 'cooling'
       runtime.rateLimits += 1
@@ -823,8 +824,9 @@ export class AiGateway {
     failures.push(failure)
     const eventInput = { userId: input.userId, sessionId: input.sessionId, preferred: input.preferred }
     if (failure.kind === 'bad_request') {
-      // The model or request is rejected as a whole: skip the rest of this provider.
-      this.noteProviderFailure(candidate.provider, failure, eventInput, { immediate: true })
+      // A 400/404/422 can be caused by one user's request (too large, a bad
+      // parameter) or by a model id. Skip this provider for the current
+      // request, but never trip the shared provider circuit breaker for it.
     } else if (failure.kind === 'transient') {
       this.coolKey(candidate.provider, candidate.key, failure, eventInput)
       this.noteProviderFailure(candidate.provider, failure, eventInput)
@@ -878,11 +880,44 @@ export class AiGateway {
     return { ...result, routing: { ...result.routing, fallback: true, reason } }
   }
 
+  /**
+   * The account override lives in `ai_settings`, so the background prober
+   * cannot enumerate it without decrypting every user's key. Instead, when its
+   * cooldown has elapsed, do one minimal probe before reusing it. This keeps
+   * the account key on the same recovery semantics as the server pool without
+   * touching other users' credentials.
+   */
+  private async probePreferredIfDue(chain: ChainProvider[], input: GatewayCompletionInput): Promise<void> {
+    const provider = chain[0]
+    if (!provider || provider.source !== 'user') return
+    const key = provider.keys[0]
+    if (!key) return
+    const state = this.keyState(provider.id, key.id)
+    const providerState = this.providerState(provider.id)
+    const providerDue = providerState.state !== 'available' && !this.isCooling(providerState.cooldownUntil)
+    if (state.state === 'available' && !providerDue) return
+    if (this.isCooling(state.cooldownUntil)) return
+    const candidate: Candidate = { provider, key, model: provider.defaultModel }
+    const probeInput = this.probeInput(input.userId, input.preferred)
+    const outcome = await this.callCandidate(candidate, probeInput, PROBE_TIMEOUT_MS)
+    if (outcome.ok) {
+      this.markSuccess(candidate, outcome, probeInput)
+      return
+    }
+    const failure = { ...outcome.failure, message: this.redact(outcome.failure.message, input.preferred) }
+    const eventInput = { userId: input.userId, sessionId: input.sessionId, preferred: input.preferred }
+    this.coolKey(provider, key, failure, eventInput)
+    if (this.allKeysUnusable(provider)) {
+      this.coolProvider(provider, 'keys_unavailable', '该提供商的所有 Key 均在冷却或不可用', eventInput)
+    }
+  }
+
   async complete(input: GatewayCompletionInput): Promise<GatewayCompletionResult> {
     const chain = this.buildChain(input.userId, input.preferred)
     if (!chain.length) throw new ApiError(409, 'ai_not_configured', '请先在 AI 创作页配置大模型接口和 API Key')
     const requestedModel = input.preferred?.model || chain[0].defaultModel
     const sourceProviderId = chain[0].id
+    await this.probePreferredIfDue(chain, input)
     const failures: Failure[] = []
     const rateLimited: Candidate[] = []
     let previous: AttemptRef | null = null
@@ -927,16 +962,25 @@ export class AiGateway {
       }
     }
 
-    // Rate limits are temporary: wait briefly and retry the affected keys once.
+    // Rate limits are temporary, but never hammer a key before its own
+    // Retry-After/cooldown elapses. Retry only candidates that become usable
+    // within the configured short wait; longer cooldowns are left for the next
+    // request or the background prober.
     if (rateLimited.length) {
-      const waits = rateLimited
-        .map(candidate => {
+      const retryable = rateLimited.filter((candidate) => {
+        const state = this.keyState(candidate.provider.id, candidate.key.id)
+        const remaining = state.cooldownUntil ? Math.max(0, state.cooldownUntil - this.now()) : 0
+        return remaining <= this.rateLimitWaitMs
+      })
+      if (retryable.length) {
+        const wait = Math.max(0, ...retryable.map((candidate) => {
           const state = this.keyState(candidate.provider.id, candidate.key.id)
-          return state.cooldownUntil ? Math.max(0, state.cooldownUntil - this.now()) : this.cooldowns.rateLimitMs
-        })
-      const wait = Math.min(Math.max(...waits, 0), this.rateLimitWaitMs, RATE_LIMIT_RETRY_LIMIT)
-      if (wait > 0) await delay(wait)
-      for (const candidate of rateLimited) {
+          return state.cooldownUntil ? state.cooldownUntil - this.now() : 0
+        }))
+        if (wait > 0) await delay(wait)
+      }
+      for (const candidate of retryable) {
+        if (!this.keyUsable(candidate.provider.id, candidate.key.id)) continue
         if (!this.providerUsable(candidate.provider.id) && this.providerState(candidate.provider.id).reason !== 'keys_unavailable') continue
         const current = this.attemptRef(candidate)
         if (previous && (previous.providerId !== current.providerId || previous.keyId !== current.keyId)) {
@@ -1048,56 +1092,68 @@ export class AiGateway {
 
   /** Explicit connectivity test: one minimal request per key, bypassing cooldown. */
   async probe(userId: string, preferred?: PreferredAiProvider | null, providerId?: string): Promise<AiProbeResult[]> {
-    const chain = this.chainWithPreferred(userId, preferred).filter(provider => !providerId || provider.id === providerId)
-    const results: AiProbeResult[] = []
-    for (const provider of chain) {
-      let providerSucceeded = false
-      for (const key of provider.keys) {
-        const candidate: Candidate = { provider, key, model: provider.defaultModel }
-        const input = this.probeInput(userId, preferred)
-        const outcome = await this.callCandidate(candidate, input, PROBE_TIMEOUT_MS)
-        if (outcome.ok) {
-          this.markSuccess(candidate, outcome, input)
-          providerSucceeded = true
-          results.push({
-            providerId: provider.id,
-            providerLabel: provider.label,
-            keyId: key.id,
-            keyLabel: key.label,
-            maskedKey: key.masked,
-            model: provider.defaultModel,
-            ok: true,
-            message: outcome.content ? `连接成功：${clampText(outcome.content, 120)}` : '连接成功',
-            latencyMs: outcome.durationMs,
-          })
-        } else {
-          const failure = { ...outcome.failure, message: this.redact(outcome.failure.message, preferred) }
-          this.coolKey(provider, key, failure, { userId, sessionId: 'probe', preferred })
-          results.push({
-            providerId: provider.id,
-            providerLabel: provider.label,
-            keyId: key.id,
-            keyLabel: key.label,
-            maskedKey: key.masked,
-            model: provider.defaultModel,
-            ok: false,
-            message: failure.message,
-            latencyMs: outcome.durationMs,
-          })
+    if (this.probeInFlight) throw new ApiError(409, 'ai_probe_busy', '已有探活任务正在执行，请稍后重试')
+    const now = this.now()
+    const throttleKey = userId || 'anonymous'
+    if (now - (this.lastProbeAt.get(throttleKey) ?? 0) < 5_000) {
+      throw new ApiError(429, 'ai_probe_rate_limited', '探活过于频繁，请 5 秒后再试')
+    }
+    this.lastProbeAt.set(throttleKey, now)
+    this.probeInFlight = true
+    try {
+      const chain = this.chainWithPreferred(userId, preferred).filter(provider => !providerId || provider.id === providerId)
+      const results: AiProbeResult[] = []
+      for (const provider of chain) {
+        let providerSucceeded = false
+        for (const key of provider.keys) {
+          const candidate: Candidate = { provider, key, model: provider.defaultModel }
+          const input = this.probeInput(userId, preferred)
+          const outcome = await this.callCandidate(candidate, input, PROBE_TIMEOUT_MS)
+          if (outcome.ok) {
+            this.markSuccess(candidate, outcome, input)
+            providerSucceeded = true
+            results.push({
+              providerId: provider.id,
+              providerLabel: provider.label,
+              keyId: key.id,
+              keyLabel: key.label,
+              maskedKey: key.masked,
+              model: provider.defaultModel,
+              ok: true,
+              message: outcome.content ? `连接成功：${clampText(outcome.content, 120)}` : '连接成功',
+              latencyMs: outcome.durationMs,
+            })
+          } else {
+            const failure = { ...outcome.failure, message: this.redact(outcome.failure.message, preferred) }
+            this.coolKey(provider, key, failure, { userId, sessionId: 'probe', preferred })
+            results.push({
+              providerId: provider.id,
+              providerLabel: provider.label,
+              keyId: key.id,
+              keyLabel: key.label,
+              maskedKey: key.masked,
+              model: provider.defaultModel,
+              ok: false,
+              message: failure.message,
+              latencyMs: outcome.durationMs,
+            })
+          }
+        }
+        if (!providerSucceeded) {
+          const failure: Failure = { kind: 'transient', code: 'provider_probe_failed', message: '该提供商的所有 Key 探活失败', httpStatus: null, retryAfterMs: null }
+          this.coolProvider(provider, 'probe_failed', failure.message, { userId, sessionId: 'probe', preferred })
         }
       }
-      if (!providerSucceeded) {
-        const failure: Failure = { kind: 'transient', code: 'provider_probe_failed', message: '该提供商的所有 Key 探活失败', httpStatus: null, retryAfterMs: null }
-        this.coolProvider(provider, 'probe_failed', failure.message, { userId, sessionId: 'probe', preferred })
-      }
+      return results
+    } finally {
+      this.probeInFlight = false
     }
-    return results
   }
 
   /** Probe keys whose cooldown expired; used by the periodic timer. */
   private async probeDue(): Promise<void> {
-    if (this.probing || !this.config) return
-    this.probing = true
+    if (this.probeInFlight || !this.config) return
+    this.probeInFlight = true
     try {
       const now = this.now()
       const due: Candidate[] = []
@@ -1125,7 +1181,7 @@ export class AiGateway {
         }
       }
     } finally {
-      this.probing = false
+      this.probeInFlight = false
     }
   }
 
@@ -1148,10 +1204,13 @@ export class AiGateway {
     }
   }
 
+  get effectiveProbeIntervalMs(): number {
+    return Math.max(15_000, this.probeIntervalMs)
+  }
+
   startProber(): void {
     if (this.timer || !this.config) return
-    const interval = Math.max(15_000, Math.min(this.probeIntervalMs, 60_000))
-    this.timer = setInterval(() => { void this.probeDue() }, interval)
+    this.timer = setInterval(() => { void this.probeDue() }, this.effectiveProbeIntervalMs)
     this.timer.unref?.()
   }
 
