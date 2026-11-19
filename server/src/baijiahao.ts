@@ -1,15 +1,29 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { load } from 'cheerio'
 import type { BaijiahaoAccount, BaijiahaoLogin, BaijiahaoPublication, BaijiahaoPublishInput, BaijiahaoResolveInput } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
-import type { BaijiahaoArticle, BaijiahaoDriver, BaijiahaoIdentity, BaijiahaoLoginAttempt } from './baijiahao-browser'
+import { downloadPublisherImage, publisherImage, type PublisherImage } from './publisher-image'
+import { UPLOAD_FILENAME_PATTERN } from './upload'
+import { isBaijiahaoImageSrc, type BaijiahaoArticle, type BaijiahaoDriver, type BaijiahaoIdentity, type BaijiahaoLoginAttempt } from './baijiahao-browser'
 
 const TTL = 5 * 60_000
 const now = () => new Date().toISOString()
 type LoginEntry = { userId: string; value: BaijiahaoLogin; attempt?: BaijiahaoLoginAttempt; timer: ReturnType<typeof setTimeout>; preparing?: Promise<void>; polling?: Promise<BaijiahaoLogin> }
+/** The article handed to the driver after the service layer prepared images. */
+type PreparedBaijiahaoArticle = BaijiahaoArticle & {
+  /** Body image srcs that still need to be downloaded (external or data URLs). */
+  external: string[]
+  /** Cover src that still needs to be downloaded. */
+  coverPending: string | null
+}
+
+/** Placeholder that keeps document order in the images map until the download replaces it. */
+const PENDING_DOWNLOAD: PublisherImage = { name: 'pending', mimeType: 'application/octet-stream', buffer: Buffer.alloc(0) }
 
 export function baijiahaoArticleUrl(remoteId: string): string { return `https://baijiahao.baidu.com/s?id=${remoteId}` }
 
@@ -158,7 +172,47 @@ export class BaijiahaoService {
     } finally { this.active.delete(userId) }
   }
 
-  private async article(userId: string, input: BaijiahaoPublishInput): Promise<BaijiahaoArticle> {
+  /** Reads one of the user's uploaded image files, validating type and size. */
+  private async mediaImage(userId: string, mediaId: string): Promise<PublisherImage> {
+    const media = this.database.getMedia(userId, mediaId)
+    if (!media || !UPLOAD_FILENAME_PATTERN.test(media.filename)) throw notFound('图片不存在或无权访问，请重新上传')
+    if (media.kind !== 'image' || !['image/png', 'image/jpeg', 'image/gif'].includes(media.mimeType) || media.size > 10 * 1024 * 1024) {
+      throw new ApiError(400, 'baijiahao_image_invalid', '百家号图片请使用 10 MB 以内的 JPG、PNG 或 GIF 格式')
+    }
+    try {
+      return { ...publisherImage(await readFile(path.join(this.config.uploadsDir, media.filename))), name: media.filename }
+    } catch {
+      throw new ApiError(400, 'baijiahao_image_invalid', '图片文件丢失、格式无效或超过 10 MB，请重新上传')
+    }
+  }
+
+  /** Resolves the article cover from `content.coverImage`, falling back to the first body image. */
+  private async coverFrom(src: string, userId: string, baseUrl?: string): Promise<{ cover: PublisherImage | null; coverPending: string | null }> {
+    if (!src) return { cover: null, coverPending: null }
+    let url: URL
+    try { url = new URL(src, 'https://multipush.invalid') } catch { throw new ApiError(400, 'baijiahao_cover_invalid', '封面图片地址无效，请重新设置封面') }
+    const origin = this.config.publicBaseUrl || baseUrl
+    const owned = url.origin === 'https://multipush.invalid' || !!origin && url.origin === new URL(origin).origin
+    if (owned && url.pathname.startsWith('/uploads/')) {
+      const filename = url.pathname.slice('/uploads/'.length)
+      if (!UPLOAD_FILENAME_PATTERN.test(filename)) throw notFound('封面图片路径无效')
+      const media = this.database.getMediaByFilename(userId, filename)
+      if (!media) throw notFound('封面图片不存在或无权访问，请重新设置封面')
+      return { cover: await this.mediaImage(userId, media.id), coverPending: null }
+    }
+    if (url.protocol === 'data:' || ['http:', 'https:'].includes(url.protocol)) return { cover: null, coverPending: src }
+    throw new ApiError(400, 'baijiahao_cover_invalid', '封面图片地址无效，请重新设置封面')
+  }
+
+  /** Validates the 5 MB cover limit enforced by the Baijiahao cover dialog. */
+  private coverChecked(cover: PublisherImage | null): PublisherImage | null {
+    if (cover && cover.buffer.length > 5 * 1024 * 1024) {
+      throw new ApiError(400, 'baijiahao_cover_size', '百家号封面不能超过 5 MB，请更换封面图片')
+    }
+    return cover
+  }
+
+  private async article(userId: string, input: BaijiahaoPublishInput, baseUrl?: string): Promise<PreparedBaijiahaoArticle> {
     const record = this.database.getRender(userId, input.renderId), render = record?.results.find(result => result.platform === 'baijiahao')
     if (!record || !render) throw notFound('百家号排版记录不存在，请先生成百家号排版')
     const content = this.database.getContentDetail(userId, record.contentId)
@@ -170,7 +224,59 @@ export class BaijiahaoService {
     if (Buffer.byteLength(render.html) > 1024 * 1024) throw new ApiError(400, 'baijiahao_body_size', '正文 HTML 不能超过 1 MB')
     const $ = load(render.html, null, false)
     if ($('video,audio,iframe,svg').length || render.videos.length) throw new ApiError(400, 'baijiahao_media_unsupported', '百家号发布支持图文，请先移除视频、音频、嵌入内容或 SVG')
-    return { title, html: render.html, text: render.text, mode: input.mode === 'draft' ? 'draft' : 'publish', images: [] }
+    if ($('img').length > 100) throw new ApiError(400, 'baijiahao_image_count', '百家号正文最多支持 100 张图片')
+    // Collect body images in document order: local /uploads/ files resolve
+    // directly, everything else (external CDN, data URLs) downloads before upload.
+    const images = new Map<string, PublisherImage>(), external: string[] = []
+    let firstImageSrc: string | null = null
+    for (const node of $('img').toArray()) {
+      const src = $(node).attr('src') || ''
+      if (!firstImageSrc && src) firstImageSrc = src
+      if (!src || images.has(src) || external.includes(src) || isBaijiahaoImageSrc(src)) continue
+      let url: URL
+      try { url = new URL(src, 'https://multipush.invalid') } catch { throw new ApiError(400, 'baijiahao_image_invalid', '正文包含无效图片地址，请重新上传图片') }
+      const origin = this.config.publicBaseUrl || baseUrl
+      const owned = url.origin === 'https://multipush.invalid' || !!origin && url.origin === new URL(origin).origin
+      if (owned && url.pathname.startsWith('/uploads/')) {
+        const filename = url.pathname.slice('/uploads/'.length)
+        if (!UPLOAD_FILENAME_PATTERN.test(filename)) throw notFound('正文图片路径无效')
+        const media = this.database.getMediaByFilename(userId, filename)
+        if (!media) throw notFound('正文图片不存在或无权访问，请在编辑器重新上传')
+        images.set(src, await this.mediaImage(userId, media.id))
+      } else if (url.protocol === 'data:' || ['http:', 'https:'].includes(url.protocol)) {
+        // Reserve the map slot now so the upload order follows the document;
+        // run() replaces the placeholder with the downloaded bytes.
+        external.push(src)
+        images.set(src, PENDING_DOWNLOAD)
+      } else {
+        throw new ApiError(400, 'baijiahao_image_invalid', '正文包含无效图片地址，请重新上传图片')
+      }
+    }
+    // Cover priority: content cover → first body image. Baijiahao refuses to
+    // publish without one, so publish mode fails loudly when neither exists.
+    // Drafts save without a cover (the platform allows that), so cover work is
+    // skipped entirely in draft mode.
+    const mode = input.mode === 'draft' ? 'draft' : 'publish'
+    let cover: PublisherImage | null = null, coverPending: string | null = null
+    if (mode === 'publish') {
+      const coverSrc = this.coverSource(content.coverImage, baseUrl) || firstImageSrc
+      const resolved = coverSrc ? await this.coverFrom(coverSrc, userId, baseUrl) : { cover: null, coverPending: null }
+      if (!resolved.cover && !resolved.coverPending) {
+        throw new ApiError(409, 'baijiahao_cover_required', '百家号发布必须设置封面：请先在原文中设置封面，或在正文里插入图片')
+      }
+      cover = this.coverChecked(resolved.cover)
+      coverPending = resolved.coverPending
+    }
+    return { title, html: render.html, text: render.text, mode, images, cover, coverPending, external }
+  }
+
+  /** Cover candidates follow the same URL forms as body images. */
+  private coverSource(coverImage: string | null | undefined, baseUrl?: string): string {
+    const raw = (coverImage ?? '').trim()
+    if (!raw || raw.startsWith('#')) return ''
+    if (/^data:/i.test(raw) || /^https?:\/\//i.test(raw)) return raw
+    if (!baseUrl) return raw
+    try { return new URL(raw, `${baseUrl.replace(/\/+$/, '')}/`).href } catch { return raw }
   }
 
   list(userId: string): BaijiahaoPublication[] { return this.database.listBaijiahaoPublications(userId) }
@@ -230,8 +336,12 @@ export class BaijiahaoService {
       if (this.database.hasUncertainBaijiahaoPublication(userId)) throw new ApiError(409, 'baijiahao_result_uncertain', '请先核实所有结果待确认的头条任务，再提交新的发布')
       const checked = await this.driver.checkSession(this.state(userId))
       this.save(userId, checked.state, checked.identity)
-      const article = await this.article(userId, input)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: article.mode }))
+      const article = await this.article(userId, input, baseUrl)
+      // The idempotency key covers the cover file and every body image buffer so
+      // re-submitting the same article cannot re-upload or re-publish it.
+      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: article.mode, external: article.external, coverPending: article.coverPending }))
+      if (article.cover) hash.update(article.cover.buffer)
+      for (const [src, image] of article.images) hash.update(src).update(image.buffer)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findBaijiahaoPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
       const publication = previous ?? this.database.createBaijiahaoPublication(userId, { renderId: input.renderId, title: article.title, mode: article.mode, idempotencyKey })
@@ -252,8 +362,21 @@ export class BaijiahaoService {
     if (account && error instanceof ApiError && error.code === 'baijiahao_session_expired') this.database.saveBaijiahaoAccount(userId, { ...account, status: 'expired', checkedAt: now() })
   }
 
-  private async run(userId: string, id: string, state: PublisherStorageState, article: BaijiahaoArticle, identity: BaijiahaoIdentity): Promise<void> {
+  private async run(userId: string, id: string, state: PublisherStorageState, article: PreparedBaijiahaoArticle, identity: BaijiahaoIdentity): Promise<void> {
     try {
+      // Download remaining body images first so a broken link fails the task
+      // cleanly instead of submitting an article without its images.
+      for (const [index, src] of article.external.entries()) {
+        this.database.updateBaijiahaoPublication(userId, id, { status: 'running', message: `正在读取正文图片 ${index + 1}/${article.external.length}，随后上传到百家号图床` })
+        article.images.set(src, await downloadPublisherImage(src, 'baijiahao'))
+      }
+      if (article.mode === 'publish' && !article.cover && article.coverPending) {
+        this.database.updateBaijiahaoPublication(userId, id, { status: 'running', message: '正在读取百家号封面图片' })
+        // A cover that reuses the first body image is already in the map.
+        article.cover = article.images.get(article.coverPending) ?? await downloadPublisherImage(article.coverPending, 'baijiahao')
+        article.coverPending = null
+        this.coverChecked(article.cover)
+      }
       const result = await this.driver.publish(state, article, progress => { this.database.updateBaijiahaoPublication(userId, id, progress) })
       this.save(userId, result.state, identity)
       this.database.updateBaijiahaoPublication(userId, id, { status: result.status, message: result.message, url: result.url, remoteId: result.remoteId })

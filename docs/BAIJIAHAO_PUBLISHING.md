@@ -13,10 +13,10 @@
 
 ## 草稿
 
-发布页支持「保存草稿」：在百家号编辑器填写标题/正文后点击平台「存草稿」按钮，成功时记录状态 `draft`，不公开发布。草稿按钮依赖平台当前页面文案；找不到按钮或无法确认成功时会停止并提示到百家号草稿箱核对。
+发布页支持「保存草稿」：在百家号编辑器填写标题/正文并上传图片后点击平台「存草稿」按钮（捕获 `POST /pcui/article/save`），成功时记录状态 `draft`，不公开发布。草稿不需要封面（平台允许草稿无封面），但正文图片同样会先上传到百家号图床。找不到按钮或无法确认成功时会停止并提示到百家号草稿箱核对。
 
 
-状态：渲染、扫码登录和发布页面已实现，并通过模拟测试与页面回归；百家号登录页二维码、二维码接口与登录态 Cookie 已用本机无头 Chrome 实测。正式文章发布尚未用真实百家号账号完成端到端验证（当前环境没有可用百家号账号）。
+状态：渲染、扫码登录、正文图片/封面上传与发布页面已实现，并通过模拟测试与页面回归；2026-11-19 已用真实百家号账号完成端到端验证（含图片链路验证文章：正文图片与图注在公开页正常显示）。
 
 ## 渲染
 
@@ -45,17 +45,45 @@
 
 1. 在渲染工作台生成百家号排版；
 2. 发布管理 → 百家号，选择排版；
-3. 点击「发布到百家号」并确认。
+3. 点击「发布到百家号」并确认（也可选择「保存草稿」）。
 
 发布使用百家号网页编辑器：
 
 - 打开 `https://baijiahao.baidu.com/builder/rc/edit?type=news`；
 - 标题写入 Lexical 编辑器（`[data-testid="news-title-input"] [contenteditable]`），写入后回读校验；
 - 正文写入 UEditor：优先调用页面内的 `window.editor.setContent(html)`，失败时在 `#ueditor_0` 内写入 HTML 并派发 `input/change`，最后回读校验；
-- 点击文本严格等于「发布」的按钮（避免命中「定时发布」），必要时确认弹窗；
-- 捕获 `POST /pcui/article/publish`，只有 `errno=0` 且返回可识别文章编号才标记成功；
+- 点击 `button[data-testid="publish-btn"]`（回退到文本严格等于「发布」的按钮，避免命中「定时发布」），必要时确认弹窗；
+- 捕获 `POST /pcui/article/publish`，只有 `errno=0` 且返回可识别文章编号才标记成功（编号优先取 `ret.article_id` / `ret.id`，`ret.url` 是预览链接不采信）；
 - 结果链接形如 `https://baijiahao.baidu.com/s?id=文章编号`；
 - 提交后响应不明确、超时或服务重启时标记「结果待核实」，不自动重发。
+
+### 正文图片自动上传到百家号图床
+
+2026-11 起正文图片不再依赖编辑器抓取外链（UEditor 的 `catchremoteimage` 会把图片替换成占位 GIF `df3e567d6f16d040326c7a0ea29a4f41.gif`，已禁用），流程改为：
+
+1. **收集**：service 层从渲染 HTML 按文档顺序提取所有唯一 `<img src>`（`srcset`/`data-src` 丢弃），相对地址按站点 origin 解析；`/uploads/` 本站图片直接读文件，其他 HTTP(S)/data URL 在后台任务中下载（`downloadPublisherImage`，仅公网地址 + MIME/魔数校验）；超过 100 张或格式不支持（仅 JPG/PNG/GIF，单张 ≤10 MB）会明确报错；
+2. **上传**：driver 调用编辑器自身使用的真实接口 `POST https://baijiahao.baidu.com/materialui/picture/uploadProxy`（multipart 字段名 `media`，带编辑器 Referer/Origin），按原文档顺序逐张上传，取响应 `ret.https_url`（`https://baijiahao.baidu.com/bjh/picproxy?param=…`）；
+3. **改写**：把渲染 HTML 的 `<figure><img><figcaption>` 重写成编辑器自身的结构——`<p class="bjh-image-container" data-bjh-caption-id="cap-mp-N"><img src="图床地址" data-bjh-origin-src="…" data-bjh-type="IMG" data-w data-h></p>`，配 `<p class="bjh-image-caption ue_t" data-bjh-caption-for="cap-mp-N">图注</p>`；图注 ≤18 字用原生图注，超过 18 字保留为居中灰色段落（百家号图注有 18 字上限，超长会丢字，所以不截断）；`alt`、`width`、`height` 原样保留；
+4. **校验**：setContent 后读取 `#ueditor_0` 内 `<img>`，数量必须与预期一致、每个 src 必须是百家号域名（`baidu.com`/`bdstatic.com`/`bdimg.com`/`bcebos.com`/`baidubce.com`），出现占位 GIF 或外链立即报 `baijiahao_image_upload_failed` 终止，不会带占位图发布；
+5. **回读**：发布响应 `errno=0` 后再拉一次公开文章页，统计百家号 CDN 图片数量；一张都没有时标记「结果待核实」，部分缺失时在成功消息里提示人工复核。
+
+幂等键包含封面文件与全部正文图片的字节哈希，重复提交同一篇文章不会重复上传/发布。
+
+### 封面自动设置
+
+百家号发布必须设置封面（「设置封面」为必填项），系统按 `原文封面（content.coverImage）→ 第一张正文图` 的顺序取封面：
+
+- 打开编辑器下方「选择封面」；
+- 上传到弹窗内的 `input[name="media"][type="file"][accept="image/*"]`（平台封面限制 5 MB，超限报 `baijiahao_cover_size`）；
+- 等待上传完成后点击文本以「确定」开头的按钮（实际是 `确定 (1)`，用 `/^确定/` 正则匹配，不用精确文本）；
+- 确认后等待弹窗关闭再发布；
+- 没有任何可用封面时发布模式直接报 `baijiahao_cover_required`，不会发布无封面文章。
+
+保存草稿不设置封面（平台允许草稿无封面），正文图片仍会全部上传。
+
+### 运营弹窗处理
+
+百家号编辑器会延迟弹出「立即体验」等运营弹窗（`.cheetah-modal`，只有 `button[aria-label="关闭"]`），出现在标题/正文/发布按钮上方拦截点击（报 `cheetah-modal-wrap intercepts pointer events`）。`dismiss()` 在三个时点执行：打开编辑器后、标题/正文填写并校验完成后、点击发布按钮前；处理内容包括原有的「我知道了/知道了/暂不开启/关闭」文字按钮，以及 `.cheetah-modal` 的 `button[aria-label="关闭"]`（绝不点「立即体验」，也不碰带 `input[name="media"]` 的封面弹窗），关闭后等待遮罩消失才继续。
 
 结果待核实支持：
 
@@ -80,9 +108,9 @@
 
 ## 验证与限制
 
-- 单元测试覆盖百家号图文渲染、标题长度、视频拦截、站外链接降级、会话加密、幂等、待核实和重启恢复。
+- 单元测试覆盖百家号图文渲染、标题长度、视频拦截、站外链接降级、会话加密、幂等、待核实和重启恢复；`server/test/baijiahao-browser.test.ts` 覆盖图片收集顺序、figure→图床 HTML 改写、原生图注、占位 GIF 检测、上传响应解析（`ret.article_id`）、公开页图片回读和无封面报错。
 - 页面回归：先 `npm run build:web`，再运行 `node scripts/smoke-baijiahao-publish.mjs`，使用隔离 fixture 验证扫码、发布确认、失败、待核实和人工核实流程，不访问真实百家号。
-- 真实登录页、二维码接口与 `BDUSS` 登录态已用本机 Chrome 验证；正式发布需要在有百家号账号的环境中扫码后验证标题/正文填写与 `/pcui/article/publish` 响应。
-- 百家号正文是 UEditor 富文本，正文图片依赖编辑器对 `<img src>` 的处理；首次真实发布前应检查图片是否保留，必要时在编辑器手动补图。
+- 真实链路已于 2026-11-19 用真实百家号账号验证：编辑器真实接口抓包（`materialui/picture/uploadProxy`、封面弹窗 `pcui/picture/processproxy`）、setContent 图片改写、封面「确定 (1)」确认、`/pcui/article/publish` 返回 `ret.article_id`，以及公开页图片/图注渲染。
+- 百家号正文是 UEditor 富文本；正文图片必须经 `materialui/picture/uploadProxy` 上传后以 `bjh/picproxy` 地址写入，禁止外链和 `catchremoteimage`。
 - 不支持视频、动态、专栏、合集、定时发布、原创声明、首发声明和位置等高级设置。
 - 百家号网页与内部接口没有稳定性承诺，改版后可能需要更新选择器和响应解析。
