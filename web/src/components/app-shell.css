@@ -1,5 +1,6 @@
 .app-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg);
 }
 
@@ -211,6 +212,7 @@
 .app-frame {
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh;
   min-width: 0;
   flex-direction: column;
   margin-left: var(--sidebar-width);
@@ -299,5 +301,6 @@
 
   .app-main {
     min-height: calc(100vh - 56px);
+    min-height: calc(100dvh - 56px);
   }
 }

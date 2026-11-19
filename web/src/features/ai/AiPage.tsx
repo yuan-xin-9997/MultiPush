@@ -24,6 +24,9 @@ const QUICK_PROMPTS = [
   '用我上传的视频新建一个视频内容，并把文案补充好。',
 ]
 
+// 手机 / 平板等触屏输入法里 Enter 通常是换行，只有精确指针（鼠标、触控板）才用 Enter 发送。
+const ENTER_SENDS = typeof window !== 'undefined' && window.matchMedia('(pointer: fine)').matches
+
 function resultPreview(value: unknown): string {
   if (value === undefined) return ''
   try {
@@ -339,7 +342,7 @@ export default function AiPage() {
                   maxLength={20000}
                   placeholder="告诉 AI 你想写什么、发到哪里；可点击回形针上传图片、视频或文本文档作为素材…"
                   onChange={event => setInput(event.target.value)}
-                  onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }}
+                  onKeyDown={event => { if (ENTER_SENDS && event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }}
                   disabled={sending}
                 />
               </div>
