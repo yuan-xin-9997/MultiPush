@@ -39,6 +39,9 @@ import { createBaijiahaoRouter } from './routes/baijiahao'
 import { DoubanService } from './douban'
 import { PlaywrightDoubanDriver, type DoubanDriver } from './douban-browser'
 import { createDoubanRouter } from './routes/douban'
+import { CsdnService } from './csdn'
+import { PlaywrightCsdnDriver, type CsdnDriver } from './csdn-browser'
+import { createCsdnRouter } from './routes/csdn'
 import { JuejinService } from './juejin'
 import { PlaywrightJuejinDriver, type JuejinDriver } from './juejin-browser'
 import { createJuejinRouter } from './routes/juejin'
@@ -142,7 +145,7 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver, doubanDriver?: DoubanDriver, juejinDriver?: JuejinDriver, jianshuDriver?: JianshuDriver, wechatpicDriver?: WechatStickerDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver, doubanDriver?: DoubanDriver, juejinDriver?: JuejinDriver, jianshuDriver?: JianshuDriver, wechatpicDriver?: WechatStickerDriver, csdnDriver?: CsdnDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
   app.locals.wechat = wechat
@@ -162,6 +165,8 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.juejin = juejin
   const jianshu = new JianshuService(database, config, jianshuDriver ?? new PlaywrightJianshuDriver())
   app.locals.jianshu = jianshu
+  const csdn = new CsdnService(database, config, csdnDriver ?? new PlaywrightCsdnDriver())
+  app.locals.csdn = csdn
   database.clearXhsAccounts()
   const douyin = new DouyinService(database, config, douyinDriver ?? new PlaywrightDouyinDriver())
   app.locals.douyin = douyin
@@ -169,11 +174,11 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.sspai = sspai
   const blog = new BlogService(database, config, blogDriver ?? new HaloBlogDriver())
   app.locals.blog = blog
-  const batch = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao, douban, juejin, jianshu)
+  const batch = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao, douban, juejin, jianshu, csdn)
   app.locals.batch = batch
   const video = new VideoService(database, config)
   app.locals.video = video
-  const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, batch, video)
+  const ai = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, csdn, batch, video)
   app.locals.ai = ai
   const smsLogin = new SmsLoginManager({
     zhihu: { importPublisherSession: (userId, state) => zhihu.importPublisherSession(userId, state) },
@@ -214,6 +219,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/baijiahao', requireAuth, createBaijiahaoRouter(baijiahao))
   app.use('/api/douban', requireAuth, createDoubanRouter(douban))
   app.use('/api/juejin', requireAuth, createJuejinRouter(juejin))
+  app.use('/api/csdn', requireAuth, createCsdnRouter(csdn))
   app.use('/api/jianshu', requireAuth, createJianshuRouter(jianshu))
   app.use('/api/sspai', requireAuth, createSspaiRouter(sspai))
   app.use('/api/blog', requireAuth, createBlogRouter(blog))

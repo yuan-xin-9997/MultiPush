@@ -1,4 +1,4 @@
-import { AtSign, BookMarked, BookOpen, Code2, Feather, Globe2, Heart, Images, MessageCircle, Music2, Newspaper, Rss, Search } from 'lucide-react'
+import { AtSign, BookMarked, BookOpen, Code2, Feather, FileCode2, Globe2, Heart, Images, MessageCircle, Music2, Newspaper, Rss, Search } from 'lucide-react'
 import type { PlatformId } from '@shared/types'
 
 interface PlatformGlyphProps {
@@ -38,6 +38,9 @@ export default function PlatformGlyph({
   }
   if (platform === 'juejin') {
     return <Code2 size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
+  }
+  if (platform === 'csdn') {
+    return <FileCode2 size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
   }
   if (platform === 'jianshu') {
     return <Feather size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />

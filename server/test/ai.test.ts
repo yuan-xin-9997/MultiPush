@@ -11,6 +11,7 @@ import type { ToutiaoService } from '../src/toutiao'
 import type { DoubanService } from '../src/douban'
 import type { JuejinService } from '../src/juejin'
 import type { JianshuService } from '../src/jianshu'
+import type { CsdnService } from '../src/csdn'
 import type { SspaiService } from '../src/sspai'
 import type { WechatService } from '../src/wechat'
 import type { ZhihuService } from '../src/zhihu'
@@ -43,12 +44,13 @@ function setup(defaults?: { apiKey: string; baseUrl: string; model: string; labe
   const douban = { publish: vi.fn() } as unknown as DoubanService
   const juejin = { publish: vi.fn() } as unknown as JuejinService
   const jianshu = { publish: vi.fn() } as unknown as JianshuService
+  const csdn = { publish: vi.fn() } as unknown as CsdnService
   const batch = {} as BatchService
   const video = new VideoService(database, config)
-  const service = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, batch, video)
+  const service = new AiService(database, config, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, csdn, batch, video)
   const session = service.createSession(user.id)
   cleanups.push(() => { database.close(); rmSync(directory, { recursive: true, force: true }) })
-  return { directory, config, database, user, service, session, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, video }
+  return { directory, config, database, user, service, session, wechat, zhihu, sspai, blog, douyin, weibo, toutiao, douban, juejin, jianshu, csdn, video }
 }
 
 afterEach(() => {

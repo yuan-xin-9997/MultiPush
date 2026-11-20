@@ -135,6 +135,10 @@
 .jianshu-publish-preview { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
 .jianshu-publish-preview h3 { padding: 14px 16px 0; font-size: 18px; line-height: 1.5; }
 .jianshu-publish-preview iframe { display: block; width: 100%; height: 590px; border: 0; border-top: 1px solid var(--line); margin-top: 12px; background: #fff; }
+
+.csdn-publish-preview { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+.csdn-publish-preview h3 { padding: 14px 16px 0; font-size: 18px; line-height: 1.5; }
+.csdn-publish-preview iframe { display: block; width: 100%; height: 590px; border: 0; border-top: 1px solid var(--line); margin-top: 12px; background: #fff; }
 .jianshu-publish-page .publish-mode-switch { display: flex; gap: 8px; margin-top: 14px; }
 .publish-connect-form { display: flex; flex-direction: column; gap: 8px; }
 

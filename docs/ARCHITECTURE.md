@@ -20,6 +20,7 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/baijiahao 百家号扫码登录、文章发布与核实
   ├─ routes/douban    豆瓣日记扫码登录、图片转存、发布与核实
   ├─ routes/juejin    掘金扫码登录、草稿/文章发布与核实
+  ├─ routes/csdn      CSDN 扫码登录、Markdown 草稿/文章发布与核实
   ├─ routes/jianshu   简书 Cookie 连接、草稿/文章发布与核实
   ├─ routes/ai        AI 配置、会话、消息、工具调用与高可用管理入口
   ├─ routes/video     视频内容剪辑时间线与导出任务
@@ -50,6 +51,7 @@ Express (single Node process, 0.0.0.0:34080)
 | `baijiahao_*` | accounts / publications / resolutions | 百家号会话、文章发布记录与人工核实 |
 | `douban_*` | accounts / publications / resolutions | 豆瓣会话、日记发布记录与人工核实 |
 | `juejin_*` | accounts / publications / resolutions | 掘金会话、草稿/文章发布记录与人工核实 |
+| `csdn_*` | accounts / publications / resolutions | CSDN 会话、草稿/文章发布记录与人工核实 |
 | `jianshu_*` | accounts / publications / resolutions | 简书会话、草稿/文章发布记录与人工核实 |
 | `ai_settings` | user_id, encrypted_api_key, base_url, model, temperature | 每用户大模型配置；Key AES-256-GCM 加密 |
 | `ai_sessions` / `ai_messages` | id, user_id, title / session_id, role, content, tool_calls_json, tool_result_json | AI 会话、消息与工具轨迹 |

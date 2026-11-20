@@ -1,4 +1,4 @@
-// Local UI smoke for the Juejin/Jianshu draft+publish pages. No platform login.
+// Local UI smoke for the Juejin/CSDN/Jianshu draft+publish pages. No platform login.
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -46,8 +46,9 @@ try {
   const token = registration.token
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
   const created = await (await fetch(`${base}/api/contents`, { method: 'POST', headers, body: JSON.stringify({ title: '掘金简书验收', contentHtml: '<h2>小节</h2><p>正文内容</p><p><img src="/uploads/demo.png" alt="图"></p><p><em>图：说明</em></p>', contentJson: {} }) })).json()
-  const rendered = await (await fetch(`${base}/api/renders`, { method: 'POST', headers, body: JSON.stringify({ contentId: created.content.id, platforms: ['juejin', 'jianshu'], options: { authorName: '测试作者' } }) })).json()
+  const rendered = await (await fetch(`${base}/api/renders`, { method: 'POST', headers, body: JSON.stringify({ contentId: created.content.id, platforms: ['juejin', 'csdn', 'jianshu'], options: { authorName: '测试作者' } }) })).json()
   assert.ok(rendered.render.results.some((item) => item.platform === 'juejin'))
+  assert.ok(rendered.render.results.some((item) => item.platform === 'csdn'))
   assert.ok(rendered.render.results.some((item) => item.platform === 'jianshu'))
 
   browser = await chromium.launch({ executablePath: chrome, headless: true })
@@ -64,6 +65,13 @@ try {
   await page.getByRole('button', { name: '扫码连接掘金' }).waitFor()
   await page.screenshot({ path: path.join(output, 'juejin-publish-page.png'), fullPage: true })
 
+  await page.goto(`${base}/publish?platform=csdn&renderId=${encodeURIComponent(rendered.render.id)}`)
+  await page.getByRole('heading', { name: '把内容发布到 CSDN' }).waitFor()
+  await page.getByRole('button', { name: '扫码连接 CSDN' }).waitFor()
+  await page.getByRole('button', { name: '保存 CSDN 草稿' }).waitFor()
+  await page.getByRole('button', { name: '直接发布' }).waitFor()
+  await page.screenshot({ path: path.join(output, 'csdn-publish-page.png'), fullPage: true })
+
   await page.goto(`${base}/publish?platform=jianshu&renderId=${encodeURIComponent(rendered.render.id)}`)
   await page.getByRole('heading', { name: '把内容发布到简书' }).waitFor()
   await page.getByRole('button', { name: '保存草稿' }).waitFor()
@@ -74,6 +82,10 @@ try {
   await page.goto(`${base}/render?renderId=${encodeURIComponent(rendered.render.id)}`)
   await page.getByText('掘金', { exact: true }).first().waitFor()
   await page.getByRole('button', { name: '发布到掘金' }).waitFor()
+  await page.getByRole('tab', { name: 'CSDN' }).click()
+  await page.getByRole('button', { name: '发布到 CSDN' }).waitFor()
+  await page.screenshot({ path: path.join(output, 'render-page-csdn.png'), fullPage: false })
+  await page.getByRole('tab', { name: '掘金' }).click()
   await page.screenshot({ path: path.join(output, 'render-page.png'), fullPage: false })
   assert.deepEqual(errors, [], errors.join('; '))
   console.log(JSON.stringify({ ok: true, renderId: rendered.render.id, output }))

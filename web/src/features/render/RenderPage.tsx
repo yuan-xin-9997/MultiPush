@@ -89,7 +89,7 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
 
-const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog']
+const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog']
 
 const DOWNLOAD_LABELS = {
   html: 'HTML 页面',
@@ -841,9 +841,9 @@ export default function RenderPage() {
         toast.success('少数派 Markdown 已复制')
         return
       }
-      if (activeRender.platform === 'blog' || activeRender.platform === 'toutiao' || activeRender.platform === 'baijiahao' || activeRender.platform === 'douban' || activeRender.platform === 'juejin' || activeRender.platform === 'jianshu') {
+      if (activeRender.platform === 'blog' || activeRender.platform === 'toutiao' || activeRender.platform === 'baijiahao' || activeRender.platform === 'douban' || activeRender.platform === 'juejin' || activeRender.platform === 'csdn' || activeRender.platform === 'jianshu') {
         await copyText(activeRender.markdown || activeRender.text || '')
-        toast.success(activeRender.platform === 'toutiao' ? '今日头条 Markdown 已复制' : activeRender.platform === 'baijiahao' ? '百家号 Markdown 已复制' : activeRender.platform === 'douban' ? '豆瓣日记 Markdown 已复制' : activeRender.platform === 'juejin' ? '掘金 Markdown 已复制' : activeRender.platform === 'jianshu' ? '简书 Markdown 已复制' : '个人博客 Markdown 已复制')
+        toast.success(activeRender.platform === 'toutiao' ? '今日头条 Markdown 已复制' : activeRender.platform === 'baijiahao' ? '百家号 Markdown 已复制' : activeRender.platform === 'douban' ? '豆瓣日记 Markdown 已复制' : activeRender.platform === 'juejin' ? '掘金 Markdown 已复制' : activeRender.platform === 'csdn' ? 'CSDN Markdown 已复制' : activeRender.platform === 'jianshu' ? '简书 Markdown 已复制' : '个人博客 Markdown 已复制')
         return
       }
       const note = activeRender.text || activeRender.cards.flatMap((card) => card.body).join('\n')
@@ -1288,6 +1288,8 @@ export default function RenderPage() {
                               ? '豆瓣日记'
                               : activeRender.platform === 'juejin'
                                 ? '掘金技术文章'
+                                : activeRender.platform === 'csdn'
+                                  ? 'CSDN 技术博客'
                                 : activeRender.platform === 'jianshu'
                                   ? '简书文章'
                                   : activeRender.platform === 'blog'
@@ -1618,6 +1620,35 @@ export default function RenderPage() {
                       <button type="button" className="btn btn-sm btn-primary" onClick={() => void copyCurrent()}><Copy size={14} />复制 Markdown</button>
                     </div>
                   </div>
+                ) : activeRender.platform === 'csdn' ? (
+                  <div className="blog-scene csdn-scene">
+                    <div className="blog-browser-shell">
+                      <div className="blog-browser-bar">
+                        <span className="blog-brand" style={{ color: '#fc5531' }}>CSDN</span>
+                        <span className="blog-browser-url"><Globe2 size={12} />blog.csdn.net / article / details</span>
+                        <span className="blog-browser-action"><ExternalLink size={13} /></span>
+                      </div>
+                      <div className="blog-browser-scroll">
+                        <article className="blog-article">
+                          <div className="blog-article-kicker" style={{ color: '#fc5531' }}>CSDN · 技术博客</div>
+                          <h1>{activeRender.title}</h1>
+                          <div className="blog-author-row">
+                            <span className="blog-avatar" style={{ background: '#fff1ec', color: '#fc5531' }}>{authorLabel.slice(0, 1)}</span>
+                            <span><strong>{authorLabel}</strong><small>发布于 {formatDate(activeRender.generatedAt)} · {activeRender.meta.readMinutes} 分钟阅读</small></span>
+                            <span className="blog-follow">关注</span>
+                          </div>
+                          <div className="blog-body" dangerouslySetInnerHTML={{ __html: activeRender.html }} />
+                          <div className="blog-foot"><span>阅读 2.6 万</span><span>点赞 512</span><span>收藏 738</span></div>
+                        </article>
+                      </div>
+                    </div>
+                    <div className="blog-side-note">
+                      <span className="blog-side-icon" style={{ background: '#fff1ec', color: '#fc5531' }}><PlatformGlyph platform="csdn" size={18} /></span>
+                      <h3>CSDN 技术博客</h3>
+                      <p>CSDN 采用 Markdown 技术博客排版，支持标题层级、引用、代码、表格和图片；发布时可保存草稿或直接发布。</p>
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => void copyCurrent()}><Copy size={14} />复制 Markdown</button>
+                    </div>
+                  </div>
                 ) : activeRender.platform === 'jianshu' ? (
                   <div className="blog-scene jianshu-scene">
                     <div className="blog-browser-shell">
@@ -1926,6 +1957,7 @@ export default function RenderPage() {
                   {activeRender.platform === 'blog' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=blog&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到个人博客</button> : null}
                   {activeRender.platform === 'douban' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=douban&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到豆瓣日记</button> : null}
                   {activeRender.platform === 'juejin' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=juejin&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到掘金</button> : null}
+                  {activeRender.platform === 'csdn' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=csdn&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到 CSDN</button> : null}
                   {activeRender.platform === 'jianshu' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=jianshu&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到简书</button> : null}
                 </div>
                 <button
@@ -2037,12 +2069,12 @@ export default function RenderPage() {
                   </> : null}
                   {activeRender.platform === 'zhihu' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
                   {activeRender.platform === 'sspai' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
-                  {activeRender.platform === 'blog' || activeRender.platform === 'toutiao' || activeRender.platform === 'baijiahao' || activeRender.platform === 'douban' || activeRender.platform === 'juejin' || activeRender.platform === 'jianshu' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
+                  {activeRender.platform === 'blog' || activeRender.platform === 'toutiao' || activeRender.platform === 'baijiahao' || activeRender.platform === 'douban' || activeRender.platform === 'juejin' || activeRender.platform === 'csdn' || activeRender.platform === 'jianshu' ? <button className="btn btn-sm" onClick={() => void copyPart('rich')}>复制富文本</button> : null}
                   <button type="button" className="btn btn-sm" onClick={() => void copyCurrent()}>
                     <Copy size={14} />
                     {activeRender.platform === 'wechat'
                       ? '复制富文本'
-                      : activeRender.platform === 'zhihu' || activeRender.platform === 'baijiahao' || activeRender.platform === 'douban' || activeRender.platform === 'juejin' || activeRender.platform === 'jianshu'
+                      : activeRender.platform === 'zhihu' || activeRender.platform === 'baijiahao' || activeRender.platform === 'douban' || activeRender.platform === 'juejin' || activeRender.platform === 'csdn' || activeRender.platform === 'jianshu'
                         ? '复制 Markdown'
                         : activeRender.platform === 'douyin'
                           ? '复制抖音文案'

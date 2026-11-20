@@ -41,6 +41,7 @@ import type { ToutiaoService } from './toutiao'
 import type { DoubanService } from './douban'
 import type { JuejinService } from './juejin'
 import type { JianshuService } from './jianshu'
+import type { CsdnService } from './csdn'
 import type { VideoService } from './video'
 import { AiGateway, type PreferredAiProvider } from './ai-gateway'
 import { normalizeAiBaseUrl } from './ai-provider-config'
@@ -64,7 +65,7 @@ const MAX_DOCUMENT_INLINE_CHARS = 20_000
 /** Images above this size are referenced by metadata only, not sent as vision parts. */
 const MAX_VISION_IMAGE_BYTES = 6 * 1024 * 1024
 const VISION_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
-const PLATFORM_IDS = new Set<PlatformId>(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog'])
+const PLATFORM_IDS = new Set<PlatformId>(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'])
 
 type JsonObject = Record<string, unknown>
 
@@ -170,7 +171,7 @@ const SYSTEM_PROMPT = `你是 MultiPush 的 AI 创作助手。MultiPush 是一�
 - 读取用户的内容库、知识库、素材、渲染记录、平台连接状态和发布记录；
 - 新建或修改文章；管理视频内容（视频为主、带标题和正文的内容类型）；
 - 通过剪辑时间线操控视频内容：查看片段、调整顺序、修剪片段起止点（单位：秒）、增删片段，并触发服务端 ffmpeg 导出成片；
-- 为文章生成微信公众号、小红书、知乎、微博、抖音、少数派和个人博客排版；
+- 为文章生成微信公众号、小红书、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、抖音、少数派和个人博客排版；
 - 将文章保存为平台草稿或正式发布；抖音视频笔记可使用导出的成片素材（videoMediaId）发布；
 - 创建批量渲染和批量发布任务。
 
@@ -352,7 +353,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           contentId: { type: 'string' },
-          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 12 },
+          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 14 },
           options: { type: 'object', description: '渲染选项，如 authorName、includeTags、includeToc、cardStyle、themeColor' },
         },
         required: ['contentId', 'platforms'],
@@ -367,7 +368,7 @@ export const AI_TOOLS: ToolDefinition[] = [
       description: '读取渲染记录中指定平台的标题、正文、Markdown、警告等信息。',
       parameters: {
         type: 'object',
-        properties: { renderId: { type: 'string' }, platform: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog'] } },
+        properties: { renderId: { type: 'string' }, platform: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] } },
         required: ['renderId'],
         additionalProperties: false,
       },
@@ -386,7 +387,7 @@ export const AI_TOOLS: ToolDefinition[] = [
     function: {
       name: 'list_publications',
       description: '读取当前用户的发布记录和平台连接状态，可按平台过滤。',
-      parameters: { type: 'object', properties: { platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'sspai', 'blog', 'douyin', 'xiaohongshu'] } }, additionalProperties: false },
+      parameters: { type: 'object', properties: { platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'sspai', 'blog', 'douyin', 'xiaohongshu'] } }, additionalProperties: false },
     },
   },
   {
@@ -398,7 +399,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           renderId: { type: 'string' },
-          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog'] },
+          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] },
           mode: { type: 'string', enum: ['draft', 'publish'] },
           coverMediaId: { type: 'string', description: '封面素材 ID，公众号必填' },
           imageMediaIds: { type: 'array', items: { type: 'string' }, description: '抖音图文素材 ID' },
@@ -417,7 +418,7 @@ export const AI_TOOLS: ToolDefinition[] = [
       parameters: {
         type: 'object',
         properties: {
-          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'sspai', 'blog'] },
+          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'sspai', 'blog'] },
           publicationId: { type: 'string' },
         },
         required: ['platform', 'publicationId'],
@@ -434,7 +435,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           contentIds: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 30 },
-          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 12 },
+          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 14 },
           options: { type: 'object' },
         },
         required: ['contentIds', 'platforms'],
@@ -446,12 +447,12 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'batch_publish',
-      description: '创建批量发布任务。支持微信公众号（仅草稿）、知乎、少数派和个人博客。一次最多 10 篇。',
+      description: '创建批量发布任务。支持微信公众号（仅草稿）、知乎、微博、今日头条、豆瓣、掘金、CSDN、简书、少数派和个人博客。一次最多 10 篇。',
       parameters: {
         type: 'object',
         properties: {
           contentIds: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 10 },
-          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'sspai', 'blog'] },
+          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'sspai', 'blog'] },
           mode: { type: 'string', enum: ['draft', 'publish'] },
           coverMediaId: { type: 'string', description: '统一封面素材 ID，公众号必填' },
         },
@@ -488,6 +489,7 @@ export class AiService {
     private readonly douban: DoubanService,
     private readonly juejin: JuejinService,
     private readonly jianshu: JianshuService,
+    private readonly csdn: CsdnService,
     private readonly batch: BatchService,
     private readonly video: VideoService,
   ) {
@@ -900,6 +902,7 @@ export class AiService {
       douban: read(this.database.getDoubanAccount(userId)),
       juejin: read(this.database.getJuejinAccount(userId)),
       jianshu: read(this.database.getJianshuAccount(userId)),
+      csdn: read(this.database.getCsdnAccount(userId)),
       douyin: read(this.database.getDouyinAccount(userId)),
       xiaohongshu: { status: 'disabled', name: null },
     }
@@ -1161,6 +1164,7 @@ export class AiService {
       douban: this.database.listDoubanPublications(userId).map(item => ({ ...item, platform: 'douban' })),
       juejin: this.database.listJuejinPublications(userId).map(item => ({ ...item, platform: 'juejin' })),
       jianshu: this.database.listJianshuPublications(userId).map(item => ({ ...item, platform: 'jianshu' })),
+      csdn: this.database.listCsdnPublications(userId).map(item => ({ ...item, platform: 'csdn' })),
       douyin: this.database.listDouyinPublications(userId).map(item => ({ ...item, platform: 'douyin' })),
       xiaohongshu: this.database.listXhsPublications(userId).map(item => ({ ...item, platform: 'xiaohongshu' })),
     }
@@ -1202,6 +1206,7 @@ export class AiService {
     }
     if (target === 'juejin') return { publication: await this.juejin.publish(userId, { renderId, mode }) }
     if (target === 'jianshu') return { publication: await this.jianshu.publish(userId, { renderId, mode }) }
+    if (target === 'csdn') return { publication: await this.csdn.publish(userId, { renderId, mode }) }
     if (target === 'douyin') {
       const imageMediaIds = stringArrayArg(args, 'imageMediaIds')
       const videoMediaId = stringArg(args, 'videoMediaId')
@@ -1232,7 +1237,7 @@ export class AiService {
 
   private batchPublish(userId: string, args: JsonObject) {
     const target = stringArg(args, 'platform', true)!
-    if (!['wechat', 'zhihu', 'weibo', 'toutiao', 'douban', 'juejin', 'jianshu', 'sspai', 'blog'].includes(target)) throw new ApiError(400, 'ai_batch_platform', '批量发布仅支持微信公众号、知乎、微博、今日头条、豆瓣、掘金、简书、少数派和个人博客')
+    if (!['wechat', 'zhihu', 'weibo', 'toutiao', 'douban', 'juejin', 'csdn', 'jianshu', 'sspai', 'blog'].includes(target)) throw new ApiError(400, 'ai_batch_platform', '批量发布仅支持微信公众号、知乎、微博、今日头条、豆瓣、掘金、CSDN、简书、少数派和个人博客')
     const input: BatchPublishInput = {
       contentIds: stringArrayArg(args, 'contentIds', true),
       platform: target as BatchPublishInput['platform'],

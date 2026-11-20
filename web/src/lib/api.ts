@@ -52,6 +52,11 @@ import type {
   JuejinPublication,
   JuejinPublishInput,
   JuejinResolveInput,
+  CsdnAccount,
+  CsdnLogin,
+  CsdnPublication,
+  CsdnPublishInput,
+  CsdnResolveInput,
   JianshuAccount,
   JianshuConnectInput,
   JianshuPublication,
@@ -369,6 +374,15 @@ export const api = {
     listPublications: () => request<{ publications: JuejinPublication[] }>('/api/juejin/publications', { cache: 'no-store' }),
     publish: (input: JuejinPublishInput) => request<{ publication: JuejinPublication }>('/api/juejin/publications', { method: 'POST', body: JSON.stringify(input) }),
   },
+  csdn: {
+    resolve: (id: string, input: CsdnResolveInput) => request<{ publication: CsdnPublication }>(`/api/csdn/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
+    account: () => request<{ account: CsdnAccount }>('/api/csdn/account', { cache: 'no-store' }),
+    startLogin: () => request<{ login: CsdnLogin }>('/api/csdn/login', { method: 'POST' }),
+    loginStatus: (id: string) => request<{ login: CsdnLogin }>(`/api/csdn/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    disconnect: () => request<{ ok: true }>('/api/csdn/account', { method: 'DELETE' }),
+    listPublications: () => request<{ publications: CsdnPublication[] }>('/api/csdn/publications', { cache: 'no-store' }),
+    publish: (input: CsdnPublishInput) => request<{ publication: CsdnPublication }>('/api/csdn/publications', { method: 'POST', body: JSON.stringify(input) }),
+  },
   jianshu: {
     resolve: (id: string, input: JianshuResolveInput) => request<{ publication: JianshuPublication }>(`/api/jianshu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
     account: () => request<{ account: JianshuAccount }>('/api/jianshu/account', { cache: 'no-store' }),
@@ -477,7 +491,7 @@ export const api = {
 }
 
 export function isPlatformId(value: string): value is PlatformId {
-  return value === 'wechat' || value === 'wechatpic' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'toutiao' || value === 'baijiahao' || value === 'douban' || value === 'juejin' || value === 'jianshu' || value === 'douyin' || value === 'sspai' || value === 'blog'
+  return value === 'wechat' || value === 'wechatpic' || value === 'xiaohongshu' || value === 'zhihu' || value === 'weibo' || value === 'toutiao' || value === 'baijiahao' || value === 'douban' || value === 'juejin' || value === 'csdn' || value === 'jianshu' || value === 'douyin' || value === 'sspai' || value === 'blog'
 }
 
 /** Make an uploaded relative URL absolute for previews / rendering. */

@@ -14,6 +14,7 @@ import type { ToutiaoService } from '../src/toutiao'
 import type { DoubanService } from '../src/douban'
 import type { JuejinService } from '../src/juejin'
 import type { JianshuService } from '../src/jianshu'
+import type { CsdnService } from '../src/csdn'
 
 const cleanups: Array<() => Promise<void> | void> = []
 
@@ -50,7 +51,8 @@ function setup() {
   } as unknown as DoubanService
   const juejin = { publish: vi.fn() } as unknown as JuejinService
   const jianshu = { publish: vi.fn() } as unknown as JianshuService
-  const service = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao, douban, juejin, jianshu)
+  const csdn = { publish: vi.fn() } as unknown as CsdnService
+  const service = new BatchService(database, config, wechat, zhihu, sspai, blog, weibo, toutiao, douban, juejin, jianshu, csdn)
   cleanups.push(async () => { await service.close(); database.close(); rmSync(directory, { recursive: true, force: true }) })
   return { directory, config, uploadsDir: config.uploadsDir, database, user, content, service, wechat, douban }
 }

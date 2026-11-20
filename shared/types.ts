@@ -6,7 +6,7 @@
  * dependencies so it can be used in either environment.
  */
 
-export type PlatformId = 'wechat' | 'wechatpic' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'jianshu' | 'douyin' | 'sspai' | 'blog'
+export type PlatformId = 'wechat' | 'wechatpic' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'douyin' | 'sspai' | 'blog'
 
 export type ContentStatus = 'draft' | 'ready'
 
@@ -131,6 +131,17 @@ export const PLATFORMS: PlatformInfo[] = [
     softColor: '#edf4ff',
     contentTypes: ['image-text'],
     highlight: '技术文章 · Markdown · 草稿 / 发布',
+    limits: { titleMax: 100, bodyMax: 50000, imageMax: 100 },
+  },
+  {
+    id: 'csdn',
+    name: 'CSDN',
+    shortName: 'CSDN',
+    description: '生成 CSDN 技术博客排版，支持 Markdown/HTML 下载；连接 CSDN 账号后可保存草稿或发布文章。',
+    color: '#fc5531',
+    softColor: '#fff1ec',
+    contentTypes: ['image-text'],
+    highlight: '技术博客 · Markdown · 草稿 / 发布',
     limits: { titleMax: 100, bodyMax: 50000, imageMax: 100 },
   },
   {
@@ -887,6 +898,53 @@ export interface JuejinResolveInput {
   articleUrl?: string
 }
 
+export interface CsdnAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface CsdnLogin {
+  id: string
+  status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'
+  qrCode: string | null
+  message: string
+  expiresAt: string
+}
+
+export interface CsdnPublishInput {
+  renderId: string
+  mode: 'draft' | 'publish'
+  tags?: string[]
+}
+
+export interface CsdnPublication {
+  id: string
+  renderId: string
+  title: string
+  mode: 'draft' | 'publish'
+  status: 'running' | 'draft' | 'published' | 'failed' | 'uncertain'
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+  resolutions?: CsdnResolution[]
+}
+
+export interface CsdnResolution {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
+}
+
+export interface CsdnResolveInput {
+  action: CsdnResolution['action']
+  articleUrl?: string
+}
+
 export interface JianshuAccount {
   status: 'disconnected' | 'connected' | 'expired'
   name: string | null
@@ -1320,7 +1378,7 @@ export interface BatchRenderInput {
   options?: RenderOptions
 }
 
-export type BatchPublishPlatform = 'wechat' | 'zhihu' | 'weibo' | 'toutiao' | 'douban' | 'juejin' | 'jianshu' | 'sspai' | 'blog'
+export type BatchPublishPlatform = 'wechat' | 'zhihu' | 'weibo' | 'toutiao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'sspai' | 'blog'
 
 export interface BatchPublishInput {
   contentIds: string[]
@@ -1345,4 +1403,4 @@ export interface ApiErrorBody {
   issues?: Array<{ path: string; message: string }>
 }
 
-export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog']
+export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog']

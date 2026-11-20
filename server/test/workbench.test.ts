@@ -128,6 +128,15 @@ describe('render workbench', () => {
     expect(result.downloads.find((file) => file.kind === 'html')?.content).toContain('<title>知乎专属</title>')
   })
 
+  it('regenerates CSDN markdown when the article title and body are adjusted', async () => {
+    const [render] = await renderPlatforms({ ...input, platforms: ['csdn'] })
+    const result = await adjustPlatformRender(render, { title: 'CSDN 专属标题', html: '<p>新的<strong>正文</strong></p>', tags: ['新标签'] }, input.options, input.baseUrl)
+    expect(result.platform).toBe('csdn')
+    expect(result.markdown).toContain('# CSDN 专属标题')
+    expect(result.markdown).toContain('**正文**')
+    expect(result.downloads.some((file) => file.kind === 'markdown' && file.filename.endsWith('.md'))).toBe(true)
+  })
+
   it('checks the final caption including title and hashtags rather than source counts', async () => {
     const [render] = await renderPlatforms({ ...input, platforms: ['xiaohongshu'] })
     const result = await adjustPlatformRender(render, { title: '标题', body: '文'.repeat(997), tags: ['话题'] }, {}, input.baseUrl)

@@ -55,7 +55,7 @@ export default function PlatformEditor({ render, style, onClose, onSave }: Props
   const [uploading, setUploading] = useState(false)
   const changed = useRef(false)
   const cardText = useRef<HTMLTextAreaElement>(null)
-  const article = render.platform === 'wechat' || render.platform === 'zhihu' || render.platform === 'sspai' || render.platform === 'blog' || render.platform === 'toutiao' || render.platform === 'baijiahao' || render.platform === 'douban' || render.platform === 'juejin' || render.platform === 'jianshu'
+  const article = render.platform === 'wechat' || render.platform === 'zhihu' || render.platform === 'sspai' || render.platform === 'blog' || render.platform === 'toutiao' || render.platform === 'baijiahao' || render.platform === 'douban' || render.platform === 'juejin' || render.platform === 'csdn' || render.platform === 'jianshu'
   const editor = useEditor({
     extensions: [StarterKit, Image, Link.configure({ openOnClick: false }), Table, TableRow, TableCell, TableHeader,
       Underline, TextStyle, Color, Highlight.configure({ multicolor: true }), TextAlign.configure({ types: ['heading', 'paragraph'] }), TaskList, TaskItem.configure({ nested: true }), Video, Figure, FigureCaption],

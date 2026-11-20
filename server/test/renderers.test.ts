@@ -39,7 +39,7 @@ function content(overrides: Partial<ContentDetail> = {}): ContentDetail {
 
 const options: RenderOptions = { cardStyle: 'clean', includeTags: true }
 
-function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'jianshu' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
+function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
   return {
     content: content(overrides),
     platforms,
@@ -136,8 +136,8 @@ describe('renderPlatforms', () => {
     expect(result.downloads[0].filename).toContain('豆瓣')
   })
 
-  it('renders Juejin and Jianshu articles with Markdown/HTML downloads', async () => {
-    for (const platform of ['juejin', 'jianshu'] as const) {
+  it('renders Juejin, CSDN and Jianshu articles with Markdown/HTML downloads', async () => {
+    for (const platform of ['juejin', 'csdn', 'jianshu'] as const) {
       const [result] = await renderPlatforms(input([platform], {
         contentHtml: '<h2>小节</h2><p>正文</p><p><img src="/uploads/cover.png" alt="图"></p><p><em>图：说明</em></p>',
       }))
@@ -147,7 +147,7 @@ describe('renderPlatforms', () => {
       expect(result.html).toContain('<figcaption')
       expect(result.markdown).toContain('# 一次创作，多平台发布')
       expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown'])
-      expect(result.downloads[0].filename).toContain(platform === 'juejin' ? '掘金' : '简书')
+      expect(result.downloads[0].filename).toContain(platform === 'juejin' ? '掘金' : platform === 'csdn' ? 'CSDN' : '简书')
     }
   })
 

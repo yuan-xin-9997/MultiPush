@@ -21,6 +21,7 @@ import type { ToutiaoService } from './toutiao'
 import type { DoubanService } from './douban'
 import type { JuejinService } from './juejin'
 import type { JianshuService } from './jianshu'
+import type { CsdnService } from './csdn'
 
 const MAX_RENDER_ITEMS = 30
 const MAX_PUBLISH_ITEMS = 10
@@ -53,6 +54,7 @@ export class BatchService {
     private readonly douban: DoubanService,
     private readonly juejin: JuejinService,
     private readonly jianshu: JianshuService,
+    private readonly csdn: CsdnService,
   ) {}
 
   private assertIdle(userId: string): void {
@@ -99,6 +101,7 @@ export class BatchService {
     if (input.platform === 'wechat' && input.mode !== 'draft') throw new ApiError(400, 'batch_wechat_mode', '公众号批量发布仅支持保存草稿；正式发表请在发布管理中逐篇完成')
     if (input.platform === 'juejin' && !['draft', 'publish'].includes(input.mode)) throw new ApiError(400, 'batch_juejin_mode', '掘金批量发布需要选择草稿或发布模式')
     if (input.platform === 'jianshu' && !['draft', 'publish'].includes(input.mode)) throw new ApiError(400, 'batch_jianshu_mode', '简书批量发布需要选择草稿或发布模式')
+    if (input.platform === 'csdn' && !['draft', 'publish'].includes(input.mode)) throw new ApiError(400, 'batch_csdn_mode', 'CSDN 批量发布需要选择草稿或发布模式')
     if (input.platform === 'wechat' && !input.coverMediaId) {
       const missing = contentIds.filter(id => {
         const content = this.database.getContentDetail(userId, id)
@@ -314,6 +317,8 @@ export class BatchService {
         return this.juejin.publish(userId, { renderId, mode })
       case 'jianshu':
         return this.jianshu.publish(userId, { renderId, mode })
+      case 'csdn':
+        return this.csdn.publish(userId, { renderId, mode })
       default:
         throw new ApiError(400, 'batch_platform_unsupported', '该平台暂不支持批量发布')
     }
@@ -346,6 +351,7 @@ export class BatchService {
       case 'douban': return this.database.getDoubanPublication(userId, id)
       case 'juejin': return this.database.getJuejinPublication(userId, id)
       case 'jianshu': return this.database.getJianshuPublication(userId, id)
+      case 'csdn': return this.database.getCsdnPublication(userId, id)
       default: return null
     }
   }

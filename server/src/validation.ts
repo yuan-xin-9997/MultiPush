@@ -132,7 +132,7 @@ export const favoriteBodySchema = z.object({
   favorite: z.boolean(),
 })
 
-const platformSchema = z.enum(['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'jianshu', 'douyin', 'sspai', 'blog'])
+const platformSchema = z.enum(['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'])
 const mediaUrlSchema = z.string().max(2048).refine((value) => /^(https?:\/\/|\/uploads\/|data:image\/(png|jpeg|webp|gif);base64,)/i.test(value), '图片地址无效')
 export const renderPlatformParamsSchema = z.object({ id: z.string().max(100), platform: platformSchema })
 export const platformAdjustmentSchema = z.object({
@@ -167,7 +167,7 @@ export const renderRequestSchema = z.object({
   platforms: z
     .array(platformSchema)
     .min(1, '请至少选择一个平台')
-    .max(13, '最多选择十三个平台')
+    .max(14, '最多选择十四个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
 })
@@ -197,14 +197,14 @@ export const batchRenderSchema = z.object({
   platforms: z
     .array(platformSchema)
     .min(1, '请至少选择一个平台')
-    .max(13, '最多选择十三个平台')
+    .max(14, '最多选择十四个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
 }).strict()
 
 export const batchPublishSchema = z.object({
   contentIds: z.array(z.string().trim().min(1, '内容 ID 不能为空').max(100)).min(1, '请选择要批量发布的内容').max(10, '一次最多批量发布 10 篇内容'),
-  platform: z.enum(['wechat', 'zhihu', 'weibo', 'toutiao', 'douban', 'juejin', 'jianshu', 'sspai', 'blog'], { message: '该平台暂不支持批量发布' }),
+  platform: z.enum(['wechat', 'zhihu', 'weibo', 'toutiao', 'douban', 'juejin', 'csdn', 'jianshu', 'sspai', 'blog'], { message: '该平台暂不支持批量发布' }),
   mode: z.enum(['draft', 'publish']),
   coverMediaId: z.uuid().optional(),
   options: renderOptionsSchema.optional(),

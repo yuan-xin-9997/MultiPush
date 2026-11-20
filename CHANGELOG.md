@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## 2026-11-20 · CSDN 渲染与发布
+
+**改了什么**
+
+- 新增 CSDN 平台：`PlatformId`、平台信息、渲染器、预览、下载、发布管理、批量发布与 AI 工具全部接入。
+- 新增 `server/src/renderers/csdn.ts`：CSDN 风格技术博客排版（白色正文、`#fc5531` 主色、深色代码块），生成 Markdown 与 HTML 下载；标题上限 100 字，视频不进入正文并给出提醒。
+- 新增 CSDN 扫码登录：抓取 `passport.csdn.net` 官方微信登录二维码，按用户加密保存浏览器会话；通过编辑器 `getBaseInfo` 返回 401/403 判断会话失效。
+- 新增 CSDN 发布驱动 `server/src/csdn-browser.ts`：打开 `editor.csdn.net/md`，通过 `#import-markdown-file-input` 导入 Markdown、填写标题，保存草稿或打开发布设置自动添加标签后发布；回读 `saveArticle` 响应中的文章编号与公开地址，原创校验未通过、未返回编号、页面异常分别标记失败或结果待核实。
+- 新增 `server/src/csdn.ts`、`server/src/routes/csdn.ts` 与 `csdn_accounts` / `csdn_publications` / `csdn_publication_resolutions` 表；支持登录、断开、草稿/发布、发布记录、重复提交保护、重启恢复和人工核实。
+- 发布页新增 CSDN 标签页与独立页面（二维码弹窗、标签输入、草稿/发布模式、记录与核实）；渲染工作台新增 CSDN 模拟预览、「发布到 CSDN」和 Markdown/富文本复制；批量发布与 AI 工具（生成排版、发布、批量发布、账号/发布记录查询）同步支持 CSDN。
+- 新增 `CSDN_BROWSER_PATH` 配置；更新 README、架构、产品规格、桌面端、部署、视频与链接策略文档，新增 [CSDN 发布说明](docs/CSDN_PUBLISHING.md)。
+
+**验证**
+
+- `npm run typecheck`、`npm test`：server 43 个文件 / 399 项、web 2 个文件 / 20 项全部通过；`npm run build` 通过。
+- 新增 `server/test/csdn.test.ts`（7 项）覆盖会话加密与用户隔离、草稿/发布与标签、标题长度校验、结果待核实与人工核实、重启恢复、CSDN Cookie 身份解析、`saveArticle` 响应解析；`server/test/workbench.test.ts` 增加 CSDN 排版调整后 Markdown 重新生成断言。
+- 真实 Chrome 验证：CSDN 登录页二维码抓取成功（`data:image/jpeg;base64`），伪造会话被 `getBaseInfo` 401 正确识别为已失效；本地用官方编辑器实测 Markdown 导入、标题填写、保存草稿请求与发布弹窗/标签选择器。
+- `node scripts/smoke-juejin-jianshu-ui.mjs` 构建后通过：新增 CSDN 发布页和渲染页「发布到 CSDN」断言，截图输出至 `artifacts/juejin-jianshu-ui-check/`。
+- 当前环境没有 CSDN 账号，未执行真实登录后的草稿创建和公开发布；首次部署后请先用真实账号保存草稿，再测试直接发布。
+
+
 ## 2026-11-19 · AI 大模型多 Key / 多提供商高可用
 
 **改了什么**

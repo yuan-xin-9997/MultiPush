@@ -44,6 +44,8 @@ import type {
   DoubanResolution,
   JuejinPublication,
   JuejinResolution,
+  CsdnPublication,
+  CsdnResolution,
   JianshuPublication,
   JianshuResolution,
   AiMessage,
@@ -386,6 +388,13 @@ export interface CreateJuejinPublicationValues {
   renderId: string
   title: string
   mode: JuejinPublication['mode']
+  idempotencyKey: string
+}
+
+export interface CreateCsdnPublicationValues {
+  renderId: string
+  title: string
+  mode: CsdnPublication['mode']
   idempotencyKey: string
 }
 
@@ -1041,6 +1050,40 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_juejin_resolutions_publication ON juejin_publication_resolutions(publication_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS csdn_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_session TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS csdn_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('draft', 'publish')),
+        status TEXT NOT NULL CHECK (status IN ('running', 'draft', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_csdn_publications_user_created ON csdn_publications(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS csdn_publication_resolutions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL REFERENCES csdn_publications(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN ('check', 'not_published', 'published')),
+        message TEXT NOT NULL,
+        article_url TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_csdn_resolutions_publication ON csdn_publication_resolutions(publication_id, created_at DESC);
       CREATE TABLE IF NOT EXISTS jianshu_accounts (
         user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         encrypted_session TEXT NOT NULL,
@@ -1075,7 +1118,7 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_jianshu_resolutions_publication ON jianshu_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 19;
+      PRAGMA user_version = 20;
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
@@ -1108,6 +1151,8 @@ export class Database {
       ['服务已重启，请先核对掘金草稿与文章发布结果，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE jianshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
       ['服务已重启，请先核对简书草稿与文章发布结果，系统不会自动重复发布。', nowIso()])
+    this.run(`UPDATE csdn_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
+      ['服务已重启，请先核对 CSDN 草稿箱与文章发布结果，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE batch_jobs SET status = 'failed', message = ?, updated_at = ? WHERE status IN ('queued', 'running')`,
       ['服务已重启，批量任务已中断，请重新提交。', nowIso()])
     this.failRunningVideoExports()
@@ -2658,6 +2703,75 @@ export class Database {
       if (!current || !['uncertain', 'running'].includes(current.status)) return null
       this.run('INSERT INTO juejin_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
       return this.updateJuejinPublication(userId, id, values)
+    })
+  }
+
+  getCsdnAccount(userId: string): ZhihuAccountSession | null {
+    const row = this.get('SELECT * FROM csdn_accounts WHERE user_id = ?', [userId])
+    return row ? { encryptedSession: text(row.encrypted_session), accountId: text(row.account_id), name: nullableText(row.name), status: row.status === 'expired' ? 'expired' : 'connected', checkedAt: text(row.checked_at) } : null
+  }
+
+  saveCsdnAccount(userId: string, values: ZhihuAccountSession): void {
+    this.run(`INSERT INTO csdn_accounts (user_id, encrypted_session, account_id, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET encrypted_session = excluded.encrypted_session,
+      account_id = excluded.account_id, name = excluded.name, status = excluded.status, checked_at = excluded.checked_at`,
+      [userId, values.encryptedSession, values.accountId, values.name, values.status, values.checkedAt])
+  }
+
+  deleteCsdnAccount(userId: string): void { this.run('DELETE FROM csdn_accounts WHERE user_id = ?', [userId]) }
+
+  private mapCsdnPublication(row: Row): CsdnPublication {
+    const resolutions: CsdnResolution[] = this.all('SELECT * FROM csdn_publication_resolutions WHERE publication_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 10', [text(row.id), text(row.user_id)])
+      .map(r => ({ id: text(r.id), action: r.action as CsdnResolution['action'], message: text(r.message), articleUrl: nullableText(r.article_url), createdAt: text(r.created_at) }))
+    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as CsdnPublication['mode'], status: row.status as CsdnPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at), resolutions }
+  }
+
+  createCsdnPublication(userId: string, values: CreateCsdnPublicationValues): CsdnPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO csdn_publications (id, user_id, render_id, title, mode, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?) ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+      [randomUUID(), userId, values.renderId, values.title, values.mode, '正在准备 CSDN 发布', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findCsdnPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create CSDN publication')
+    return publication
+  }
+
+  getCsdnPublication(userId: string, id: string): CsdnPublication | null {
+    const row = this.get('SELECT * FROM csdn_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapCsdnPublication(row) : null
+  }
+
+  findCsdnPublication(userId: string, key: string): CsdnPublication | null {
+    const row = this.get('SELECT * FROM csdn_publications WHERE user_id = ? AND idempotency_key = ?', [userId, key])
+    return row ? this.mapCsdnPublication(row) : null
+  }
+
+  hasUncertainCsdnPublication(userId: string): boolean {
+    return !!this.get("SELECT id FROM csdn_publications WHERE user_id = ? AND status = 'uncertain' LIMIT 1", [userId])
+  }
+
+  listCsdnPublications(userId: string): CsdnPublication[] {
+    return this.all('SELECT * FROM csdn_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapCsdnPublication(row))
+  }
+
+  updateCsdnPublication(userId: string, id: string, values: Partial<Pick<CsdnPublication, 'status' | 'message' | 'url' | 'remoteId'>>): CsdnPublication | null {
+    const current = this.getCsdnPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE csdn_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getCsdnPublication(userId, id)
+  }
+
+  deleteCsdnPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM csdn_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
+  resolveCsdnPublication(userId: string, id: string, action: CsdnResolution['action'], values: Pick<CsdnPublication, 'status' | 'message' | 'url' | 'remoteId'>): CsdnPublication | null {
+    return this.transaction(() => {
+      const current = this.getCsdnPublication(userId, id)
+      if (!current || !['uncertain', 'running'].includes(current.status)) return null
+      this.run('INSERT INTO csdn_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
+      return this.updateCsdnPublication(userId, id, values)
     })
   }
 
