@@ -20,6 +20,11 @@
 - 真实 CSDN 登录态 + 生产 Chromium：关闭模板/新手指引后，Markdown 导入校验通过，标题写入正确；拦截 `saveArticle` 响应检查请求体，标题、正文尾部均在且无欢迎页残留。强制走粘贴回退时，全选替换 4881 字后同样校验通过，保存请求体完整；两次均未实际创建 CSDN 草稿。
 - 2026-11-20 两次真实 CSDN 失败（21:18、21:30）的日志与上述复现一致：导入成功但校验失败，回退点击被浮层拦截。
 
+**部署**
+
+- Jenkins 构建 #119 成功（提交 `af6bc54`），`DEPLOYED_COMMIT=af6bc54f4ed853b564306bf0085947ff056b78ce`；服务重启后 `GET /api/health` 返回 `status=ok`，`.data` 未变更。
+- 生产 `server/dist/index.js` 已包含 `markdown paste verified`、`dismissed CSDN onboarding overlay` 与知乎表格转列表的校验文案，确认部署产物为本次修复。
+
 ## 2026-11-20 · 统一设置页与可视化大模型高可用配置
 
 **改了什么**
