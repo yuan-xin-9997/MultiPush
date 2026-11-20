@@ -381,12 +381,31 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
         const currentQr = await qrImage(page, LOGIN_QR)
         if (currentQr) qrCode = currentQr.image
         const scanned = isWechatLoginScanned(text)
+        // Post-scan states: the panel distinguishes "confirm on the phone"
+        // from "choose an account" from "no account bound to this WeChat".
+        if (/没有可登录账号/.test(text)) {
+          if (lastStatus !== 'no-account') {
+            lastStatus = 'no-account'
+            console.log('[wechat] login scanned but no public account on this WeChat')
+            void this.saveLoginDiagnostics(page, 'no-account').catch(() => {})
+          }
+          return { status: 'failed', qrCode, message: '扫码成功，但这个微信没有可登录的公众号账号：请确认使用绑定了公众号的微信扫码（可在手机微信切换账号后重新扫码）' }
+        }
+        const chooseAccount = /请在微信中选择账号登录/.test(text)
         const status = scanned ? 'scanned' : 'waiting'
         if (status !== lastStatus) {
           lastStatus = status
           console.log(`[wechat] login poll status=${status} url=${page.url()}`)
+          if (scanned) void this.saveLoginDiagnostics(page, 'scanned').catch(() => {})
         }
-        return { status, qrCode, message: scanned ? '请在微信中选择公众号并确认登录' : risk ? `微信页面提示「${risk[0]}」，请稍后重试；多次出现请检查服务器网络环境` : '请使用公众号管理员微信扫码登录' }
+        return {
+          status,
+          qrCode,
+          message: scanned
+            ? chooseAccount ? '请在微信中选择要登录的公众号账号' : '请在微信中确认账号登录'
+            : risk ? `微信页面提示「${risk[0]}」，请稍后重试；多次出现请检查服务器网络环境`
+            : '请使用公众号管理员微信扫码登录',
+        }
       },
     }
   }
