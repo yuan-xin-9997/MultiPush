@@ -293,7 +293,7 @@ export async function renderPlatforms(input: RenderInput): Promise<PlatformRende
 4. 每个平台返回 `downloads`（HTML 完整文档 / Markdown / 文案），文件名安全、带平台后缀。
 5. 小红书：`previewMode='cards'`（有视频时为 `'video'`）；生成 1 张封面卡 + 若干内容卡 + 结束卡；每卡正文控制阅读量（约 120–220 字），图片分配到卡片；标题 ≤20 字（超长截断并 warning）；`text` 含标题、正文、3–6 个话题标签。
 6. 公众号：标题 ≤64 字；移动端字号 16px、行高 1.8、图片圆角、引用/代码块/表格有专属样式；`previewMode='article'`。
-7. 知乎：标题 ≤100 字；正文 16px、行高 1.8；Markdown 用 turndown（表格保留）；`previewMode='article'`。
+7. 知乎：标题 ≤100 字；正文 16px、行高 1.8；表格在知乎排版中转换为等价列表（草稿接口会丢表）；Markdown 用 turndown；`previewMode='article'`。
 8. 微博：标题 ≤64 字、正文 ≤2000 字；`previewMode='vertical'`；双井号话题 `#话题#`，最多 9 图；返回文案 TXT、图文 HTML 与 JSON 下载。
 9. 今日头条：标题 2–30 字；`previewMode='article'`；推荐流图文排版，正文 17px、行高 1.9，引用/代码/表格有专属样式；Markdown 用 turndown；返回 HTML 与 Markdown 下载。
 10. 百家号：标题 2–30 字（少于 5 字给建议）；`previewMode='article'`；百度图文排版，正文 17px、行高 1.9，引用/代码/表格有专属样式；Markdown 用 turndown；返回 HTML 与 Markdown 下载。

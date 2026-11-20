@@ -50,6 +50,31 @@ function safeFilename(value: string): string {
   return value.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'CSDN 文章'
 }
 
+/**
+ * Compare what the editor shows against the article without letting Markdown
+ * syntax decide the result. The editor keeps `#`, `|`, `**` and friends, while
+ * the imported Markdown is full of them; comparing raw strings made every
+ * import look like it failed.
+ */
+function editorProbe(value: string): string {
+  return value
+    .replace(/[\u200b\ufeff]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function csdnEditorContainsArticle(markdown: string, text: string, editorText: string): boolean {
+  const haystack = editorProbe(editorText)
+  if (!haystack) return false
+  const markdownProbe = editorProbe(markdown)
+  const probe = markdownProbe.length >= 6 ? markdownProbe : editorProbe(text)
+  if (probe.length < 6) return false
+  if (probe.length <= 120) return haystack.includes(probe)
+  // Require both ends: a partial import or a leftover title must not pass.
+  return haystack.includes(probe.slice(0, 40)) && haystack.includes(probe.slice(-40))
+}
+
 /** Read the signed-in identity from CSDN cookies. UserToken alone is not enough. */
 export function parseCsdnIdentity(cookies: Array<{ name: string; value: string }>): CsdnIdentity | null {
   const map = new Map(cookies.map(cookie => [cookie.name, cookie.value]))
@@ -226,43 +251,93 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
     } finally { await context.close().catch(() => {}) }
   }
 
+  /**
+   * CSDN opens a template-library modal and a coach-mark guide on some editor
+   * boots. Both overlay the title bar and the editor, so pointer actions time
+   * out even though the import itself succeeded. Dismiss only known onboarding
+   * overlays; the publish dialog is opened later and never touched here.
+   */
+  private async dismissEditorHints(page: Page): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let dismissed = false
+      const modal = page.locator('.modal:visible').first()
+      if (await modal.count()) {
+        const close = modal.locator('.modal__close-button[title="关闭"]').first()
+        if (await close.count() && await close.isVisible().catch(() => false)) {
+          await close.click({ timeout: 3_000 }).catch(() => {})
+          dismissed = true
+        } else {
+          await page.keyboard.press('Escape').catch(() => {})
+          dismissed = true
+        }
+      }
+      const guide = page.locator('.beginnerGuide-box:visible').first()
+      if (await guide.count()) {
+        const button = guide.getByRole('button', { name: /^(?:我知道了|知道了|跳过)$/ }).first()
+        if (await button.count()) await button.click({ timeout: 3_000 }).catch(() => {})
+        else await page.keyboard.press('Escape').catch(() => {})
+        dismissed = true
+      }
+      if (!dismissed) return
+      log('dismissed CSDN onboarding overlay')
+      await page.waitForTimeout(300)
+    }
+  }
+
   private async fillTitle(page: Page, title: string): Promise<void> {
     const display = page.locator(TITLE_DISPLAY).first()
-    if (await display.count()) await display.click().catch(() => {})
+    if (await display.count()) {
+      await display.click({ timeout: 5_000 }).catch(async () => { await display.dispatchEvent('click').catch(() => {}) })
+      await page.waitForTimeout(150)
+    }
     const input = page.locator(`${TITLE_INPUT}:visible`).first()
     if (!await input.count()) throw new ApiError(502, 'csdn_editor_unavailable', 'CSDN 编辑器没有找到标题输入框，页面可能已改版')
     await input.fill(title)
     await input.press('Enter')
     await page.waitForTimeout(300)
     const shown = (await display.innerText().catch(() => '')).trim()
-    if (shown && shown !== title) throw new ApiError(502, 'csdn_title_failed', `CSDN 标题没有正确写入（当前为“${shown.slice(0, 30)}”），请稍后重试`)
+    if (shown !== title) throw new ApiError(502, 'csdn_title_failed', `CSDN 标题没有正确写入（当前为“${shown.slice(0, 30)}”），请稍后重试`)
   }
 
   private async importMarkdown(page: Page, article: CsdnArticle): Promise<void> {
-    const normalized = article.markdown.replace(/[#>*_`\-[\]()|]/g, ' ').replace(/\s+/g, ' ').trim()
-    const marker = (normalized.length >= 6 ? normalized : article.text.replace(/\s+/g, ' ').trim()).slice(0, 24)
+    const editor = page.locator(EDITOR_BODY).first()
+    const readEditor = async (): Promise<string> => editor.innerText().catch(() => '')
+    const imported = async (): Promise<boolean> => csdnEditorContainsArticle(article.markdown, article.text, await readEditor())
     const importer = page.locator('#import-markdown-file-input').first()
     if (await importer.count()) {
-      await importer.setInputFiles({ name: `${safeFilename(article.title)}.md`, mimeType: 'text/markdown', buffer: Buffer.from(article.markdown, 'utf8') })
-      let imported = false
-      for (let attempt = 0; attempt < 30 && !imported; attempt += 1) {
-        await page.waitForTimeout(500)
-        const editorText = (await page.locator(EDITOR_BODY).first().innerText().catch(() => '')).replace(/\s+/g, ' ')
-        imported = !!marker && editorText.includes(marker)
+      try {
+        await importer.setInputFiles({ name: `${safeFilename(article.title)}.md`, mimeType: 'text/markdown', buffer: Buffer.from(article.markdown, 'utf8') })
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          await page.waitForTimeout(500)
+          if (await imported()) { log('markdown import verified'); return }
+        }
+      } catch (error) {
+        log('markdown import failed', error instanceof Error ? error.message : String(error))
       }
-      if (imported) return
       log('markdown import did not take effect, falling back to paste')
     }
-    // Fallback for editor revisions that hide the importer: paste into the
-    // contenteditable Markdown surface. This keeps a valid article if the
-    // import control is unavailable, at the cost of slower input.
-    const editor = page.locator(EDITOR_BODY).first()
-    await editor.click()
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
-    await page.keyboard.insertText(article.markdown)
-    await page.waitForTimeout(800)
-    const pasted = (await editor.innerText().catch(() => '')).replace(/\s+/g, ' ')
-    if (!pasted.trim()) throw new ApiError(502, 'csdn_body_failed', 'CSDN 正文写入失败，请稍后重试')
+    // Fallback for editor revisions that hide the importer: focus the Markdown
+    // surface directly (avoid pointer events blocked by overlays), replace its
+    // contents, then verify the article text before any save request is made.
+    try {
+      await this.dismissEditorHints(page)
+      await editor.focus({ timeout: 5_000 }).catch(async () => { await editor.click({ timeout: 5_000 }) })
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
+      await page.keyboard.insertText(article.markdown)
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await page.waitForTimeout(500)
+        if (!await imported()) continue
+        const shown = await readEditor()
+        const welcome = /欢迎使用\s*Markdown\s*编辑器|这里写自定义目录标题/
+        if (welcome.test(shown) && !welcome.test(article.markdown)) throw new ApiError(502, 'csdn_body_failed', 'CSDN 正文粘贴时没有替换编辑器中的旧内容，未提交保存；请稍后重试')
+        log('markdown paste verified')
+        return
+      }
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'csdn_body_failed', `CSDN 正文导入失败，未提交保存：${error instanceof Error ? error.message : '页面操作异常'}`)
+    }
+    throw new ApiError(502, 'csdn_body_failed', 'CSDN 正文导入未生效（导入和粘贴都没有写入正文），未提交保存；请稍后重试或先保存草稿再粘贴')
   }
 
   private async addTags(page: Page, tags: string[]): Promise<void> {
@@ -322,17 +397,19 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
 
   async publish(state: PublisherStorageState, article: CsdnArticle, progress: (value: Partial<Pick<CsdnPublication, 'message' | 'remoteId' | 'url'>>) => void) {
     const context = await this.context(state)
-    let stage = '准备 CSDN 编辑器'
+    let stage = '准备 CSDN 编辑器', saveRequested = false
     try {
       const page = await this.openEditor(context)
       try {
+        await page.waitForTimeout(800)
+        await this.dismissEditorHints(page)
         progress({ message: '正在导入 CSDN 正文' })
         stage = '导入 CSDN 正文'
         await this.importMarkdown(page, article)
+        await this.dismissEditorHints(page)
         await this.fillTitle(page, article.title)
-        let requested = false
         page.on('request', request => {
-          if (request.method() === 'POST' && request.url().includes(SAVE_API)) requested = true
+          if (request.method() === 'POST' && request.url().includes(SAVE_API)) saveRequested = true
         })
         if (article.mode === 'draft') {
           progress({ message: '正在保存 CSDN 草稿' })
@@ -342,7 +419,7 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
           let response: Response
           try { response = await pending }
           catch {
-            if (!requested) throw new ApiError(502, 'csdn_save_blocked', `CSDN 没有提交保存请求：${await this.notice(page) || '请检查编辑器状态后重试'}`)
+            if (!saveRequested) throw new ApiError(502, 'csdn_save_blocked', `CSDN 没有提交保存请求：${await this.notice(page) || '请检查编辑器状态后重试'}`)
             throw uncertain('CSDN 草稿保存请求已发出，但结果未确认；请先到 CSDN 草稿箱核实，避免重复创建')
           }
           const result = await this.saveResult(response)
@@ -364,7 +441,7 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
         let response: Response
         try { response = await pending }
         catch {
-          if (!requested) throw new ApiError(400, 'csdn_publish_blocked', `CSDN 发布设置校验未通过，未提交发布：${await this.notice(page) || '请检查标签、标题和可见范围后重试'}`)
+          if (!saveRequested) throw new ApiError(400, 'csdn_publish_blocked', `CSDN 发布设置校验未通过，未提交发布：${await this.notice(page) || '请检查标签、标题和可见范围后重试'}`)
           throw uncertain('CSDN 发布请求已发出，但结果未确认；请先到 CSDN 草稿箱和文章列表核实，避免重复发布')
         }
         const result = await this.saveResult(response)
@@ -376,7 +453,8 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
       } finally { await page.close().catch(() => {}) }
     } catch (error) {
       if (error instanceof ApiError) throw error
-      throw uncertain(`CSDN ${stage}时页面或网络异常，结果未确认；请先到 CSDN 草稿箱和文章列表核实，避免重复发布`)
+      if (saveRequested) throw uncertain(`CSDN ${stage}时页面或网络异常，结果未确认；请先到 CSDN 草稿箱和文章列表核实，避免重复发布`)
+      throw new ApiError(502, 'csdn_publish_failed', `CSDN ${stage}时页面异常，尚未提交保存，请稍后重试`)
     } finally { await context.close().catch(() => {}) }
   }
 

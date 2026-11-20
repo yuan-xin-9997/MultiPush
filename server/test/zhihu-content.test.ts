@@ -16,21 +16,73 @@ describe('Zhihu native article formatting', () => {
     expect(() => verifyZhihuContent(input, native)).not.toThrow()
     expect(() => verifyZhihuContent(native, native.replace('</h2>', '</h2><p class="ztext-empty-paragraph"><br></p>'))).toThrow('停止发布')
   })
-  it('uses semantic figures/captions, clean lists, native tables and exact code whitespace', () => {
+  it('uses semantic figures/captions, clean lists, lists for tables and exact code whitespace', () => {
     const html = prepareZhihuContent(source), $ = load(html)
     expect($('figure').length).toBe(1)
     expect($('figure > img').length).toBe(1)
     expect($('figure > figcaption').text()).toBe('图 1：说明')
     expect($('figure').next().is('ul')).toBe(true)
-    expect($('li').length).toBe(3)
+    expect($('li').length).toBe(5)
     expect($('ol').attr('start')).toBe('3')
     for (const list of $('ul,ol').toArray()) expect($(list).contents().toArray().every(n => n.type === 'tag' && n.name === 'li')).toBe(true)
     expect($('pre').attr('lang')).toBe('js')
     expect($('pre code').text()).toBe('  first\n    second')
-    expect($('table').attr('data-draft-type')).toBe('table')
+    expect($('table').length).toBe(0)
+    const tableList = $('ul').last()
+    expect(tableList.children('li').length).toBe(2)
+    expect(tableList.children('li').first().find('strong').length).toBe(2)
+    expect(tableList.children('li').first().text().replace(/\s+/g, ' ').trim()).toBe('字段 ｜ 类型')
+    expect(tableList.children('li').last().text().replace(/\s+/g, ' ').trim()).toBe('标题 ｜ 文本')
     expect($('a').attr('href')).toBe('https://github.com/org/repo?a=1&b=2')
     expect(html).not.toMatch(/\s(?:style|class)=/)
     expect(prepareZhihuContent(html)).toBe(html)
+    expect(() => verifyZhihuContent(html, html)).not.toThrow()
+  })
+
+  it('converts tables into equivalent lists because the draft API drops table nodes', () => {
+    const html = prepareZhihuContent([
+      '<table><caption>表 1：两种写法</caption>',
+      '<thead><tr><th>场景</th><th>写法</th></tr></thead>',
+      '<tbody><tr><td>C++</td><td><code>MPSolver::CreateSolver("CBC")</code></td></tr>',
+      '<tr><td>Python</td><td><a href="https://example.com/solver">pywraplp</a></td></tr></tbody></table>',
+    ].join('')), $ = load(html)
+    expect(html).not.toContain('<table')
+    expect($('caption').length).toBe(0)
+    expect($('p').first().text()).toBe('表 1：两种写法')
+    expect($('li').length).toBe(3)
+    expect($('li').first().find('strong').length).toBe(2)
+    expect($('li').eq(1).find('code').text()).toBe('MPSolver::CreateSolver("CBC")')
+    expect($('li').eq(2).find('a').attr('href')).toBe('https://example.com/solver')
+    expect(prepareZhihuContent(html)).toBe(html)
+    expect(() => verifyZhihuContent(html, html)).not.toThrow()
+  })
+
+  it('detects the draft API dropping the converted table list', () => {
+    const html = prepareZhihuContent('<table><thead><tr><th>字段</th><th>类型</th></tr></thead><tbody><tr><td>标题</td><td>文本</td></tr></tbody></table>')
+    const stored = load(html, null, false)
+    stored('ul').remove()
+    expect(() => verifyZhihuContent(html, stored.html())).toThrow('停止发布')
+  })
+
+  it('skips empty table cells without leaving dangling separators', () => {
+    const $ = load(prepareZhihuContent('<table><tr><td>A</td><td> </td><td>B</td></tr><tr><td></td><td>C</td><td></td></tr></table>'), null, false)
+    expect($('li').first().text().replace(/\s+/g, ' ').trim()).toBe('A ｜ B')
+    expect($('li').last().text().trim()).toBe('C')
+  })
+
+  it('keeps every row and cell when an article has several tables', () => {
+    const tables = [7, 6, 6].map((rowCount, tableIndex) => {
+      const rows = Array.from({ length: rowCount }, (_, rowIndex) => {
+        const cells = [1, 2, 3].map(cell => `<td>表${tableIndex + 1}行${rowIndex + 1}列${cell}</td>`).join('')
+        return `<tr>${cells}</tr>`
+      }).join('')
+      return `<table><thead><tr><th>A${tableIndex}</th><th>B${tableIndex}</th><th>C${tableIndex}</th></tr></thead><tbody>${rows}</tbody></table>`
+    }).join('')
+    const html = prepareZhihuContent(tables), $ = load(html)
+    expect($('table').length).toBe(0)
+    expect($('li').length).toBe(22)
+    expect($('li').filter((_, item) => $(item).find('strong').length === 3).length).toBe(3)
+    expect($('li').last().text()).toContain('表3行6列3')
     expect(() => verifyZhihuContent(html, html)).not.toThrow()
   })
 

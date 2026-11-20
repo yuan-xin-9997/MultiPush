@@ -8,7 +8,7 @@ import { ApiError } from '../src/errors'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey } from '../src/publisher-session'
 import { renderPlatforms } from '../src/renderers'
 import { CsdnService } from '../src/csdn'
-import { csdnArticleUrl, parseCsdnArticleId, parseCsdnIdentity, parseCsdnSaveResponse, type CsdnDriver, type CsdnLoginAttempt } from '../src/csdn-browser'
+import { csdnArticleUrl, csdnEditorContainsArticle, parseCsdnArticleId, parseCsdnIdentity, parseCsdnSaveResponse, type CsdnDriver, type CsdnLoginAttempt } from '../src/csdn-browser'
 import type { ContentDetail } from '../../shared/types'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -130,5 +130,33 @@ describe('CSDN parsing', () => {
     expect(parseCsdnArticleId('https://editor.csdn.net/md/?articleId=13000000002')).toBe('13000000002')
     expect(parseCsdnArticleId('https://blog.csdn.net/alice_csdn/article/details/abc')).toBeNull()
     expect(csdnArticleUrl('alice_csdn', '13000000001')).toBe('https://blog.csdn.net/alice_csdn/article/details/13000000001')
+  })
+
+  it('verifies CSDN import without being confused by Markdown syntax', () => {
+    const markdown = [
+      '# 优化|MPSolver 和 pywraplp 到底谁是谁？',
+      '',
+      '前几天，一位做排班的同学问我：',
+      '',
+      '> “MPSolver 和 pywraplp 到底哪个快？”',
+      '',
+      '- **pywraplp** 是 Python 模块',
+      '- `MPSolver` 是 C++ 接口',
+      '',
+      '```text',
+      'from ortools.linear_solver import pywraplp',
+      '```',
+      '',
+      '最后一段结论：先选对模型，再谈调参。',
+    ].join('\n')
+    const editorText = markdown.replace(/\n/g, '\n\n')
+    expect(csdnEditorContainsArticle(markdown, '正文', editorText)).toBe(true)
+    expect(csdnEditorContainsArticle(markdown, '正文', `\u200b${editorText.replace(/调参/g, '调\u200b参')}`)).toBe(true)
+    expect(csdnEditorContainsArticle(markdown, '正文', editorText.slice(0, editorText.indexOf('最后一段')))).toBe(false)
+    expect(csdnEditorContainsArticle(markdown, '正文', [
+      '欢迎使用Markdown编辑器',
+      '这里写自定义目录标题',
+      '# 欢迎使用Markdown编辑器',
+    ].join('\n\n'))).toBe(false)
   })
 })

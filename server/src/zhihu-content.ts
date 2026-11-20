@@ -1,4 +1,5 @@
-import { load } from 'cheerio'
+import { load, type Cheerio, type CheerioAPI } from 'cheerio'
+import type { AnyNode } from 'domhandler'
 import { ApiError } from './errors'
 import { normalizeArticleLists } from './renderers/article-normalization'
 import { normalizeFigureCaptions } from './renderers/figure-captions'
@@ -11,12 +12,67 @@ export function zhihuImageUrl(value: unknown): string | null {
   } catch { return null }
 }
 
+const TABLE_SEPARATOR = ' ｜ '
+const TABLE_BLOCK_TAGS = 'p,div,ul,ol,pre,blockquote,h1,h2,h3,h4,h5,h6,table,figure,hr'
+
+/**
+ * The current draft API silently drops every `<table>` node, including its
+ * cells. Rendering tables as lists keeps all cell text (and links, code and
+ * inline images) while using a block type the draft API stores reliably.
+ */
+function appendTableCell($: CheerioAPI, target: Cheerio<AnyNode>, cell: AnyNode, bold: boolean): void {
+  const $cell = $(cell)
+  const contents = $cell.contents()
+  if (!contents.length) return
+  const hasBlocks = $cell.children(TABLE_BLOCK_TAGS).length > 0
+  if (!bold || hasBlocks) {
+    target.append(contents)
+    return
+  }
+  target.append($('<strong>').append(contents))
+}
+
+function hasCellContent($: CheerioAPI, cell: AnyNode): boolean {
+  const $cell = $(cell)
+  return !!$cell.text().replace(/[\s\u200b]/g, '') || $cell.find('img,video,audio,source,hr').length > 0
+}
+
+function convertTable($: CheerioAPI, table: AnyNode): void {
+  const $table = $(table)
+  const rows = $table.find('tr').toArray().filter(row => $(row).parents('table').first().get(0) === table)
+  const headerRows = new Set<AnyNode>()
+  for (const row of rows) {
+    const $row = $(row)
+    const cells = $row.children('th,td').toArray()
+    if (cells.length && cells.every(cell => $(cell).is('th'))) headerRows.add(row)
+    else if ($row.parent().is('thead')) headerRows.add(row)
+  }
+  const list = $('<ul>')
+  for (const row of rows) {
+    const cells = $(row).children('th,td').toArray().filter(cell => hasCellContent($, cell))
+    if (!cells.length) continue
+    const item = $('<li>')
+    cells.forEach((cell, index) => {
+      if (index) item.append(TABLE_SEPARATOR)
+      appendTableCell($, item, cell, headerRows.has(row))
+    })
+    list.append(item)
+  }
+  const caption = $table.children('caption').first().text().replace(/\s+/g, ' ').trim()
+  if (caption) $table.before($('<p>').append($('<strong>').text(caption)))
+  if (list.children().length) $table.replaceWith(list)
+  else $table.remove()
+}
+
 export function prepareZhihuContent(html: string): string {
   const $ = load(html, null, false)
   $('script,noscript,style,meta,link').remove()
   normalizeArticleLists($)
   normalizeFigureCaptions($)
   $('section').each((_, node) => { node.name = 'div' })
+  // Process nested tables first so an outer table sees the converted list.
+  for (const table of $('table').toArray().reverse()) convertTable($, table)
+  normalizeArticleLists($)
   $('img').each((_, node) => {
     const image = $(node)
     image.removeAttr('srcset')
@@ -48,7 +104,6 @@ export function prepareZhihuContent(html: string): string {
     const language = code.attr('class')?.match(/(?:^|\s)language-([\w+-]+)/)?.[1]
     if (language) $(node).attr('lang', language)
   })
-  $('table').attr({ 'data-draft-node': 'block', 'data-draft-type': 'table', 'data-size': 'normal', 'data-row-style': 'normal' })
   $('a[href]').each((_, node) => {
     const link = $(node), href = link.attr('href')!
     if (href.startsWith('#')) return
@@ -128,8 +183,7 @@ export function verifyZhihuContent(expected: string, stored: string): void {
     || JSON.stringify(captions(before)) !== JSON.stringify(captions(after))
     || JSON.stringify(code(before)) !== JSON.stringify(code(after))
     || JSON.stringify(structure(before)) !== JSON.stringify(structure(after))
-    || before('table tr').length !== after('table tr').length
-    || before('table th,table td').length !== after('table th,table td').length) {
-    throw new ApiError(502, 'zhihu_content_mismatch', '知乎保存后的正文与提交内容不一致（图片、列表、图注、链接或代码），已保留草稿并停止发布，请检查知乎编辑器')
+    || before('table').length !== 0 || after('table').length !== 0) {
+    throw new ApiError(502, 'zhihu_content_mismatch', '知乎保存后的正文与提交内容不一致（图片、列表（含表格转换）、图注、链接、代码或标题结构），已保留草稿并停止发布，请检查知乎编辑器')
   }
 }
