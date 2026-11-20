@@ -28,7 +28,9 @@
 
 **部署**
 
-- 待 Jenkins 构建与生产复核（需在 `/opt/MultiPush/.env` 配置 `MULTIPUSH_ADMIN_USERNAMES=yuanxin`）。
+- 已在 `/opt/MultiPush/.env` 配置 `MULTIPUSH_ADMIN_USERNAMES=yuanxin`；Jenkins 构建 #116 成功（提交 `1226445`），部署后启动日志 `[multipush] ai providers=1 keys=2 source=file`。
+- 生产 `GET /api/ai/providers`：`editable=true`、`source=file`，返回 2 个 Key 的脱敏标识和高可用开关；`PUT /api/ai/providers` 用现有 Key（不提交明文）保存成功，文件权限 `600` 且包含 `highAvailability`/`enabled`，热加载后探活仍为账号1 额度不足、账号2 可用，证明 Key 未丢失。
+- 生产浏览器（LAN 地址，1440×1000 / 390×844）复核：设置导航、三个分类、提供商编辑、多 Key 高可用开关、逐 Key 启停、未保存提示、AI 页跳转设置均正常；移动端无横向溢出。截图见 `artifacts/settings-check/production-settings-*.png`。
 
 ## 2026-11-20 · CSDN 渲染与发布
 
