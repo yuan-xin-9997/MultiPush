@@ -147,7 +147,7 @@ function mountWebApp(app: express.Express, webDist: string): void {
 
 export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver, doubanDriver?: DoubanDriver, juejinDriver?: JuejinDriver, jianshuDriver?: JianshuDriver, wechatpicDriver?: WechatStickerDriver, csdnDriver?: CsdnDriver): express.Express {
   const app = express()
-  const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver())
+  const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver(config))
   app.locals.wechat = wechat
   const wechatpic = new WechatpicService(database, config, wechatpicDriver ?? new WechatStickerApiDriver())
   app.locals.wechatpic = wechatpic

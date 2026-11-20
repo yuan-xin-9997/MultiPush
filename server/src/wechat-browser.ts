@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { load, type CheerioAPI } from 'cheerio'
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright-core'
@@ -143,13 +144,18 @@ export function findPublishedArticle(value: unknown, remoteId: string): { url: s
 
 export function parseWechatPage(html: string, pageUrl: string): { token: string; name: string; ticket: string; userName: string } | null {
   if (new URL(pageUrl, HOME).origin !== new URL(HOME).origin) return null
-  const token = new URL(pageUrl, HOME).searchParams.get('token')
-    ?? html.match(/[?&]token=(\d+)/)?.[1]
-    ?? html.match(/\bt\s*:\s*["'](\d+)["']/)?.[1]
   const pick = (key: string) => html.match(new RegExp(`["']?${key}["']?\\s*[:=]\\s*["']([^"']+)["']`))?.[1] ?? ''
   const userName = pick('user_name')
-  if (!token || !/^\d+$/.test(token) || !userName) return null
-  let name = pick('nick_name') || '微信公众号'
+  // A token in the URL of an mp.weixin.qq.com page only exists after a
+  // successful login (the login flow's final redirect carries it), so it is
+  // authoritative on its own. Embedded HTML tokens keep requiring user_name,
+  // because legacy pages hide the token in scripts and the identity there is
+  // the signal that we are not parsing an arbitrary page.
+  const token = new URL(pageUrl, HOME).searchParams.get('token')
+    ?? (userName ? html.match(/[?&]token=(\d+)/)?.[1] : undefined)
+    ?? (userName ? html.match(/\bt\s*:\s*["'](\d+)["']/)?.[1] : undefined)
+  if (!token || !/^\d+$/.test(token)) return null
+  let name = pick('nick_name') || (userName ? '公众号' : '微信公众号')
   try { name = decodeURIComponent(name) } catch { /* Some accounts return an unencoded nickname. */ }
   name = load(`<span>${name}</span>`).text()
   return { token, name, userName, ticket: pick('ticket') }
@@ -210,6 +216,7 @@ async function sessionInfo(page: Page) {
     if (await page.locator(LOGIN_QR).count() || /loginpage|scanlogin/.test(page.url())) throw expired()
     await page.waitForTimeout(250)
   }
+  console.log(`[wechat] session check could not find a logged-in state url=${page.url()} text=${(await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300)}`)
   throw expired()
 }
 
@@ -271,7 +278,27 @@ async function turnSwitchOff(dialog: Locator, label: string, required: boolean):
 
 export class PlaywrightWechatDriver implements WechatBrowserDriver {
   private browser: Promise<Browser> | null = null
-  constructor(_config?: { dataDir: string }) {}
+  constructor(private readonly config?: { dataDir: string }) {}
+
+  /** Persist the login page state (URL, text, screenshot) for offline diagnosis. */
+  private async saveLoginDiagnostics(page: Page, label: string): Promise<void> {
+    if (!this.config?.dataDir) return
+    try {
+      const dir = join(this.config.dataDir, 'diagnostics')
+      await mkdir(dir, { recursive: true })
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      const base = `wechat-login-${label}-${stamp}`
+      const text = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 800)
+      await writeFile(join(dir, `${base}.json`), JSON.stringify({ at: new Date().toISOString(), label, url: page.url(), text }, null, 2))
+      await page.screenshot({ path: join(dir, `${base}.png`), timeout: 5000 }).catch(() => {})
+      console.log(`[wechat] login diagnostics saved (${label})`)
+      // Keep the directory small: the newest ten files per side are enough.
+      const files = (await readdir(dir).catch(() => [])).filter(name => name.startsWith('wechat-login-')).sort()
+      for (const stale of files.slice(0, Math.max(0, files.length - 20))) {
+        await unlink(join(dir, stale)).catch(() => {})
+      }
+    } catch { /* Diagnostics must never break the login flow. */ }
+  }
 
   private async context(state?: WechatStorageState): Promise<BrowserContext> {
     if (!this.browser) {
@@ -308,23 +335,58 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
       await page.waitForFunction('(() => { const img = document.querySelector("img.js_login_qrcode, .js_login_qrcode img, img[src*=scanloginqrcode], img[src*=loginqrcode], .login__type__container img[src*=qrcode]"); return img && img.complete && img.naturalWidth > 10 })()', undefined, { timeout: 15_000 })
       qrCode = (await qrImage(page, LOGIN_QR))?.image ?? null
       if (!qrCode) throw new ApiError(502, 'wechat_qrcode_unavailable', '微信登录二维码未能加载，请稍后重新获取')
+      console.log(`[wechat] login QR ready url=${page.url()}`)
     } catch (error) {
+      console.error('[wechat] login page failed:', error instanceof ApiError ? `${error.code} ${error.message}` : error)
+      void this.saveLoginDiagnostics(page, 'qr-failed').catch(() => {})
       await close()
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'wechat_login_unavailable', '无法加载微信公众平台登录页，请检查服务器网络后重试')
     }
+    let lastStatus = ''
+    let riskSaved = false
     return {
       close,
       poll: async () => {
-        if (closed || page.isClosed() || Date.now() > deadline) return { status: 'expired', qrCode: null, message: '登录二维码已过期，请重新获取' }
+        if (closed || page.isClosed() || Date.now() > deadline) {
+          if (lastStatus !== 'expired') {
+            lastStatus = 'expired'
+            console.log(`[wechat] login expired closed=${closed} pageClosed=${page.isClosed()} url=${page.url()}`)
+            void this.saveLoginDiagnostics(page, 'deadline').catch(() => {})
+          }
+          return { status: 'expired', qrCode: null, message: '登录二维码已过期，请重新获取' }
+        }
         const info = parseWechatPage(await page.content(), page.url())
-        if (info) return { status: 'connected', qrCode: null, message: '微信公众号已登录', state: await context.storageState(), name: info.name }
+        if (info) {
+          if (lastStatus !== 'connected') {
+            lastStatus = 'connected'
+            console.log(`[wechat] login connected name=${info.name} url=${page.url()}`)
+          }
+          return { status: 'connected', qrCode: null, message: '微信公众号已登录', state: await context.storageState(), name: info.name }
+        }
         const text = await page.locator('body').innerText()
-        if (/二维码已失效|二维码已过期|二维码过期/.test(text)) return { status: 'expired', qrCode: null, message: '登录二维码已过期，请重新获取' }
+        if (/二维码已失效|二维码已过期|二维码过期/.test(text)) {
+          if (lastStatus !== 'expired') {
+            lastStatus = 'expired'
+            console.log('[wechat] login QR expired on the page')
+          }
+          return { status: 'expired', qrCode: null, message: '登录二维码已过期，请重新获取' }
+        }
+        const risk = /安全验证|扫码验证|环境异常|异常登录|登录环境/.exec(text)
+        if (risk && !riskSaved) {
+          riskSaved = true
+          console.log(`[wechat] login risk signal: ${risk[0]} url=${page.url()}`)
+          void this.saveLoginDiagnostics(page, 'risk').catch(() => {})
+        }
         const currentQr = await qrImage(page, LOGIN_QR)
         if (currentQr) qrCode = currentQr.image
         const scanned = isWechatLoginScanned(text)
-        return { status: scanned ? 'scanned' : 'waiting', qrCode, message: scanned ? '请在微信中选择公众号并确认登录' : '请使用公众号管理员微信扫码登录' }
+        const status = scanned ? 'scanned' : 'waiting'
+        if (status !== lastStatus) {
+          lastStatus = status
+          console.log(`[wechat] login poll status=${status} url=${page.url()}`)
+        }
+        return { status, qrCode, message: scanned ? '请在微信中选择公众号并确认登录' : risk ? `微信页面提示「${risk[0]}」，请稍后重试；多次出现请检查服务器网络环境` : '请使用公众号管理员微信扫码登录' }
       },
     }
   }

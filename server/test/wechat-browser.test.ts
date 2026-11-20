@@ -92,7 +92,14 @@ describe('WeChat browser responses', () => {
     expect(parseWechatPage('<html>请扫码登录</html>', 'https://mp.weixin.qq.com/')).toBeNull()
     expect(parseWechatPage(html.replace('gh_account', ''), 'https://mp.weixin.qq.com/')).toBeNull()
     expect(parseWechatPage(html, 'https://evil.example/?token=123')).toBeNull()
-    expect(parseWechatPage('token=123', 'https://mp.weixin.qq.com/?token=123')).toBeNull()
+  })
+
+  it('treats a URL token on an mp origin as logged in even when identity fields move to XHR templates', () => {
+    // Redesigned home pages may not embed user_name/nick_name in the initial HTML.
+    expect(parseWechatPage('<html>后台</html>', 'https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN&token=123')).toEqual({ token: '123', userName: '', ticket: '', name: '微信公众号' })
+    // An HTML-embedded token without user_name and without a URL token still
+    // means "not a logged-in page".
+    expect(parseWechatPage('token=123', 'https://mp.weixin.qq.com/')).toBeNull()
   })
 
   it('accepts material objects and serialized material objects and upgrades trusted CDN URLs', () => {
