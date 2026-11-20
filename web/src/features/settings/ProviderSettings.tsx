@@ -437,6 +437,7 @@ export default function ProviderSettings() {
                   </div>
                   {provider.keys.map((key, keyIndex) => {
                     const keyRuntime = runtime.keys.get(`${provider.id}/${key.id}`) ?? null
+                    const inactiveByHa = !provider.highAvailability && keyIndex > 0 && key.enabled
                     return (
                       <div className={`provider-key-row ${key.enabled ? '' : 'is-disabled'}`} key={key.id}>
                         <span className="provider-key-order">{keyIndex + 1}</span>
@@ -444,7 +445,7 @@ export default function ProviderSettings() {
                           <div className="provider-key-line">
                             <input className="input input-sm provider-key-label" value={key.label} onChange={event => updateKey(providerIndex, keyIndex, { label: event.target.value })} disabled={!pool.editable} aria-label={`Key ${keyIndex + 1} 名称`} />
                             {key.maskedKey ? <code className="provider-key-mask">{key.maskedKey}</code> : <span className="provider-key-new">新 Key</span>}
-                            <span className={`settings-state ${keyStateClass(key, keyRuntime)}`}>{keyStateLabel(key, keyRuntime)}</span>
+                            <span className={`settings-state ${inactiveByHa ? 'is-off' : keyStateClass(key, keyRuntime)}`} title={inactiveByHa ? '该提供商已关闭多 Key 高可用，只有第一个启用的 Key 参与轮换' : undefined}>{inactiveByHa ? '未参与轮换' : keyStateLabel(key, keyRuntime)}</span>
                             {keyRuntime?.cooldownUntil ? <span className="provider-key-cooldown">冷却至 {formatDateTime(keyRuntime.cooldownUntil)}</span> : null}
                           </div>
                           <div className="provider-key-line">
