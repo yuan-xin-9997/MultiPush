@@ -67,8 +67,30 @@ async function setup() {
   const database = openDatabase(':memory:')
   databases.push(database)
   const user = database.createUser({ username: 'gatewayroutes', email: 'gatewayroutes@example.com', passwordHash: 'unused', displayName: 'Routes' })
+  const pool = {
+    editable: true,
+    editableReason: null,
+    source: 'file',
+    warning: null,
+    providers: [{
+      id: 'opencode-go',
+      label: 'OpenCode Go',
+      baseUrl: 'https://opencode.ai/inference/go/openai/v1',
+      defaultModel: 'deepseek-v4.1-flash',
+      models: ['deepseek-v4.1-flash'],
+      highAvailability: true,
+      keys: [{ id: 'account-2', label: '账号2', maskedKey: 'oc_sk_…3Ea', baseUrl: null, enabled: true }],
+    }],
+    modelMap: {},
+    probeIntervalMs: 300_000,
+    maxProviderFailures: 3,
+    cooldowns: { quotaMs: 1_800_000, authMs: 1_800_000, rateLimitMs: 30_000, transientMs: 20_000, providerMs: 120_000 },
+    updatedAt: new Date().toISOString(),
+  }
   const service = {
     gatewayStatus: vi.fn(() => gatewayStatus()),
+    providerPool: vi.fn(() => pool),
+    saveProviderPool: vi.fn(() => pool),
     probeGateway: vi.fn(async (_userId: string, providerId?: string) => [{
       providerId: providerId ?? 'opencode-go',
       providerLabel: 'OpenCode Go',
@@ -129,6 +151,44 @@ describe('AI gateway management routes', () => {
     expect(gateway.configured).toBe(true)
     expect(JSON.stringify(gateway)).not.toContain('oc_sk_REAL_KEY_SHOULD_NOT_LEAK')
     expect(JSON.stringify(gateway)).toContain('oc_sk_…StK-T')
+  })
+
+  it('returns and saves the provider pool with server-side validation', async () => {
+    const { base, token, service } = await setup()
+    const read = await call(base, '/providers', token)
+    expect(read.status).toBe(200)
+    expect(read.cacheControl).toBe('no-store')
+    expect((read.data.pool as Record<string, unknown>).editable).toBe(true)
+
+    const payload = {
+      providers: [{
+        id: 'opencode-go',
+        label: 'OpenCode Go',
+        baseUrl: 'https://opencode.ai/inference/go/openai/v1',
+        defaultModel: 'deepseek-v4.1-flash',
+        models: ['deepseek-v4.1-flash'],
+        highAvailability: false,
+        keys: [
+          { id: 'account-1', label: '账号1', enabled: true },
+          { label: '账号2', apiKey: 'sk-new-key-12345678', enabled: true },
+        ],
+      }],
+      probeIntervalMs: 120_000,
+    }
+    const saved = await call(base, '/providers', token, { method: 'PUT', body: JSON.stringify(payload) })
+    expect(saved.status).toBe(200)
+    expect((service as unknown as { saveProviderPool: ReturnType<typeof vi.fn> }).saveProviderPool)
+      .toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ providers: expect.any(Array) }))
+
+    const invalid = await call(base, '/providers', token, { method: 'PUT', body: JSON.stringify({ providers: [] }) })
+    expect(invalid.status).toBe(400)
+    expect(invalid.data.error).toBe('validation_failed')
+  })
+
+  it('rejects anonymous provider pool writes', async () => {
+    const { base } = await setup()
+    const response = await call(base, '/providers', undefined, { method: 'PUT', body: JSON.stringify({ providers: [] }) })
+    expect(response.status).toBe(401)
   })
 
   it('probes all keys or one provider and returns the refreshed status', async () => {

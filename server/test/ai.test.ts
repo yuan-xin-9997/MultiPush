@@ -29,9 +29,23 @@ function response(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } })
 }
 
-function setup(defaults?: { apiKey: string; baseUrl: string; model: string; label: string }, aiProviders?: AiProvidersConfig) {
+function setup(
+  defaults?: { apiKey: string; baseUrl: string; model: string; label: string },
+  aiProviders?: AiProvidersConfig,
+  options?: { writePoolFile?: unknown; nodeEnv?: string; settingsAdmins?: string[] },
+) {
   const directory = mkdtempSync(path.join(tmpdir(), 'multipush-ai-'))
-  const config = loadConfig({ dataDir: directory, nodeEnv: 'test', jwtSecret: 'ai-test-secret', ...(defaults ? { aiDefaults: defaults } : {}), ...(aiProviders ? { aiProviders } : {}) })
+  if (options?.writePoolFile) {
+    writeFileSync(path.join(directory, 'ai-providers.json'), JSON.stringify(options.writePoolFile), { mode: 0o600 })
+  }
+  const config = loadConfig({
+    dataDir: directory,
+    nodeEnv: options?.nodeEnv ?? 'test',
+    jwtSecret: 'ai-test-secret',
+    ...(defaults ? { aiDefaults: defaults } : {}),
+    ...(aiProviders ? { aiProviders } : {}),
+    ...(options?.settingsAdmins ? { settingsAdmins: options.settingsAdmins } : {}),
+  })
   const database = openDatabase(':memory:')
   const user = database.createUser({ username: 'alice', email: 'alice@example.com', displayName: 'Alice', passwordHash: 'hash' })
   const wechat = { publish: vi.fn(), remove: vi.fn() } as unknown as WechatService
@@ -465,5 +479,83 @@ describe('AI high availability integration', () => {
     expect(result.routing).toMatchObject({ providerId: 'beta', model: 'beta-pro', requestedModel: 'alpha-flash', fallback: true })
     expect(result.session.messages.map(message => message.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
     expect(result.reply.content).toContain('备用提供商')
+  })
+})
+
+
+describe('provider pool settings integration', () => {
+  const poolFile = {
+    providers: [
+      {
+        id: 'opencode-go',
+        label: 'OpenCode Go',
+        baseUrl: 'https://opencode.ai/inference/go/openai/v1',
+        defaultModel: 'deepseek-v4.1-flash',
+        models: ['deepseek-v4.1-flash'],
+        highAvailability: true,
+        keys: [
+          { id: 'account-1', label: '账号1', apiKey: 'sk-pool-account-1-111111', enabled: true },
+          { id: 'account-2', label: '账号2', apiKey: 'sk-pool-account-2-222222', enabled: true },
+        ],
+      },
+    ],
+    modelMap: {},
+    probeIntervalMs: 300_000,
+    maxProviderFailures: 3,
+  }
+
+  it('returns a masked editable pool and persists changes without restarting', () => {
+    const { user, service, config } = setup(undefined, undefined, { writePoolFile: poolFile })
+    const before = service.providerPool(user.id)
+    expect(before).toMatchObject({ editable: true, source: 'file', editableReason: null })
+    expect(before.providers[0].highAvailability).toBe(true)
+    expect(before.providers[0].keys.map(key => key.maskedKey)).toEqual(['sk-p…1111', 'sk-p…2222'])
+    expect(JSON.stringify(before)).not.toContain('sk-pool-account-1-111111')
+
+    const saved = service.saveProviderPool(user.id, {
+      providers: [{
+        id: 'opencode-go',
+        label: 'OpenCode Go',
+        baseUrl: 'https://opencode.ai/inference/go/openai/v1',
+        defaultModel: 'deepseek-v4.1-flash',
+        models: ['deepseek-v4.1-flash'],
+        highAvailability: false,
+        keys: [
+          { id: 'account-1', label: '账号1', enabled: true },
+          { id: 'account-2', label: '账号2', enabled: false },
+          { id: 'account-3', label: '账号3', apiKey: 'sk-pool-account-3-333333', enabled: true },
+        ],
+      }],
+      probeIntervalMs: 120_000,
+    })
+    expect(saved.editable).toBe(true)
+    expect(saved.providers[0].highAvailability).toBe(false)
+    expect(saved.providers[0].keys).toHaveLength(3)
+    expect(saved.providers[0].keys[0].maskedKey).toBe('sk-p…1111')
+    expect(saved.providers[0].keys[1].enabled).toBe(false)
+    expect(saved.providers[0].keys[2].maskedKey).toBe('sk-p…3333')
+    expect(service.settings(user.id)).toMatchObject({ configured: true, source: 'server', providers: 1, keys: 1 })
+    expect(config.aiProvidersSource).toBe('file')
+    expect(service.gateway.keyCount).toBe(1)
+    expect(service.gateway.status(user.id).source).toBe('file')
+  })
+
+  it('only lets configured admins edit the server pool in production', () => {
+    const { database, user, service } = setup(undefined, undefined, {
+      writePoolFile: poolFile,
+      nodeEnv: 'production',
+      settingsAdmins: ['alice'],
+    })
+    const bob = database.createUser({ username: 'bob', email: 'bob@example.com', displayName: 'Bob', passwordHash: 'hash' })
+    expect(service.providerPool(user.id).editable).toBe(true)
+    expect(service.providerPool(bob.id)).toMatchObject({ editable: false, editableReason: expect.stringContaining('仅管理员') })
+    expect(() => service.saveProviderPool(bob.id, { providers: [{ id: 'x', label: 'X', baseUrl: 'https://x.example/v1', defaultModel: 'm', keys: [{ label: 'k', apiKey: 'sk-x-12345678' }] }] }))
+      .toThrowError(/仅管理员/)
+  })
+
+  it('keeps the pool read-only when it comes from AI_PROVIDERS_JSON-like overrides', () => {
+    const pool = parseAiProvidersConfig(poolFile)
+    const { user, service } = setup(undefined, pool)
+    expect(service.providerPool(user.id)).toMatchObject({ editable: false, source: 'override' })
   })
 })

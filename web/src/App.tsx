@@ -11,6 +11,7 @@ import VideoWorkspacePage from '@/features/video/VideoWorkspacePage'
 import RenderPage from '@/features/render/RenderPage'
 import PublishPage from '@/features/publish/PublishPage'
 import AiPage from '@/features/ai/AiPage'
+import SettingsPage from '@/features/settings/SettingsPage'
 import { Loader2 } from 'lucide-react'
 
 function FullScreenLoading() {
@@ -69,6 +70,7 @@ export default function App() {
         <Route path="/ai" element={<AiPage />} />
         <Route path="/render" element={<RenderPage />} />
         <Route path="/publish" element={<PublishPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/library" replace />} />
       </Route>
     </Routes>

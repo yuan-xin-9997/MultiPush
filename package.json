@@ -19,6 +19,7 @@
     "smoke:ai-attachments": "npm run build && node scripts/smoke-ai-attachments.mjs",
     "smoke:ai-mobile": "npm run build && node scripts/smoke-ai-mobile-ui.mjs",
     "smoke:ai-gateway": "npm run build && node scripts/smoke-ai-gateway-ui.mjs",
+    "smoke:settings": "npm run build && node scripts/smoke-settings-ui.mjs",
     "smoke": "node scripts/smoke-api.mjs",
     "desktop:install": "npm install --prefix desktop",
     "desktop:build": "npm run build:web && node scripts/build-desktop.mjs",

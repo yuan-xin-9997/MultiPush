@@ -5,33 +5,42 @@
       "label": "OpenCode Go",
       "baseUrl": "https://opencode.ai/inference/go/openai/v1",
       "defaultModel": "deepseek-v4.1-flash",
-      "models": ["deepseek-v4.1-flash"],
+      "models": [
+        "deepseek-v4.1-flash"
+      ],
       "keys": [
         {
           "id": "account-1",
           "label": "账号1",
-          "apiKey": "oc_sk_REPLACE_WITH_ACCOUNT_1_KEY"
+          "apiKey": "oc_sk_REPLACE_WITH_ACCOUNT_1_KEY",
+          "enabled": true
         },
         {
           "id": "account-2",
           "label": "账号2",
-          "apiKey": "oc_sk_REPLACE_WITH_ACCOUNT_2_KEY"
+          "apiKey": "oc_sk_REPLACE_WITH_ACCOUNT_2_KEY",
+          "enabled": true
         }
-      ]
+      ],
+      "highAvailability": true
     },
     {
       "id": "deepseek",
       "label": "DeepSeek 官方",
       "baseUrl": "https://api.deepseek.com/v1",
       "defaultModel": "deepseek-chat",
-      "models": ["deepseek-chat"],
+      "models": [
+        "deepseek-chat"
+      ],
       "keys": [
         {
           "id": "official",
           "label": "官方 Key",
-          "apiKey": "sk-REPLACE_WITH_DEEPSEEK_KEY"
+          "apiKey": "sk-REPLACE_WITH_DEEPSEEK_KEY",
+          "enabled": true
         }
-      ]
+      ],
+      "highAvailability": true
     }
   ],
   "modelMap": {

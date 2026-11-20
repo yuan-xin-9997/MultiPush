@@ -1,7 +1,8 @@
-import { chmodSync, existsSync, readFileSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { ApiError } from './errors'
 import type { AiDefaultConfig } from './config'
+import type { AiProviderConfigSource, AiProviderPoolInput, AiProviderPoolView } from '../../shared/types'
 
 /**
  * Server-level provider pool configuration.
@@ -17,6 +18,8 @@ export interface AiProviderKeyConfig {
   apiKey: string
   /** Optional per-key base URL override; falls back to the provider base URL. */
   baseUrl?: string
+  /** Disabled keys stay stored but never participate in rotation or probing. */
+  enabled: boolean
 }
 
 export interface AiProviderConfig {
@@ -25,6 +28,8 @@ export interface AiProviderConfig {
   baseUrl: string
   models: string[]
   defaultModel: string
+  /** When false, only the first enabled key is used; other keys remain stored. */
+  highAvailability: boolean
   keys: AiProviderKeyConfig[]
 }
 
@@ -116,6 +121,7 @@ function parseKey(raw: unknown, index: number, providerId: string): AiProviderKe
     id,
     label: text(input.label) || `Key ${index + 1}`,
     apiKey,
+    enabled: input.enabled !== false,
   }
   const baseUrl = text(input.baseUrl)
   if (baseUrl) key.baseUrl = normalizeBaseUrlForConfig(baseUrl, `providers.${providerId}.keys[${index}].baseUrl`)
@@ -139,6 +145,7 @@ function parseProvider(raw: unknown, index: number): AiProviderConfig {
     if (keyIds.has(key.id)) throw new Error(`providers.${id} 存在重复的 Key id: ${key.id}`)
     keyIds.add(key.id)
   }
+  if (!keys.some(key => key.enabled)) throw new Error(`providers.${id} 至少需要一个启用的 API Key`)
   const modelsInput = Array.isArray(input.models) ? input.models : []
   const models = [...new Set(modelsInput.map(text).filter(Boolean))]
   const defaultModel = text(input.defaultModel) || models[0]
@@ -150,6 +157,7 @@ function parseProvider(raw: unknown, index: number): AiProviderConfig {
     baseUrl: normalizeBaseUrlForConfig(baseUrl, `providers.${id}.baseUrl`),
     models,
     defaultModel,
+    highAvailability: input.highAvailability !== false,
     keys,
   }
 }
@@ -226,10 +234,12 @@ export function providersFromDefaults(defaults: AiDefaultConfig, keys?: string[]
     baseUrl: normalizeBaseUrlForConfig(defaults.baseUrl, 'AI_DEFAULT_BASE_URL'),
     models: [defaults.model],
     defaultModel: defaults.model,
+    highAvailability: unique.length > 1,
     keys: unique.map((apiKey, index) => ({
       id: `key-${index + 1}`,
       label: unique.length > 1 ? `Key ${index + 1}` : '默认 Key',
       apiKey,
+      enabled: true,
     })),
   }
   return {
@@ -308,6 +318,109 @@ export function loadAiProviders(
     }
   }
   return { config: null, source: 'none', warning: null }
+}
+
+/** Build the management view; raw keys never leave the server. */
+export function providerPoolView(
+  config: AiProvidersConfig | null,
+  options: {
+    editable: boolean
+    editableReason: string | null
+    source: AiProviderConfigSource
+    warning: string | null
+  },
+): AiProviderPoolView {
+  return {
+    editable: options.editable,
+    editableReason: options.editableReason,
+    source: options.source,
+    warning: options.warning,
+    providers: (config?.providers ?? []).map(provider => ({
+      id: provider.id,
+      label: provider.label,
+      baseUrl: provider.baseUrl,
+      defaultModel: provider.defaultModel,
+      models: [...provider.models],
+      highAvailability: provider.highAvailability,
+      keys: provider.keys.map(key => ({
+        id: key.id,
+        label: key.label,
+        maskedKey: maskApiKey(key.apiKey),
+        baseUrl: key.baseUrl ?? null,
+        enabled: key.enabled,
+      })),
+    })),
+    modelMap: config?.modelMap ?? {},
+    probeIntervalMs: config?.probeIntervalMs ?? DEFAULT_PROBE_INTERVAL_MS,
+    maxProviderFailures: config?.maxProviderFailures ?? DEFAULT_MAX_PROVIDER_FAILURES,
+    cooldowns: { ...DEFAULT_PROVIDER_COOLDOWNS, ...(config?.cooldowns ?? {}) },
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Merge a UI pool submission with the current config. Existing keys can omit
+ * `apiKey` to keep their stored secret; new keys must provide one.
+ */
+export function applyProviderPoolInput(input: AiProviderPoolInput, current: AiProvidersConfig | null): AiProvidersConfig {
+  const providersInput = Array.isArray(input.providers) ? input.providers : []
+  if (!providersInput.length) throw new Error('至少需要一个提供商')
+  const currentProviders = new Map((current?.providers ?? []).map(provider => [provider.id, provider]))
+  const providers = providersInput.map((provider, providerIndex) => {
+    const id = String(provider.id ?? '').trim()
+    if (!id) throw new Error(`第 ${providerIndex + 1} 个提供商缺少 id`)
+    const existingProvider = currentProviders.get(id)
+    const keysInput = Array.isArray(provider.keys) ? provider.keys : []
+    if (!keysInput.length) throw new Error(`提供商「${provider.label || id}」至少需要一个 API Key`)
+    const keys = keysInput.map((key, keyIndex) => {
+      const keyId = String(key.id ?? '').trim() || `key-${keyIndex + 1}`
+      const existingKey = existingProvider?.keys.find(item => item.id === keyId)
+      const apiKey = String(key.apiKey ?? '').trim() || existingKey?.apiKey
+      if (!apiKey) throw new Error(`提供商「${provider.label || id}」的第 ${keyIndex + 1} 个 Key 需要填写 API Key`)
+      const baseUrl = String(key.baseUrl ?? existingKey?.baseUrl ?? '').trim()
+      return {
+        id: keyId,
+        label: String(key.label ?? '').trim() || existingKey?.label || `Key ${keyIndex + 1}`,
+        apiKey,
+        ...(baseUrl ? { baseUrl: normalizeBaseUrlForConfig(baseUrl, `providers.${id}.keys[${keyIndex}].baseUrl`) } : {}),
+        enabled: key.enabled !== false,
+      }
+    })
+    const modelsInput = Array.isArray(provider.models) ? provider.models : (existingProvider?.models ?? [])
+    const models = [...new Set(modelsInput.map(model => String(model ?? '').trim()).filter(Boolean))]
+    const defaultModel = String(provider.defaultModel ?? '').trim() || existingProvider?.defaultModel || models[0] || ''
+    return {
+      id,
+      label: String(provider.label ?? '').trim() || existingProvider?.label || id,
+      baseUrl: String(provider.baseUrl ?? '').trim() || existingProvider?.baseUrl || '',
+      defaultModel,
+      models,
+      highAvailability: provider.highAvailability !== false,
+      keys,
+    }
+  })
+  const raw = {
+    providers,
+    modelMap: input.modelMap !== undefined ? input.modelMap : (current?.modelMap ?? {}),
+    probeIntervalMs: input.probeIntervalMs ?? current?.probeIntervalMs ?? DEFAULT_PROBE_INTERVAL_MS,
+    maxProviderFailures: input.maxProviderFailures ?? current?.maxProviderFailures ?? DEFAULT_MAX_PROVIDER_FAILURES,
+    cooldowns: { ...(current?.cooldowns ?? DEFAULT_PROVIDER_COOLDOWNS), ...(input.cooldowns ?? {}) },
+  }
+  return parseAiProvidersConfig(raw)
+}
+
+/** Atomically persist the provider pool with owner-only permissions. */
+export function writeAiProvidersFile(file: string, config: AiProvidersConfig): void {
+  mkdirSync(path.dirname(file), { recursive: true })
+  const temp = `${file}.${process.pid}.${Date.now()}.tmp`
+  try {
+    writeFileSync(temp, `${JSON.stringify(config, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    renameSync(temp, file)
+    try { chmodSync(file, 0o600) } catch { /* best effort */ }
+  } catch (error) {
+    try { unlinkSync(temp) } catch { /* ignore */ }
+    throw new Error(`无法写入大模型提供商配置：${error instanceof Error ? error.message : '未知错误'}`)
+  }
 }
 
 /** Mask a key for logs and UI. Never reveal more than a short prefix/suffix. */

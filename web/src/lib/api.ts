@@ -92,6 +92,8 @@ import type {
   AiChatResult,
   AiGatewayStatus,
   AiProbeResult,
+  AiProviderPoolInput,
+  AiProviderPoolView,
   AiRoutingInfo,
   AiSendMessageInput,
   AiSession,
@@ -444,6 +446,11 @@ export const api = {
     saveSettings: (input: AiSettingsInput) => request<{ settings: AiSettings }>('/api/ai/settings', { method: 'PUT', body: JSON.stringify(input) }),
     deleteSettings: () => request<{ ok: true }>('/api/ai/settings', { method: 'DELETE' }),
     testSettings: () => request<{ ok: true; message: string; model: string; routing?: AiRoutingInfo }>('/api/ai/settings/test', { method: 'POST' }),
+    providers: () => request<{ pool: AiProviderPoolView }>('/api/ai/providers', { cache: 'no-store' }),
+    saveProviders: (input: AiProviderPoolInput) => request<{ pool: AiProviderPoolView }>('/api/ai/providers', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
     gatewayStatus: () => request<{ gateway: AiGatewayStatus }>('/api/ai/gateway', { cache: 'no-store' }),
     probeGateway: (providerId?: string) => request<{ probes: AiProbeResult[]; gateway: AiGatewayStatus }>('/api/ai/gateway/probe', {
       method: 'POST',

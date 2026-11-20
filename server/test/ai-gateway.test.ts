@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AiGateway } from '../src/ai-gateway'
 import { loadConfig } from '../src/config'
 import { openDatabase, type Database } from '../src/db'
-import { maskApiKey, parseAiProvidersConfig, type AiProvidersConfig } from '../src/ai-provider-config'
+import { applyProviderPoolInput, maskApiKey, parseAiProvidersConfig, providerPoolView, writeAiProvidersFile, type AiProvidersConfig } from '../src/ai-provider-config'
 
 const cleanups: Array<() => void> = []
 
@@ -573,5 +573,163 @@ describe('provider pool file and environment configuration', () => {
     }
     // The file is absent; ensure no accidental write of secrets.
     expect(() => readFileSync(path.join(directory, 'ai-providers.json'), 'utf8')).toThrow()
+  })
+})
+
+
+describe('provider pool editing', () => {
+  it('keeps stored keys when the editor leaves apiKey blank and writes a 600 file', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'multipush-gateway-write-'))
+    cleanups.push(() => rmSync(directory, { recursive: true, force: true }))
+    const current = parseAiProvidersConfig(rawPool())
+    const next = applyProviderPoolInput({
+      providers: [
+        {
+          id: 'alpha',
+          label: 'Alpha 云',
+          baseUrl: 'https://alpha.example/v1',
+          defaultModel: 'alpha-flash',
+          models: ['alpha-flash'],
+          highAvailability: false,
+          keys: [
+            { id: 'a1', label: '账号1', baseUrl: 'https://alpha-key.example/v1', enabled: true },
+            { id: 'a2', label: '账号2', enabled: false },
+          ],
+        },
+        {
+          id: 'beta',
+          label: 'Beta 官方',
+          baseUrl: 'https://beta.example/v1',
+          defaultModel: 'beta-pro',
+          models: ['beta-pro'],
+          keys: [{ id: 'b1', label: '官方 Key', apiKey: 'sk-new-beta-key-999999', enabled: true }],
+        },
+      ],
+      probeIntervalMs: 120_000,
+      maxProviderFailures: 4,
+      cooldowns: { quotaMs: 5_000 },
+    }, current)
+    expect(next.providers[0].keys[0]).toMatchObject({ apiKey: 'sk-alpha-key-111111111111', baseUrl: 'https://alpha-key.example/v1', enabled: true })
+    expect(next.providers[0].keys[1]).toMatchObject({ apiKey: 'sk-alpha-key-222222222222', enabled: false })
+    expect(next.providers[0].highAvailability).toBe(false)
+    expect(next.providers[1].keys[0].apiKey).toBe('sk-new-beta-key-999999')
+    expect(next.probeIntervalMs).toBe(120_000)
+    expect(next.maxProviderFailures).toBe(4)
+    expect(next.cooldowns.quotaMs).toBe(5_000)
+    const file = path.join(directory, 'nested', 'ai-providers.json')
+    writeAiProvidersFile(file, next)
+    expect(statSync(file).mode & 0o077).toBe(0)
+    const view = providerPoolView(next, { editable: true, editableReason: null, source: 'file', warning: null })
+    expect(view.providers[0].highAvailability).toBe(false)
+    expect(view.providers[0].keys[0].maskedKey).toBe('sk-alph…1111')
+    expect(JSON.stringify(view)).not.toContain('sk-alpha-key-111111111111')
+  })
+
+  it('requires an API key for a newly added key', () => {
+    const current = parseAiProvidersConfig(rawPool())
+    expect(() => applyProviderPoolInput({
+      providers: [{
+        id: 'alpha',
+        label: 'Alpha 云',
+        baseUrl: 'https://alpha.example/v1',
+        defaultModel: 'alpha-flash',
+        keys: [{ id: 'new-key', label: '新 Key', enabled: true }],
+      }],
+    }, current)).toThrow(/需要填写 API Key/)
+  })
+
+  it('rejects a provider with every key disabled', () => {
+    expect(() => parseAiProvidersConfig({
+      providers: [{
+        id: 'alpha',
+        baseUrl: 'https://alpha.example/v1',
+        defaultModel: 'm1',
+        keys: [{ id: 'a1', apiKey: 'sk-alpha-key-111111111111', enabled: false }],
+      }],
+    })).toThrow(/至少需要一个启用/)
+  })
+})
+
+describe('provider HA switches and reload', () => {
+  it('uses only the first enabled key when highAvailability is false', async () => {
+    const config = parseAiProvidersConfig({
+      ...rawPool(),
+      providers: [{
+        ...rawPool().providers[0],
+        highAvailability: false,
+      }],
+      modelMap: {},
+    })
+    const { user, gateway } = setup(config)
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      seen.push(request(init).authorization)
+      return success('主 Key')
+    }))
+    const result = await gateway.complete(completeInput(user.id))
+    expect(seen).toEqual(['Bearer sk-alpha-key-111111111111'])
+    expect(result.routing.keyId).toBe('a1')
+    expect(gateway.keyCount).toBe(1)
+    // Explicit testing still covers all enabled keys so the user can verify a
+    // second key before turning high availability on.
+    vi.stubGlobal('fetch', vi.fn(async () => success('探活成功')))
+    const probes = await gateway.probe(user.id)
+    expect(probes.map(probe => probe.keyId)).toEqual(['a1', 'a2'])
+  })
+
+  it('skips disabled keys', async () => {
+    const config = parseAiProvidersConfig({
+      ...rawPool(),
+      providers: [{
+        ...rawPool().providers[0],
+        keys: [
+          { ...rawPool().providers[0].keys[0], enabled: false },
+          rawPool().providers[0].keys[1],
+        ],
+      }],
+      modelMap: {},
+    })
+    const { user, gateway } = setup(config)
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      seen.push(request(init).authorization)
+      return success('账号2')
+    }))
+    const result = await gateway.complete(completeInput(user.id))
+    expect(seen).toEqual(['Bearer sk-alpha-key-222222222222'])
+    expect(result.routing.keyId).toBe('a2')
+  })
+
+  it('swaps the provider pool at runtime after a settings save', async () => {
+    const { user, gateway } = setup()
+    let body = ''
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      body = String(init?.body ?? '')
+      return success('旧池')
+    }))
+    await gateway.complete(completeInput(user.id))
+    expect(body).toContain('alpha-flash')
+
+    const next = parseAiProvidersConfig({
+      providers: [{
+        id: 'gamma',
+        label: 'Gamma 新池',
+        baseUrl: 'https://gamma.example/v1',
+        defaultModel: 'gamma-mini',
+        models: ['gamma-mini'],
+        keys: [{ id: 'g1', label: 'Gamma Key', apiKey: 'sk-gamma-key-999999' }],
+      }],
+      modelMap: {},
+    })
+    gateway.reloadProviderPool(next, 'file', null)
+    expect(gateway.providerCount).toBe(1)
+    expect(gateway.status(user.id).source).toBe('file')
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      body = String(init?.body ?? '')
+      return success('新池')
+    }))
+    const result = await gateway.complete(completeInput(user.id))
+    expect(result.routing.providerId).toBe('gamma')
+    expect(body).toContain('gamma-mini')
   })
 })

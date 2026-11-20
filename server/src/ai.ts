@@ -7,6 +7,8 @@ import type {
   AiMessage,
   AiMessageAttachment,
   AiProbeResult,
+  AiProviderPoolInput,
+  AiProviderPoolView,
   AiRoutingInfo,
   AiSendMessageInput,
   AiSession,
@@ -44,7 +46,7 @@ import type { JianshuService } from './jianshu'
 import type { CsdnService } from './csdn'
 import type { VideoService } from './video'
 import { AiGateway, type PreferredAiProvider } from './ai-gateway'
-import { normalizeAiBaseUrl } from './ai-provider-config'
+import { applyProviderPoolInput, normalizeAiBaseUrl, providerPoolView, writeAiProvidersFile } from './ai-provider-config'
 
 /**
  * Provider↔tool rounds per user message. Generous enough for multi-step
@@ -503,7 +505,10 @@ export class AiService {
   settings(userId: string): AiSettings {
     const record = this.database.getAiSettings(userId)
     const poolProviders = this.config.aiProviders?.providers.length ?? 0
-    const poolKeys = this.config.aiProviders?.providers.reduce((total, provider) => total + provider.keys.length, 0) ?? 0
+    const poolKeys = this.config.aiProviders?.providers.reduce((total, provider) => {
+      const enabled = provider.keys.filter(key => key.enabled)
+      return total + (provider.highAvailability ? enabled.length : Math.min(1, enabled.length))
+    }, 0) ?? 0
     if (record) {
       const providers = poolProviders + 1
       const keys = poolKeys + 1
@@ -511,7 +516,7 @@ export class AiService {
     }
     const provider = this.config.aiProviders?.providers[0]
     if (provider) {
-      const first = provider.keys[0]
+      const first = provider.keys.find(key => key.enabled)
       return {
         configured: true,
         baseUrl: first?.baseUrl ?? provider.baseUrl,
@@ -606,6 +611,69 @@ export class AiService {
 
   async probeGateway(userId: string, providerId?: string): Promise<AiProbeResult[]> {
     return this.gateway.probe(userId, this.userPreferred(userId), providerId)
+  }
+
+  private canManageProviderPool(userId: string): boolean {
+    const user = this.database.findUserById(userId)
+    if (!user) return false
+    if (this.config.desktopMode || !this.config.isProduction) return true
+    return this.config.settingsAdmins.includes('*') || this.config.settingsAdmins.includes(user.username.toLowerCase())
+  }
+
+  private providerConfigFile(): string {
+    const explicit = process.env.AI_PROVIDERS_FILE?.trim()
+    return explicit ? path.resolve(explicit) : path.join(this.config.dataDir, 'ai-providers.json')
+  }
+
+  /** Server-wide provider pool metadata for the settings page (masked keys only). */
+  providerPool(userId: string): AiProviderPoolView {
+    const canManage = this.canManageProviderPool(userId)
+    const source = this.config.aiProvidersSource
+    let reason: string | null = null
+    if (!canManage) reason = '仅管理员可修改服务器提供商池；当前可以只读查看，或使用个人大模型配置。'
+    else if (source === 'env') reason = '当前提供商池由 AI_PROVIDERS_JSON 环境变量管理，请修改部署配置并重启服务。'
+    else if (source === 'override') reason = '当前提供商池由启动参数注入，页面不可修改。'
+    return providerPoolView(this.config.aiProviders, {
+      editable: canManage && source !== 'env' && source !== 'override',
+      editableReason: reason,
+      source,
+      warning: this.config.aiProvidersWarning,
+    })
+  }
+
+  saveProviderPool(userId: string, input: AiProviderPoolInput): AiProviderPoolView {
+    if (!this.canManageProviderPool(userId)) throw new ApiError(403, 'ai_provider_forbidden', '仅管理员可修改服务器提供商池')
+    if (this.config.aiProvidersSource === 'env' || this.config.aiProvidersSource === 'override') {
+      throw new ApiError(409, 'ai_providers_readonly', '当前提供商池由环境变量或启动参数管理，不能通过页面修改')
+    }
+    let next: ReturnType<typeof applyProviderPoolInput>
+    try {
+      next = applyProviderPoolInput(input, this.config.aiProviders)
+    } catch (error) {
+      throw new ApiError(400, 'ai_provider_config_invalid', error instanceof Error ? error.message : '提供商配置不合法')
+    }
+    try {
+      writeAiProvidersFile(this.providerConfigFile(), next)
+    } catch (error) {
+      throw new ApiError(500, 'ai_provider_write_failed', error instanceof Error ? error.message : '写入提供商配置失败')
+    }
+    this.config.aiProviders = next
+    this.config.aiProvidersSource = 'file'
+    this.config.aiProvidersWarning = null
+    const provider = next.providers[0]
+    const key = provider?.keys.find(item => item.enabled) ?? provider?.keys[0]
+    if (provider && key) {
+      this.config.aiDefaults = {
+        apiKey: key.apiKey,
+        baseUrl: key.baseUrl ?? provider.baseUrl,
+        model: provider.defaultModel,
+        label: provider.label,
+      }
+    }
+    this.gateway.reloadProviderPool(next, 'file', null)
+    const user = this.database.findUserById(userId)
+    console.info(`[multipush] ai provider pool updated by ${user?.username ?? userId}: providers=${next.providers.length} activeKeys=${this.gateway.keyCount}`)
+    return this.providerPool(userId)
   }
 
   listSessions(userId: string): AiSession[] { return this.database.listAiSessions(userId) }

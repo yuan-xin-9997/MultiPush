@@ -4,6 +4,7 @@ import type {
   AiGatewayStatus,
   AiKeyState,
   AiProbeResult,
+  AiProviderConfigSource,
   AiProviderState,
   AiRoutingInfo,
   AiToolCall,
@@ -16,6 +17,7 @@ import {
   maskApiKey,
   type AiProviderConfig,
   type AiProviderCooldowns,
+  type AiProviderKeyConfig,
   type AiProvidersConfig,
 } from './ai-provider-config'
 
@@ -252,9 +254,11 @@ function modelTier(model: string): string | null {
  * - masked routing records and failover events for the management page.
  */
 export class AiGateway {
-  private readonly providers: AiProviderConfig[]
-  private readonly config: AiProvidersConfig | null
-  private readonly cooldowns: AiProviderCooldowns
+  private providers: AiProviderConfig[]
+  private config: AiProvidersConfig | null
+  private cooldowns: AiProviderCooldowns
+  private providersSource: AiProviderConfigSource
+  private providersWarning: string | null
   private readonly rateLimitWaitMs: number
   private readonly now: () => number
   private readonly keyStates = new Map<string, RuntimeKey>()
@@ -271,6 +275,8 @@ export class AiGateway {
     this.config = appConfig.aiProviders
     this.providers = this.config?.providers ?? []
     this.cooldowns = { ...DEFAULT_PROVIDER_COOLDOWNS, ...(this.config?.cooldowns ?? {}) }
+    this.providersSource = appConfig.aiProvidersSource
+    this.providersWarning = appConfig.aiProvidersWarning
     this.rateLimitWaitMs = Math.max(0, options.rateLimitWaitMs ?? DEFAULT_RATE_LIMIT_WAIT_MS)
     this.now = options.now ?? (() => Date.now())
   }
@@ -284,7 +290,26 @@ export class AiGateway {
   }
 
   get keyCount(): number {
-    return this.providers.reduce((total, provider) => total + provider.keys.length, 0)
+    return this.providers.reduce((total, provider) => total + this.activeKeys(provider).length, 0)
+  }
+
+  /** Swap the provider pool after a settings-page edit and re-arm the prober. */
+  reloadProviderPool(config: AiProvidersConfig | null, source: AiProviderConfigSource, warning: string | null): void {
+    this.stopProber()
+    this.config = config
+    this.providers = config?.providers ?? []
+    this.cooldowns = { ...DEFAULT_PROVIDER_COOLDOWNS, ...(config?.cooldowns ?? {}) }
+    this.providersSource = source
+    this.providersWarning = warning
+    this.keyStates.clear()
+    this.providerStates.clear()
+    this.lastProbeAt.clear()
+    this.startProber()
+  }
+
+  private activeKeys(provider: AiProviderConfig): AiProviderKeyConfig[] {
+    const enabled = provider.keys.filter(key => key.enabled)
+    return provider.highAvailability ? enabled : enabled.slice(0, 1)
   }
 
   get probeIntervalMs(): number {
@@ -403,7 +428,7 @@ export class AiGateway {
   }
 
   /** Build the effective chain: the user's own setting first, then server pool. */
-  private buildChain(userId: string, preferred?: PreferredAiProvider | null): ChainProvider[] {
+  private buildChain(userId: string, preferred?: PreferredAiProvider | null, allEnabledKeys = false): ChainProvider[] {
     const chain: ChainProvider[] = []
     if (preferred?.apiKey && preferred.baseUrl && preferred.model) {
       const apiKey = preferred.apiKey.trim()
@@ -432,7 +457,7 @@ export class AiGateway {
         models: provider.models,
         defaultModel: provider.defaultModel,
         source: 'config',
-        keys: provider.keys.map((key, index) => ({
+        keys: (allEnabledKeys ? provider.keys.filter(key => key.enabled) : this.activeKeys(provider)).map((key, index) => ({
           id: key.id,
           label: key.label,
           apiKey: key.apiKey,
@@ -1021,8 +1046,8 @@ export class AiGateway {
     throw new ApiError(status, 'ai_all_providers_failed', `所有大模型提供商均不可用（共尝试 ${attempts} 次）。最后一次原因：${first.message}${summary ? `；失败摘要：${summary}` : ''}`)
   }
 
-  private chainWithPreferred(userId: string, preferred?: PreferredAiProvider | null): ChainProvider[] {
-    return this.buildChain(userId, preferred)
+  private chainWithPreferred(userId: string, preferred?: PreferredAiProvider | null, allEnabledKeys = false): ChainProvider[] {
+    return this.buildChain(userId, preferred, allEnabledKeys)
   }
 
   /** Fetch a status snapshot for the management page. Never includes raw keys. */
@@ -1069,8 +1094,8 @@ export class AiGateway {
     })
     return {
       configured: chain.length > 0,
-      source: this.appConfig.aiProvidersSource,
-      warning: this.appConfig.aiProvidersWarning,
+      source: this.providersSource,
+      warning: this.providersWarning,
       probeIntervalMs: this.probeIntervalMs,
       updatedAt: new Date(this.now()).toISOString(),
       providers,
@@ -1101,7 +1126,9 @@ export class AiGateway {
     this.lastProbeAt.set(throttleKey, now)
     this.probeInFlight = true
     try {
-      const chain = this.chainWithPreferred(userId, preferred).filter(provider => !providerId || provider.id === providerId)
+      // Explicit testing covers every enabled key, even when the provider's
+      // high-availability toggle currently only uses the first key.
+      const chain = this.chainWithPreferred(userId, preferred, true).filter(provider => !providerId || provider.id === providerId)
       const results: AiProbeResult[] = []
       for (const provider of chain) {
         let providerSucceeded = false
@@ -1160,11 +1187,11 @@ export class AiGateway {
       for (const provider of this.providers) {
         const providerState = this.providerState(provider.id)
         const providerDue = providerState.state !== 'available' && !this.isCooling(providerState.cooldownUntil)
-        for (const key of provider.keys) {
+        for (const key of this.activeKeys(provider)) {
           const state = this.keyState(provider.id, key.id)
           const keyDue = state.state !== 'available' && !this.isCooling(state.cooldownUntil)
           if (keyDue || (providerDue && state.state === 'available')) {
-            due.push({ provider: { ...this.toChainProvider(provider) }, key: { ...key, baseUrl: key.baseUrl || provider.baseUrl, masked: maskApiKey(key.apiKey), priority: 1 }, model: provider.defaultModel })
+            due.push({ provider: this.toChainProvider(provider), key: { ...key, baseUrl: key.baseUrl || provider.baseUrl, masked: maskApiKey(key.apiKey), priority: 1 }, model: provider.defaultModel })
             if (due.length >= PROBE_MAX_PER_TICK) break
           }
         }
@@ -1193,7 +1220,7 @@ export class AiGateway {
       models: provider.models,
       defaultModel: provider.defaultModel,
       source: 'config',
-      keys: provider.keys.map((key, index) => ({
+      keys: this.activeKeys(provider).map((key, index) => ({
         id: key.id,
         label: key.label,
         apiKey: key.apiKey,

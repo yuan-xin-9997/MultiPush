@@ -1313,16 +1313,87 @@ export interface AiProviderRequest {
   tokensOut: number
 }
 
+export type AiProviderConfigSource = 'env' | 'file' | 'legacy' | 'override' | 'none'
+
 export interface AiGatewayStatus {
   configured: boolean
   /** Where the provider pool came from: environment, protected file, or legacy single-provider env. */
-  source: 'env' | 'file' | 'legacy' | 'override' | 'none'
+  source: AiProviderConfigSource
   warning: string | null
   probeIntervalMs: number
   updatedAt: string
   providers: AiGatewayProviderStatus[]
   events: AiFailoverEvent[]
   requests: AiProviderRequest[]
+}
+
+/** Editable provider pool metadata. Masked keys only; raw keys are never returned. */
+export interface AiProviderKeyView {
+  id: string
+  label: string
+  maskedKey: string
+  /** Key-specific base URL override; null means inherit the provider base URL. */
+  baseUrl: string | null
+  enabled: boolean
+}
+
+export interface AiProviderView {
+  id: string
+  label: string
+  baseUrl: string
+  defaultModel: string
+  models: string[]
+  /** When false, only the first enabled key is used (no multi-key rotation). */
+  highAvailability: boolean
+  keys: AiProviderKeyView[]
+}
+
+export interface AiProviderCooldownSettings {
+  quotaMs: number
+  authMs: number
+  rateLimitMs: number
+  transientMs: number
+  providerMs: number
+}
+
+export interface AiProviderPoolView {
+  editable: boolean
+  editableReason: string | null
+  source: AiProviderConfigSource
+  warning: string | null
+  providers: AiProviderView[]
+  modelMap: Record<string, Record<string, string> | string>
+  probeIntervalMs: number
+  maxProviderFailures: number
+  cooldowns: AiProviderCooldownSettings
+  updatedAt: string
+}
+
+export interface AiProviderKeyInput {
+  id?: string
+  label: string
+  /** Leave empty/omitted for an existing key to keep its stored secret. */
+  apiKey?: string
+  baseUrl?: string | null
+  enabled?: boolean
+}
+
+export interface AiProviderInput {
+  id: string
+  label: string
+  baseUrl: string
+  defaultModel: string
+  models?: string[]
+  highAvailability?: boolean
+  keys: AiProviderKeyInput[]
+}
+
+export interface AiProviderPoolInput {
+  providers: AiProviderInput[]
+  modelMap?: Record<string, Record<string, string> | string>
+  probeIntervalMs?: number
+  maxProviderFailures?: number
+  cooldowns?: Partial<AiProviderCooldownSettings>
 }
 
 export interface AiProbeResult {

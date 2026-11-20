@@ -28,6 +28,8 @@ export interface AppConfig {
   aiProviders: AiProvidersConfig | null
   aiProvidersSource: AiProvidersSource
   aiProvidersWarning: string | null
+  /** Usernames allowed to edit the server-wide provider pool in production. */
+  settingsAdmins: string[]
   version: string
 }
 
@@ -42,6 +44,7 @@ export interface ConfigOverrides {
   desktopMode?: boolean
   aiDefaults?: AiDefaultConfig | null
   aiProviders?: AiProvidersConfig | null
+  settingsAdmins?: string[]
 }
 
 const DEFAULT_PORT = 34080
@@ -221,6 +224,10 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
     aiProviders: loadedProviders.config,
     aiProvidersSource: loadedProviders.source,
     aiProvidersWarning: loadedProviders.warning,
+    settingsAdmins: overrides.settingsAdmins ?? (trimmedEnv('MULTIPUSH_ADMIN_USERNAMES') ?? '')
+      .split(/[\s,;]+/)
+      .map(name => name.trim().toLowerCase())
+      .filter(Boolean),
     version: typeof packageJson.version === 'string' ? packageJson.version : '1.0.0',
   }
 }

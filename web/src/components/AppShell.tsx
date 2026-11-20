@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bot, LibraryBig, LogOut, Menu, Send, Sparkles, X } from 'lucide-react'
+import { Bot, LibraryBig, LogOut, Menu, Send, Settings, Sparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/contexts/AuthContext'
 import { useServerInfo } from '@/contexts/ServerContext'
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/library', label: '内容库', icon: LibraryBig, badge: null },
   { to: '/render', label: '智能渲染', icon: Sparkles, badge: null },
   { to: '/publish', label: '发布管理', icon: Send, badge: null },
+  { to: '/settings', label: '设置', icon: Settings, badge: null },
 ] as const
 
 export default function AppShell() {
@@ -121,6 +122,12 @@ export default function AppShell() {
                 </div>
               }
               items={[
+                {
+                  key: 'settings',
+                  label: '设置',
+                  icon: <Settings size={16} />,
+                  onSelect: () => navigate('/settings'),
+                },
                 ...(!desktopMode && !user?.email ? [{ key: 'bind-email', label: '绑定邮箱', onSelect: () => navigate('/bind-email') }] : []),
                 {
                   key: 'logout',

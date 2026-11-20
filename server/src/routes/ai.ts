@@ -14,6 +14,34 @@ const settingsSchema = z.object({
 
 const sessionSchema = z.object({ title: z.string().trim().max(80).optional() }).strict()
 const probeSchema = z.object({ providerId: z.string().trim().min(1).max(120).optional() }).strict()
+const providerKeySchema = z.object({
+  id: z.string().trim().min(1).max(80).optional(),
+  label: z.string().trim().min(1).max(100),
+  apiKey: z.string().trim().max(4096).optional(),
+  baseUrl: z.string().trim().max(2048).nullable().optional(),
+  enabled: z.boolean().optional(),
+}).strict()
+const providerPoolSchema = z.object({
+  providers: z.array(z.object({
+    id: z.string().trim().min(1).max(64),
+    label: z.string().trim().min(1).max(100),
+    baseUrl: z.string().trim().min(1).max(2048),
+    defaultModel: z.string().trim().min(1).max(200),
+    models: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
+    highAvailability: z.boolean().optional(),
+    keys: z.array(providerKeySchema).min(1).max(20),
+  }).strict()).min(1).max(20),
+  modelMap: z.record(z.string(), z.union([z.string(), z.record(z.string(), z.string())])).optional(),
+  probeIntervalMs: z.number().int().min(30_000).max(86_400_000).optional(),
+  maxProviderFailures: z.number().int().min(1).max(20).optional(),
+  cooldowns: z.object({
+    quotaMs: z.number().int().min(1_000).max(21_600_000).optional(),
+    authMs: z.number().int().min(1_000).max(21_600_000).optional(),
+    rateLimitMs: z.number().int().min(1_000).max(21_600_000).optional(),
+    transientMs: z.number().int().min(1_000).max(21_600_000).optional(),
+    providerMs: z.number().int().min(1_000).max(21_600_000).optional(),
+  }).strict().optional(),
+}).strict()
 const documentSchema = z.object({
   name: z.string().trim().min(1).max(200),
   mimeType: z.string().trim().max(100).default('text/plain'),
@@ -37,6 +65,12 @@ export function createAiRouter(service: AiService): Router {
   }))
   router.delete('/settings', asyncHandler((req, res) => { service.deleteSettings(currentUser(req).id); res.json({ ok: true }) }))
   router.post('/settings/test', asyncHandler(async (req, res) => { res.json(await service.testSettings(currentUser(req).id)) }))
+
+  router.get('/providers', asyncHandler((req, res) => { res.json({ pool: service.providerPool(currentUser(req).id) }) }))
+  router.put('/providers', asyncHandler((req, res) => {
+    const input = parseInput(providerPoolSchema, req.body)
+    res.json({ pool: service.saveProviderPool(currentUser(req).id, input) })
+  }))
 
   router.get('/gateway', asyncHandler((req, res) => { res.json({ gateway: service.gatewayStatus(currentUser(req).id) }) }))
   router.post('/gateway/probe', asyncHandler(async (req, res) => {
