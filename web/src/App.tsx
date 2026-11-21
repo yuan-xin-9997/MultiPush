@@ -1,5 +1,5 @@
 import EmailAccountPage from '@/features/auth/EmailAccountPage'
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import AppShell from '@/components/AppShell'
@@ -15,6 +15,8 @@ import PublishPage from '@/features/publish/PublishPage'
 import AiPage from '@/features/ai/AiPage'
 import SettingsPage from '@/features/settings/SettingsPage'
 import { Loader2 } from 'lucide-react'
+
+const VideoStudioPage = lazy(() => import('@/features/video/VideoStudioPage'))
 
 function FullScreenLoading() {
   return (
@@ -62,6 +64,16 @@ export default function App() {
         element={
           <Protected>
             <VideoWorkspacePage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/video/:id/studio"
+        element={
+          <Protected>
+            <Suspense fallback={<FullScreenLoading />}>
+              <VideoStudioPage />
+            </Suspense>
           </Protected>
         }
       />

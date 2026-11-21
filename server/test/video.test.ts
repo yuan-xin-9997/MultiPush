@@ -145,6 +145,48 @@ describe('video timeline persistence', () => {
     expect(context.database.getVideoProjectRow(alice.id, copy.id).clips).toHaveLength(2)
   })
 
+  it('stores a studio project snapshot while keeping compatibility clips', async () => {
+    const context = setup()
+    const { user, content } = createVideoUser(context, 'video_studio')
+    const media = context.database.createMedia(user.id, {
+      kind: 'video',
+      filename: 'studio-clip.mp4',
+      originalName: 'studio-clip.mp4',
+      mimeType: 'video/mp4',
+      size: 2048,
+      meta: { duration: 10, width: 1920, height: 1080, hasAudio: true },
+    })
+    const video = new VideoService(context.database, context.config)
+    const project = {
+      version: 1,
+      tracks: [{
+        id: 't-main',
+        name: '主视频',
+        type: 'element',
+        elements: [{
+          id: 'e-studio',
+          trackId: 't-main',
+          type: 'video',
+          name: 'studio-clip.mp4',
+          s: 0,
+          e: 3,
+          props: { src: '/uploads/studio-clip.mp4', time: 1, playbackRate: 1, volume: 1 },
+          metadata: { mediaId: media.id, duration: 10 },
+        }],
+      }],
+    }
+
+    const saved = await video.saveStudioProject(user.id, content.id, project, [
+      { mediaId: media.id, trimStart: 1, trimEnd: 4, duration: 10 },
+    ])
+    expect(saved.project).toEqual(project)
+    expect(saved.clips).toHaveLength(1)
+    expect(saved.clips[0]?.trimStart).toBe(1)
+    expect((await video.getStudioProject(user.id, content.id)).project).toEqual(project)
+    expect((await video.getProject(user.id, content.id)).clips[0]?.trimStart).toBe(1)
+    await expect(video.saveStudioProject(user.id, content.id, project, [])).rejects.toThrow('没有可识别的视频片段')
+  })
+
   it('keeps article contents untouched and defaults missing metadata', () => {
     const context = setup()
     const user = context.database.createUser({ username: 'video_meta', email: 'video-meta@example.com', passwordHash: 'hash', displayName: 'Meta' })

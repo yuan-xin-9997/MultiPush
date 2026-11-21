@@ -397,6 +397,15 @@ export interface VideoProject {
   updatedAt: string
 }
 
+/** Full multi-track studio project (Twick ProjectJSON) rounded to its version. */
+export interface VideoStudioProject {
+  contentId: string
+  clips: VideoClipDetail[]
+  /** Null until the first studio save; the classic editor can continue to be used. */
+  project: Record<string, unknown> | null
+  updatedAt: string
+}
+
 export type VideoExportStatus = 'queued' | 'running' | 'completed' | 'failed'
 
 export interface VideoExport {

@@ -4,7 +4,7 @@ import { currentUser } from '../auth'
 import type { Database } from '../db'
 import type { VideoService } from '../video'
 import { asyncHandler } from '../errors'
-import { parseInput, videoTimelineSchema } from '../validation'
+import { parseInput, videoStudioSchema, videoTimelineSchema } from '../validation'
 
 /**
  * Timeline editing + export endpoints for video contents. Auth is applied per
@@ -33,6 +33,28 @@ export function createVideoRouter(database: Database, video: VideoService, requi
       const user = currentUser(req)
       const input = parseInput(videoTimelineSchema, req.body)
       const project = await video.saveTimeline(user.id, req.params.id, input.clips)
+      res.json({ project })
+    }),
+  )
+
+  router.get(
+    '/contents/:id/video/studio',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req)
+      const project = await video.getStudioProject(user.id, req.params.id)
+      const capability = await video.capability()
+      res.json({ project, capability })
+    }),
+  )
+
+  router.put(
+    '/contents/:id/video/studio',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const user = currentUser(req)
+      const input = parseInput(videoStudioSchema, req.body)
+      const project = await video.saveStudioProject(user.id, req.params.id, input.project, input.clips)
       res.json({ project })
     }),
   )
