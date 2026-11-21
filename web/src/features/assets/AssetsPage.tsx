@@ -24,6 +24,7 @@ import {
   Upload,
   X,
 } from 'lucide-react'
+import { marked } from 'marked'
 import { toast } from 'sonner'
 import type { MediaAsset, MediaFolder, MediaKind, MediaStats } from '@shared/types'
 import { absoluteUrl, api } from '@/lib/api'
@@ -63,6 +64,8 @@ const DOCUMENT_EXTENSIONS = new Set([
 const TEXT_PREVIEW_EXTENSIONS = new Set([
   'txt', 'md', 'markdown', 'csv', 'json', 'html', 'htm', 'xml', 'yml', 'yaml',
 ])
+const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown'])
+const BLOCKED_PREVIEW_TAGS = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'BASE', 'FORM'])
 const UPLOAD_ACCEPT = [
   ...IMAGE_EXTENSIONS,
   ...VIDEO_EXTENSIONS,
@@ -136,6 +139,61 @@ function copyMediaLink(media: MediaAsset): void {
     .catch(() => toast.error('复制链接失败'))
 }
 
+function stemOf(name: string): string {
+  return name.replace(/\.[^.]+$/, '')
+}
+
+function renderMarkdownHtml(markdown: string, images: MediaAsset[]): string {
+  if (!markdown.trim()) return ''
+  const rendered = marked.parse(markdown, { gfm: true, breaks: false, async: false }) as string
+  const document = new DOMParser().parseFromString(rendered, 'text/html')
+  const byName = new Map(images.map((image) => [image.originalName.toLowerCase(), image]))
+  const byStem = new Map(images.map((image) => [stemOf(image.originalName).toLowerCase(), image]))
+
+  // Yuque exports keep relative asset paths such as
+  // "构建个人数字生活蓝图.assets/xxx.heic". Resolve them to uploaded assets in
+  // the same folder; HEIC exports map to the converted JPEG by file stem.
+  document.body.querySelectorAll('img').forEach((image) => {
+    const source = image.getAttribute('src') ?? ''
+    if (!source || /^(?:https?:|data:|blob:)/i.test(source)) return
+    let name = source.split(/[?#]/)[0].split('/').pop() ?? ''
+    try {
+      name = decodeURIComponent(name)
+    } catch {
+      // Keep the raw name when it is not valid percent-encoding.
+    }
+    const asset = byName.get(name.toLowerCase()) ?? byStem.get(stemOf(name).toLowerCase())
+    if (asset) {
+      image.setAttribute('src', absoluteUrl(asset.url))
+      image.setAttribute('loading', 'lazy')
+    } else {
+      image.removeAttribute('src')
+    }
+  })
+
+  for (const element of Array.from(document.body.querySelectorAll('*'))) {
+    if (BLOCKED_PREVIEW_TAGS.has(element.tagName)) {
+      element.remove()
+      continue
+    }
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLowerCase()
+      if (name.startsWith('on') || name === 'srcdoc' || name === 'style' || name === 'class') {
+        element.removeAttribute(attribute.name)
+        continue
+      }
+      if ((name === 'href' || name === 'src') && /^\s*javascript:/i.test(attribute.value)) {
+        element.removeAttribute(attribute.name)
+      }
+    }
+    if (element.tagName === 'A') {
+      element.setAttribute('target', '_blank')
+      element.setAttribute('rel', 'noopener noreferrer')
+    }
+  }
+  return document.body.innerHTML
+}
+
 export default function AssetsPage() {
   const [items, setItems] = useState<MediaAsset[]>([])
   const [total, setTotal] = useState(0)
@@ -167,6 +225,7 @@ export default function AssetsPage() {
   const [previewText, setPreviewText] = useState('')
   const [previewTextLoading, setPreviewTextLoading] = useState(false)
   const [previewTextError, setPreviewTextError] = useState('')
+  const [previewImages, setPreviewImages] = useState<MediaAsset[]>([])
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null)
   const [deleting, setDeleting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -252,18 +311,31 @@ export default function AssetsPage() {
     setPreviewText('')
     setPreviewTextError('')
     setPreviewTextLoading(false)
+    setPreviewImages([])
     if (!selected || selected.kind !== 'document') return
     const extension = extensionOf(selected.originalName)
     if (!TEXT_PREVIEW_EXTENSIONS.has(extension) || selected.size > TEXT_PREVIEW_LIMIT) return
     let cancelled = false
     setPreviewTextLoading(true)
-    fetch(absoluteUrl(selected.url))
-      .then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        return response.text()
-      })
-      .then((text) => {
-        if (!cancelled) setPreviewText(text.slice(0, TEXT_PREVIEW_CHARS))
+    const textRequest = fetch(absoluteUrl(selected.url)).then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return response.text()
+    })
+    const imageRequest = MARKDOWN_EXTENSIONS.has(extension)
+      ? api.media
+          .list({
+            kind: 'image',
+            folderId: selected.folderId ?? 'unfiled',
+            pageSize: 100,
+          })
+          .then((result) => result.media)
+          .catch(() => [])
+      : Promise.resolve([])
+    Promise.all([textRequest, imageRequest])
+      .then(([text, images]) => {
+        if (cancelled) return
+        setPreviewText(text.slice(0, TEXT_PREVIEW_CHARS))
+        setPreviewImages(images)
       })
       .catch((error) => {
         if (!cancelled) setPreviewTextError(getErrorMessage(error, '读取文档失败'))
@@ -472,7 +544,12 @@ export default function AssetsPage() {
 
   const selectedExtension = selected ? extensionOf(selected.originalName) : ''
   const selectedIsPdf = selected?.kind === 'document' && selectedExtension === 'pdf'
+  const selectedIsMarkdown = MARKDOWN_EXTENSIONS.has(selectedExtension)
   const selectedHasTextPreview = Boolean(selected) && TEXT_PREVIEW_EXTENSIONS.has(selectedExtension)
+  const previewMarkdownHtml = useMemo(
+    () => (selectedIsMarkdown && previewText ? renderMarkdownHtml(previewText, previewImages) : ''),
+    [selectedIsMarkdown, previewText, previewImages],
+  )
   const activeFolder =
     activeFolderId && activeFolderId !== 'unfiled'
       ? folders.find((folder) => folder.id === activeFolderId) ?? null
@@ -906,7 +983,17 @@ export default function AssetsPage() {
               ) : previewTextError ? (
                 <div className="asset-preview-loading is-error">{previewTextError}</div>
               ) : previewText ? (
-                <pre className="asset-preview-text">{previewText}</pre>
+                selectedIsMarkdown ? (
+                  <div className="asset-markdown-preview">
+                    <div className="asset-markdown-label">Markdown 预览</div>
+                    <article
+                      className="asset-markdown"
+                      dangerouslySetInnerHTML={{ __html: previewMarkdownHtml }}
+                    />
+                  </div>
+                ) : (
+                  <pre className="asset-preview-text">{previewText}</pre>
+                )
               ) : (
                 <div className="asset-preview-doc">
                   <FileText size={38} />

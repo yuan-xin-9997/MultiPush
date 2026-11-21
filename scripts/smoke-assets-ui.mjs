@@ -27,7 +27,7 @@ const videoFixture = path.join(root, 'server', 'test', 'fixtures', 'clip_a.mp4')
 assert.ok(existsSync(videoFixture), 'video fixture missing')
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4fy0NAAUTAjz/apfHAAAAAElFTkSuQmCC', 'base64')
-const MARKDOWN = Buffer.from('# 素材说明\n\n这是素材库的文档预览内容。\n\n- 第一项\n- 第二项\n', 'utf8')
+const MARKDOWN = Buffer.from('# 素材说明\n\n这是素材库的文档预览内容。\n\n![封面](cover.png)\n\n- 第一项\n- 第二项\n', 'utf8')
 
 const server = spawn(process.execPath, ['server/dist/index.js'], {
   cwd: root,
@@ -120,6 +120,17 @@ try {
   assert.match(await productFolder.innerText(), /3 个素材/)
   await page.screenshot({ path: path.join(output, 'desktop.png') })
 
+  // Markdown preview must render and resolve a relative image reference to the
+  // uploaded asset in the same folder.
+  await page.getByRole('button', { name: '预览 素材说明.md', exact: true }).click()
+  await page.waitForFunction(() => (document.querySelector('.asset-markdown')?.textContent || '').includes('素材库的文档预览内容'))
+  await page.waitForFunction(() => {
+    const image = document.querySelector('.asset-markdown img')
+    return Boolean(image?.getAttribute('src')?.includes('/uploads/'))
+  })
+  await page.screenshot({ path: path.join(output, 'markdown-preview.png') })
+  await page.getByRole('button', { name: '关闭弹窗' }).click()
+
   // Folder navigation and a second folder.
   await page.locator('.assets-folder-card.is-all').click()
   await page.waitForFunction(() => document.querySelectorAll('.asset-name').length === 3)
@@ -188,7 +199,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.asset-name').length === 2)
 
   await page.getByRole('button', { name: '预览 素材说明.md', exact: true }).click()
-  await page.waitForFunction(() => (document.querySelector('.asset-preview-text')?.textContent || '').includes('素材库的文档预览内容'))
+  await page.waitForFunction(() => (document.querySelector('.asset-markdown')?.textContent || '').includes('素材库的文档预览内容'))
   await page.getByRole('button', { name: '关闭弹窗' }).click()
   await page.getByRole('button', { name: '预览 演示视频.mp4', exact: true }).click()
   await page.locator('video.asset-preview-media').waitFor()
