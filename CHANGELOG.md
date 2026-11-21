@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 2026-11-21 · 素材库 Markdown 预览与语雀文章图片归档
+
+**改了什么**
+
+- 素材库文本预览升级：`md` / `markdown` 文件使用 `marked` 渲染为富文本预览，支持标题、段落、列表、引用、代码块、表格、链接和图片；其他文本格式仍显示源码。
+- Markdown 中的相对图片路径会按「同文件夹素材」自动解析为已上传图片 URL，兼容语雀导出的 `文章名.assets/xxx.jpeg|png|heic` 结构。
+- 语雀 HEIC 图片在归档时转换为 JPEG；预览按文件主名匹配，因此 Markdown 中仍保留原 `.heic` 引用也能显示转换后的图片。
+- 预览 HTML 使用 DOMParser 清洗：移除 script/style/iframe/object/embed/form、事件属性、`javascript:` URL、style/class，外部链接统一新标签打开。
+- `npm run smoke:assets` 增加 Markdown 相对图片预览断言，并更新 README、产品规格、用户指南和验收计划。
+- 生产数据：在「我写的文章」文件夹补传《构建个人数字生活蓝图》的 39 张配图（9 张 HEIC 已转 JPEG），文件夹共 40 个素材（39 图片 + 1 Markdown）。
+
+**验证**
+
+- `npm run typecheck` 通过；`npm run build` 通过。
+- `npm run smoke:assets` 通过：Markdown 预览渲染、同文件夹 `cover.png` 相对引用解析为 `/uploads/` URL，随后继续完成文件夹/移动/删除/移动端回归。
+- 生产素材库确认：`我写的文章` 文件夹 39 张图片、1 个 Markdown 文档；所有 39 个 Markdown 图片引用均能在同文件夹按文件名或主名匹配到素材。
+
 ## 2026-11-21 · 从素材库向文章 / 图文 / 视频添加内容
 
 **改了什么**
