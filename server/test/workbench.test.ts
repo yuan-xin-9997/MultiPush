@@ -3,7 +3,7 @@ import { createCardId, fitCardBody, prepareXhsCaption, selectXhsPublishCards, ge
 import { renderPlatforms } from '../src/renderers'
 import { adjustPlatformRender } from '../src/render-adjustment'
 import { platformAdjustmentSchema } from '../src/validation'
-import type { ContentDetail, PlatformRender } from '../../shared/types'
+import { PLATFORM_ORDER, type ContentDetail, type PlatformRender } from '../../shared/types'
 
 const source = {
   id: 'source', title: '原文标题', contentHtml: '<h2>段落</h2><p>这是<strong>正文</strong>。</p><img src="/uploads/a.png">',
@@ -87,6 +87,12 @@ describe('render workbench', () => {
     expect(render.authorName).toBe('作者设置')
     expect(render.downloads[0].content).toContain('作者设置')
     expect(publishChecks(render, true).find((check) => check.label === '原文与设置版本')?.ok).toBe(false)
+  })
+
+  it('renders every supported platform in one pass', async () => {
+    const results = await renderPlatforms({ ...input, platforms: PLATFORM_ORDER })
+    expect(results).toHaveLength(PLATFORM_ORDER.length)
+    expect(results.map((render) => render.platform)).toEqual(PLATFORM_ORDER)
   })
 
   it('omits disabled hashtags from both captions and rendered card metadata', async () => {

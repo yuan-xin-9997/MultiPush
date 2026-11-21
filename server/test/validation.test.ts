@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { registerSchema, changePasswordSchema, loginSchema } from '../src/validation'
+import { PLATFORMS, PLATFORM_ORDER } from '../../shared/types'
+import { batchRenderSchema, changePasswordSchema, loginSchema, registerSchema, renderRequestSchema } from '../src/validation'
 import { DOCUMENT_MAX_BYTES, getMediaDescriptor, maxBytesFor } from '../src/upload'
 
 describe('security input validation', () => {
@@ -14,6 +15,13 @@ describe('security input validation', () => {
     }
     // Existing long-password accounts must still be able to sign in and change passwords.
     expect(loginSchema.safeParse({ account: 'audit', password: 'a'.repeat(100) }).success).toBe(true)
+  })
+
+  it('accepts every supported platform in one render or batch render request', () => {
+    expect(new Set(PLATFORM_ORDER)).toEqual(new Set(PLATFORMS.map((platform) => platform.id)))
+    expect(renderRequestSchema.parse({ contentId: 'content-1', platforms: PLATFORM_ORDER }).platforms).toEqual(PLATFORM_ORDER)
+    expect(batchRenderSchema.safeParse({ contentIds: ['content-1'], platforms: PLATFORM_ORDER }).success).toBe(true)
+    expect(renderRequestSchema.safeParse({ contentId: 'content-1', platforms: ['unknown'] }).success).toBe(false)
   })
 
   it('rejects SVG uploads including uppercase extensions while allowing raster images', () => {

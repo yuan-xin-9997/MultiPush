@@ -182,7 +182,6 @@ export const renderRequestSchema = z.object({
   platforms: z
     .array(platformSchema)
     .min(1, '请至少选择一个平台')
-    .max(14, '最多选择十四个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
 })
@@ -212,7 +211,6 @@ export const batchRenderSchema = z.object({
   platforms: z
     .array(platformSchema)
     .min(1, '请至少选择一个平台')
-    .max(14, '最多选择十四个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
 }).strict()
