@@ -9,6 +9,7 @@ import {
   FilePlus2,
   FolderInput,
   Grid2X2,
+  Images,
   List,
   Menu,
   Plus,
@@ -21,7 +22,7 @@ import {
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Book, ContentListResult, ContentSummary } from '@shared/types'
+import type { Book, ContentKind, ContentListResult, ContentSummary } from '@shared/types'
 import { api } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { formatNumber } from '@/lib/format'
@@ -70,6 +71,18 @@ function modeFromPath(pathname: string): { mode: LibraryMode; bookId: string | n
 
 function emptyResult(page: number): ContentListResult {
   return { items: [], total: 0, page, pageSize: LIBRARY_PAGE_SIZE }
+}
+
+function contentPath(kind: ContentKind, id: string): string {
+  if (kind === 'video') return `/video/${id}`
+  if (kind === 'gallery') return `/gallery/${id}`
+  return `/editor/${id}`
+}
+
+function contentDefaultTitle(kind: ContentKind): string {
+  if (kind === 'video') return '无标题视频'
+  if (kind === 'gallery') return '无标题图文'
+  return '无标题文章'
 }
 
 export default function LibraryPage() {
@@ -209,7 +222,7 @@ export default function LibraryPage() {
 
   const actions: DocumentActions = useMemo(
     () => ({
-      open: (item) => navigate(item.kind === 'video' ? `/video/${item.id}` : `/editor/${item.id}`),
+      open: (item) => navigate(contentPath(item.kind, item.id)),
       toggleFavorite: (item) => {
         void api.contents
           .setFavorite(item.id, !item.favorite)
@@ -268,15 +281,15 @@ export default function LibraryPage() {
     [navigate, reload],
   )
 
-  async function createDocument(kind: 'article' | 'video' = 'article') {
+  async function createDocument(kind: ContentKind = 'article') {
     try {
       const targetBookId = mode === 'book' && activeBookId !== UNFILED_BOOK_ID ? activeBookId : null
       const { content } = await api.contents.create({
-        title: kind === 'video' ? '无标题视频' : '无标题文档',
+        title: contentDefaultTitle(kind),
         kind,
         bookId: targetBookId,
       })
-      navigate(kind === 'video' ? `/video/${content.id}` : `/editor/${content.id}`)
+      navigate(contentPath(kind, content.id))
     } catch (error) {
       toast.error(getErrorMessage(error, '创建内容失败'))
     }
@@ -482,13 +495,17 @@ export default function LibraryPage() {
                   <Upload size={16} />
                   导入
                 </button>
+                <button type="button" className="btn" onClick={() => void createDocument('gallery')}>
+                  <Images size={16} />
+                  新建图文
+                </button>
                 <button type="button" className="btn" onClick={() => void createDocument('video')}>
                   <Clapperboard size={16} />
                   新建视频
                 </button>
                 <button type="button" className="btn btn-primary" onClick={() => void createDocument('article')}>
                   <FilePlus2 size={16} />
-                  新建文档
+                  新建文章
                 </button>
               </>
             ) : (
@@ -708,7 +725,11 @@ export default function LibraryPage() {
                   <div className="btn-group">
                     <button type="button" className="btn btn-primary" onClick={() => void createDocument('article')}>
                       <Plus size={16} />
-                      新建文档
+                      新建文章
+                    </button>
+                    <button type="button" className="btn" onClick={() => void createDocument('gallery')}>
+                      <Images size={16} />
+                      新建图文
                     </button>
                     <button type="button" className="btn" onClick={() => void createDocument('video')}>
                       <Clapperboard size={16} />

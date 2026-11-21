@@ -10,10 +10,13 @@ export type PlatformId = 'wechat' | 'wechatpic' | 'xiaohongshu' | 'zhihu' | 'wei
 
 export type ContentStatus = 'draft' | 'ready'
 
-/** A content is either a rich-text article or a video-first note. */
-export type ContentKind = 'article' | 'video'
+/**
+ * A content is a rich-text article, an image-first gallery note (公众号贴图 /
+ * 抖音图文 / 小红书), or a video-first note.
+ */
+export type ContentKind = 'article' | 'gallery' | 'video'
 
-export type MediaKind = 'image' | 'video'
+export type MediaKind = 'image' | 'video' | 'document'
 
 export type RenderPreviewMode = 'article' | 'cards' | 'video' | 'vertical'
 
@@ -313,7 +316,33 @@ export interface MediaAsset {
   duration?: number | null
   width?: number | null
   height?: number | null
+  /** Owning folder, or null when the asset is unfiled. */
+  folderId: string | null
   createdAt: string
+}
+
+export interface MediaFolder {
+  id: string
+  name: string
+  assetCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MediaListResult {
+  media: MediaAsset[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export interface MediaStats {
+  total: number
+  images: number
+  videos: number
+  documents: number
+  /** Sum of all asset sizes in bytes. */
+  bytes: number
 }
 
 // ---------------------------------------------------------------- video editing

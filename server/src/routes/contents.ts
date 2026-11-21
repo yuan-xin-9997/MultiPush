@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import type { ContentWriteValues } from '../db'
-import type { ContentDetail, ContentInput } from '../../../shared/types'
+import type { ContentDetail, ContentInput, ContentKind } from '../../../shared/types'
 import { currentUser } from '../auth'
 import { defaultContentTitle, deriveContentMetrics, normalizeTags } from '../content-utils'
 import { contentHtmlHash, tiptapJsonToHtml } from '../tiptap-html'
@@ -13,6 +13,12 @@ import {
   parseInput,
   permanentQuerySchema,
 } from '../validation'
+
+function normalizeContentKind(value: ContentKind | undefined): ContentKind {
+  if (value === 'video') return 'video'
+  if (value === 'gallery') return 'gallery'
+  return 'article'
+}
 
 function resolveBookId(database: Database, userId: string, bookId: string | null): string | null {
   if (bookId === null) return null
@@ -33,7 +39,7 @@ function createValues(database: Database, userId: string, input: ContentInput): 
   })
   return {
     title: defaultContentTitle(input.title),
-    kind: input.kind === 'video' ? 'video' : 'article',
+    kind: normalizeContentKind(input.kind),
     bookId: input.bookId ? resolveBookId(database, userId, input.bookId) : null,
     contentJson,
     contentHtml,

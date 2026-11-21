@@ -1329,10 +1329,12 @@
 
   .library-head-actions {
     align-self: stretch;
+    flex-wrap: wrap;
   }
 
   .library-head-actions .btn {
-    flex: 1;
+    flex: 1 1 calc(50% - 5px);
+    justify-content: center;
   }
 
   .library-toolbar {
@@ -1430,6 +1432,10 @@
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;
+}
+
+.document-kind-badge.is-gallery {
+  background: #6b4de0;
 }
 
 .document-cover .document-kind-badge {

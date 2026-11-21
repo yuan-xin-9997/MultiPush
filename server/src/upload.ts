@@ -6,6 +6,7 @@ import { ApiError } from './errors'
 
 export const IMAGE_MAX_BYTES = 20 * 1024 * 1024
 export const VIDEO_MAX_BYTES = 200 * 1024 * 1024
+export const DOCUMENT_MAX_BYTES = 50 * 1024 * 1024
 
 export interface MediaDescriptor {
   ext: string
@@ -22,6 +23,24 @@ const MEDIA_TYPES: Record<string, MediaDescriptor> = {
   mp4: { ext: 'mp4', kind: 'video', mimeType: 'video/mp4' },
   webm: { ext: 'webm', kind: 'video', mimeType: 'video/webm' },
   mov: { ext: 'mov', kind: 'video', mimeType: 'video/quicktime' },
+  pdf: { ext: 'pdf', kind: 'document', mimeType: 'application/pdf' },
+  doc: { ext: 'doc', kind: 'document', mimeType: 'application/msword' },
+  docx: { ext: 'docx', kind: 'document', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  xls: { ext: 'xls', kind: 'document', mimeType: 'application/vnd.ms-excel' },
+  xlsx: { ext: 'xlsx', kind: 'document', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+  ppt: { ext: 'ppt', kind: 'document', mimeType: 'application/vnd.ms-powerpoint' },
+  pptx: { ext: 'pptx', kind: 'document', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' },
+  txt: { ext: 'txt', kind: 'document', mimeType: 'text/plain' },
+  md: { ext: 'md', kind: 'document', mimeType: 'text/markdown' },
+  markdown: { ext: 'markdown', kind: 'document', mimeType: 'text/markdown' },
+  csv: { ext: 'csv', kind: 'document', mimeType: 'text/csv' },
+  json: { ext: 'json', kind: 'document', mimeType: 'application/json' },
+  html: { ext: 'html', kind: 'document', mimeType: 'text/html' },
+  htm: { ext: 'htm', kind: 'document', mimeType: 'text/html' },
+  xml: { ext: 'xml', kind: 'document', mimeType: 'application/xml' },
+  yml: { ext: 'yml', kind: 'document', mimeType: 'application/yaml' },
+  yaml: { ext: 'yaml', kind: 'document', mimeType: 'application/yaml' },
+  rtf: { ext: 'rtf', kind: 'document', mimeType: 'application/rtf' },
 }
 
 export const UPLOAD_FILENAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/
@@ -47,11 +66,18 @@ export function decodeOriginalName(name: string): string {
 function mimeMatches(descriptor: MediaDescriptor, mimeType: string): boolean {
   const mime = (mimeType || '').toLowerCase()
   if (!mime || mime === 'application/octet-stream') return true
-  return mime.startsWith(descriptor.kind === 'image' ? 'image/' : 'video/')
+  if (descriptor.kind === 'image') return mime.startsWith('image/')
+  if (descriptor.kind === 'video') return mime.startsWith('video/')
+  // Browsers report Office files, Markdown and YAML inconsistently. The
+  // extension already decided the storage type, so accept text/ and
+  // application/ MIME types for documents instead of rejecting valid uploads.
+  return mime.startsWith('text/') || mime.startsWith('application/')
 }
 
 export function maxBytesFor(descriptor: MediaDescriptor): number {
-  return descriptor.kind === 'image' ? IMAGE_MAX_BYTES : VIDEO_MAX_BYTES
+  if (descriptor.kind === 'image') return IMAGE_MAX_BYTES
+  if (descriptor.kind === 'video') return VIDEO_MAX_BYTES
+  return DOCUMENT_MAX_BYTES
 }
 
 /**
@@ -83,7 +109,11 @@ export function createUploader(uploadsDir: string) {
       const descriptor = getMediaDescriptor(file.originalname)
       if (!descriptor) {
         callback(
-          new ApiError(400, 'unsupported_media_type', '仅支持 JPG、PNG、WebP、GIF、MP4、WebM、MOV 文件'),
+          new ApiError(
+            400,
+            'unsupported_media_type',
+            '仅支持图片、视频和常见文档（PDF / Word / Excel / PPT / TXT / Markdown / CSV / JSON / HTML 等）',
+          ),
         )
         return
       }

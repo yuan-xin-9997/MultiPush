@@ -179,6 +179,10 @@ function normalizeJsonDoc(value: unknown): ContentInput | null {
   if (!rawHtml && !isRichTextJson(item.contentJson)) return null
   return {
     title,
+    // Preserve the image-first gallery kind on backup round-trips. Video
+    // timelines are not part of the content JSON, so video exports import as
+    // regular articles just as before.
+    kind: item.kind === 'gallery' ? 'gallery' : undefined,
     contentHtml: groupImageCaptions(sanitizeImportedHtml(rawHtml)),
     contentJson,
     excerpt: typeof item.excerpt === 'string' ? item.excerpt : htmlToPlainText(rawHtml).slice(0, 160),

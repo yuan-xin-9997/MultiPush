@@ -155,8 +155,8 @@ OpenCode Go 的 OpenAI 兼容接口要求 `x-opencode-session` 请求头。Multi
 
 对话记录按用户保存在 `ai_sessions` / `ai_messages`。每轮最多执行 16 轮工具调用，单轮总时长上限 6 分钟。工具包括：
 
-- `get_system_overview`、`list_books`、`list_contents`（支持 `kind` 筛选图文/视频）、`get_content`、`list_media`
-- `create_content`、`update_content`（支持 `mediaIds`，见「对话附件」）
+- `get_system_overview`、`list_books`、`list_contents`（支持 `kind` 筛选文章/图文/视频）、`get_content`、`list_media`（图片/视频/文档素材元数据，含文件夹；不读取文档全文）
+- `create_content`、`update_content`（支持 `kind="gallery"` 与 `mediaIds`，见「对话附件」）
 - `get_video_project`、`update_video_timeline`、`export_video`、`get_video_export`
 - `render_content`、`get_render`、`list_renders`
 - `list_publications`、`publish_article`、`delete_draft`（删除草稿或失败记录；支持的平台会同步删除后台草稿，已发布/处理中/待核实记录禁止删除）
@@ -178,7 +178,7 @@ OpenCode Go 的 OpenAI 兼容接口要求 `x-opencode-session` 请求头。Multi
 
 | 类型 | 处理方式 | 模型能做什么 |
 | --- | --- | --- |
-| 图片 | 走素材库上传（`POST /api/media`，≤10 MB JPG/PNG/WebP/GIF），消息携带素材 ID 与尺寸；≤6 MB 且为常见格式时以 base64 视觉内容发给模型 | 看图写作、把图片插入文章（`create_content`/`update_content` 传 `mediaIds`，图片按顺序追加到正文末尾，第一张默认作为封面）、设置封面 |
+| 图片 | 走素材库上传（`POST /api/media`，≤10 MB JPG/PNG/WebP/GIF），消息携带素材 ID 与尺寸；≤6 MB 且为常见格式时以 base64 视觉内容发给模型 | 看图写作、把图片插入文章或图文（`create_content(kind="article"|"gallery")` / `update_content` 传 `mediaIds`，图片按顺序追加到正文末尾，第一张默认作为封面）、设置封面 |
 | 视频 | 走素材库上传（≤200 MB MP4/WebM/MOV），消息携带素材 ID、时长与分辨率 | `create_content(kind:"video", mediaIds:…)` 用上传的视频按顺序初始化剪辑时间线，再配合剪辑工具修剪、调序、导出成片 |
 | 文档 | 前端读取纯文本（txt/md/markdown/json/csv/html/xml/yml/yaml，≤2 MB），全文随消息发送；服务端再次截断（单文档 ≤10 万字符，注入提示词时每份 ≤2 万字） | 以文档内容为素材写文章、改写、总结 |
 

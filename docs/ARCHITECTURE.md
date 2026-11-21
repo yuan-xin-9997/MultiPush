@@ -12,7 +12,7 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/auth      注册、登录、资料
   ├─ routes/books     知识库
   ├─ routes/contents  内容 CRUD、软删除、收藏、统计
-  ├─ routes/media     上传（multer → DATA_DIR/uploads）
+  ├─ routes/media     素材上传、分页/筛选、文件夹与移动（multer → DATA_DIR/uploads）
   ├─ routes/renders   调用渲染器、保存历史
   ├─ routes/platform-sms 平台手机验证码登录（知乎/微博/头条/百家号/豆瓣/掘金/抖音）
   ├─ routes/weibo     微博扫码登录、发布与核实
@@ -41,8 +41,9 @@ Express (single Node process, 0.0.0.0:34080)
 | --- | --- | --- |
 | `users` | id, username, email, password_hash, display_name, avatar_url | 唯一用户名/邮箱；bcrypt |
 | `books` | id, user_id, name, description, color | 知识库/分组 |
-| `contents` | id, user_id, book_id, kind, title, content_json, content_html, excerpt, cover_image, tags, status, favorite, word_count, image_count, video_count, deleted_at | Tiptap JSON + HTML 双存；软删除；`kind` 区分图文/视频 |
-| `media` | id, user_id, filename, original_name, mime_type, size, kind, meta_json | 文件在 `DATA_DIR/uploads`；视频含 ffprobe 元数据 |
+| `contents` | id, user_id, book_id, kind, title, content_json, content_html, excerpt, cover_image, tags, status, favorite, word_count, image_count, video_count, deleted_at | Tiptap JSON + HTML 双存；软删除；`kind` 区分文章/图文/视频 |
+| `media` | id, user_id, folder_id, filename, original_name, mime_type, size, kind, meta_json | 文件在 `DATA_DIR/uploads`；`kind` 区分图片/视频/文档；视频含 ffprobe 元数据 |
+| `media_folders` | id, user_id, name, created_at, updated_at | 素材文件夹；同名（NOCASE）唯一；删除时素材移到未分组 |
 | `video_projects` | content_id, user_id, timeline_json | 视频内容剪辑时间线（有序片段，引用 media 资产） |
 | `video_exports` | id, user_id, content_id, status, progress, message, timeline_json, output_media_id | 视频导出异步任务（服务端 ffmpeg） |
 | `renders` | id, user_id, content_id, platforms, options_json, result_json | 渲染历史；结果完整存储 |
@@ -130,9 +131,9 @@ export interface ContentEnhancer {
 
 ## 前端结构
 
-- 路由：登录/注册、应用壳（AI 创作/内容库/渲染/发布）、全屏编辑器、全屏视频工作台（`/video/:id`：预览播放器 + 片段时间线 + 导出）；内容库多选后可打开批量渲染/发布弹窗。
+- 路由：登录/注册、应用壳（AI 创作/内容库/渲染/发布）、全屏编辑器、素材库（`/assets`：素材上传/筛选/文件夹/预览）、全屏图文工作台（`/gallery/:id`：图片网格 + 图注 + 配文）、全屏视频工作台（`/video/:id`：预览播放器 + 片段时间线 + 导出）；内容库多选后可打开批量渲染/发布弹窗。
 - 状态：`AuthContext` + 页面局部状态；无全局状态库。
-- API：`web/src/lib/api.ts` 唯一入口，401 统一清理 token。
+- API：`web/src/lib/api.ts` 唯一入口，401 统一清理 token；`components/MediaPicker` 提供文章/图文/视频共用的素材选择器。
 - 导入导出：`web/src/lib/content-io.ts` 纯浏览器解析（marked / turndown / JSZip），不经过服务器。
 - 设计系统：`web/src/styles/globals.css` token + 通用组件类；各 feature 独立 CSS。
 - 小红书卡片导出：固定 540×720 CSS 容器，`pixelRatio: 2` 输出 1080×1440。

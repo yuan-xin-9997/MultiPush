@@ -9,6 +9,7 @@ import {
   CloudUpload,
   Download,
   Film,
+  FolderOpen,
   LoaderCircle,
   Pause,
   Play,
@@ -31,6 +32,7 @@ import { api, absoluteUrl } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { cn, escapeHtml, formatBytes, formatDateTime } from '@/lib/utils'
 import EmptyState from '@/components/EmptyState'
+import MediaPicker from '@/components/MediaPicker'
 import './video.css'
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error'
@@ -129,6 +131,7 @@ export default function VideoWorkspacePage() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
 
   const [uploads, setUploads] = useState<UploadTask[]>([])
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const [exports, setExports] = useState<VideoExport[]>([])
   const [exporting, setExporting] = useState(false)
@@ -401,7 +404,7 @@ export default function VideoWorkspacePage() {
 
   // ------------------------------------------------------------- uploading
 
-  const appendUploadedClip = useCallback(async (media: MediaAsset, file: File) => {
+  const appendUploadedClip = useCallback(async (media: MediaAsset, source?: File) => {
     let duration: number | null = media.duration ?? null
     if (duration === null) {
       try {
@@ -412,14 +415,17 @@ export default function VideoWorkspacePage() {
       }
     }
     if (duration === null) {
+      const previewUrl = source ? URL.createObjectURL(source) : absoluteUrl(media.url)
       try {
-        duration = await probeDurationFromUrl(URL.createObjectURL(file))
+        duration = await probeDurationFromUrl(previewUrl)
       } catch {
         duration = null
+      } finally {
+        if (source) URL.revokeObjectURL(previewUrl)
       }
     }
     const clip: VideoClipDetail = {
-      id: `local-${media.id}`,
+      id: `local-${media.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       mediaId: media.id,
       trimStart: 0,
       trimEnd: null,
@@ -435,6 +441,14 @@ export default function VideoWorkspacePage() {
     markTimelineDirty()
     setActiveIndex(clipsRef.current.length - 1)
   }, [markTimelineDirty])
+
+  const addLibraryClips = useCallback(async (assets: MediaAsset[]) => {
+    const videos = assets.filter((media) => media.kind === 'video')
+    for (const media of videos) await appendUploadedClip(media)
+    if (videos.length > 0) {
+      toast.success(videos.length === 1 ? '已从素材库添加 1 段视频' : `已从素材库添加 ${videos.length} 段视频`)
+    }
+  }, [appendUploadedClip])
 
   const uploadFiles = useCallback(async (files: File[]) => {
     const videos = files.filter((file) => file.type.startsWith('video/') || /\.(mp4|webm|mov)$/i.test(file.name))
@@ -893,6 +907,19 @@ export default function VideoWorkspacePage() {
             />
           </div>
 
+          <button
+            type="button"
+            className="video-library-add"
+            aria-label="从素材库添加视频"
+            onClick={() => setAssetPickerOpen(true)}
+          >
+            <FolderOpen size={18} />
+            <span>
+              <strong>从素材库添加</strong>
+              <small>复用已上传的视频素材到时间线</small>
+            </span>
+          </button>
+
           {uploads.length > 0 ? (
             <div className="video-uploads">
               {uploads.map((task) => (
@@ -1080,6 +1107,14 @@ export default function VideoWorkspacePage() {
           </div>
         </div>
       ) : null}
+
+      <MediaPicker
+        open={assetPickerOpen}
+        onClose={() => setAssetPickerOpen(false)}
+        onSelect={(assets) => void addLibraryClips(assets)}
+        kinds={['video']}
+        title="从素材库添加视频"
+      />
     </div>
   )
 }

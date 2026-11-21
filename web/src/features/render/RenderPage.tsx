@@ -587,6 +587,14 @@ export default function RenderPage() {
     let cancelled = false
     const renderIdParam = searchParams.get('renderId')
     const contentIdParam = searchParams.get('contentId')
+    // The gallery workspace asks the workbench to focus on image-first
+    // platforms without changing the account's saved default selection.
+    const requestedPlatforms = Array.from(new Set(
+      (searchParams.get('platforms') ?? '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter((value): value is PlatformId => PLATFORM_ORDER.includes(value as PlatformId)),
+    ))
 
     const boot = async () => {
       try {
@@ -607,6 +615,7 @@ export default function RenderPage() {
         if (contentIdParam) {
           const { content } = await api.contents.get(contentIdParam)
           if (cancelled) return
+          if (requestedPlatforms.length > 0) setPlatforms(requestedPlatforms)
           setSelectedContent(content)
           autoPendingRef.current = true
           return

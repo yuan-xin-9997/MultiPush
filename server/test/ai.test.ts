@@ -363,6 +363,32 @@ describe('AI attachments', () => {
     expect((detail.contentHtml.match(/<img /g) ?? []).length).toBe(2)
   })
 
+  it('creates an image-first gallery through create_content', async () => {
+    const { config, database, user, service, session } = setup()
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    const first = image(config, database, user.id, 'gallery-first.png')
+    const second = image(config, database, user.id, 'gallery-second.png')
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      if (calls === 1) return response(toolCall('create_content', {
+        title: '周末散步', kind: 'gallery', html: '<p>三张图的周末。</p>', mediaIds: [first.id, second.id], tags: ['散步'],
+      }))
+      return response({ choices: [{ message: { role: 'assistant', content: '图文已创建。' } }] })
+    }))
+    const result = await service.chat(user.id, session.id, { message: '用这两张图做一篇图文' })
+    const toolMessage = result.session.messages.find(message => message.role === 'tool')
+    expect(toolMessage?.toolResult).toMatchObject({ ok: true })
+    const createdId = (toolMessage?.toolResult as { data: { content: { id: string } } }).data.content.id
+    const detail = database.getContentDetail(user.id, createdId)!
+    expect(detail.kind).toBe('gallery')
+    expect(detail.coverImage).toBe(first.url)
+    expect(detail.imageCount).toBe(2)
+    expect(detail.contentHtml).toContain(first.url)
+    expect(detail.contentHtml).toContain(second.url)
+    expect(database.listContents(user.id, { favorite: false, trash: false, kind: 'gallery', sort: 'updated_desc', page: 1, pageSize: 20 }).total).toBe(1)
+  })
+
   it('initializes a video timeline when creating video content from uploaded videos', async () => {
     const { config, database, user, service, session, video } = setup()
     service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
