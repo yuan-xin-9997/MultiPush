@@ -430,10 +430,15 @@ export type RenderOptions = {
   accountName?: string
 }
 
+export type PlatformOptionOverrides = Partial<Record<PlatformId, RenderOptions>>
+
 export interface RenderRequest {
   contentId: string
   platforms: PlatformId[]
+  /** Base options applied to every selected platform. */
   options?: RenderOptions
+  /** Per-platform overrides merged on top of `options` for that platform only. */
+  platformOptions?: PlatformOptionOverrides
 }
 
 export interface XhsCard {
@@ -508,6 +513,7 @@ export interface RenderRecord {
   platforms: PlatformId[]
   results: PlatformRender[]
   options: RenderOptions
+  platformOptions: PlatformOptionOverrides
   createdAt: string
 }
 
@@ -1559,6 +1565,7 @@ export interface BatchRenderInput {
   contentIds: string[]
   platforms: PlatformId[]
   options?: RenderOptions
+  platformOptions?: PlatformOptionOverrides
 }
 
 export type BatchPublishPlatform = 'wechat' | 'zhihu' | 'weibo' | 'toutiao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'sspai' | 'blog'

@@ -78,7 +78,15 @@ describe('render workbench', () => {
   it('validates stored account preferences and removes invalid platforms', () => {
     expect(parsePreferences({ platforms: ['unknown'] })).toBeNull()
     expect(parsePreferences({ platforms: ['zhihu', 'zhihu', 'unknown'], options: { cardStyle: 'invalid', authorName: '昵称', includeTags: false } }))
-      .toEqual({ platforms: ['zhihu'], options: { cardStyle: 'clean', authorName: '昵称', includeTags: false, includeToc: false } })
+      .toEqual({ platforms: ['zhihu'], options: { cardStyle: 'clean', authorName: '昵称', includeTags: false, includeToc: false }, platformOptions: {} })
+    expect(parsePreferences({
+      platforms: ['zhihu', 'wechat'],
+      platformOptions: {
+        zhihu: { includeToc: true, authorName: ' 知乎号 ' },
+        wechat: { includeTags: 'yes' },
+        unknown: { includeToc: true },
+      },
+    })?.platformOptions).toEqual({ zhihu: { includeToc: true, authorName: ' 知乎号 ' } })
   })
 
   it('records source version and honors the requested author', async () => {
@@ -87,6 +95,26 @@ describe('render workbench', () => {
     expect(render.authorName).toBe('作者设置')
     expect(render.downloads[0].content).toContain('作者设置')
     expect(publishChecks(render, true).find((check) => check.label === '原文与设置版本')?.ok).toBe(false)
+  })
+
+  it('applies per-platform overrides without leaking into other platforms', async () => {
+    const results = await renderPlatforms({
+      ...input,
+      platforms: ['wechat', 'zhihu', 'xiaohongshu', 'douyin'],
+      options: { includeToc: true, includeTags: true, authorName: '默认作者' },
+      platformOptions: {
+        wechat: { includeToc: false, authorName: '公众号作者' },
+        xiaohongshu: { includeTags: false },
+      },
+    })
+    const byPlatform = Object.fromEntries(results.map((render) => [render.platform, render]))
+    expect(byPlatform.wechat.html).not.toContain('目录')
+    expect(byPlatform.wechat.authorName).toBe('公众号作者')
+    expect(byPlatform.zhihu.html).toContain('目录')
+    expect(byPlatform.zhihu.authorName).toBe('默认作者')
+    expect(byPlatform.xiaohongshu.meta.tags).toEqual([])
+    expect(byPlatform.xiaohongshu.text).not.toContain('#原话题')
+    expect(byPlatform.douyin.meta.tags).toEqual(['原话题'])
   })
 
   it('renders every supported platform in one pass', async () => {

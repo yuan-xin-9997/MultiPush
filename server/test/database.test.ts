@@ -152,10 +152,12 @@ describe('database user isolation', () => {
     const bob = database.createUser({ username: 'draft_bob', email: 'draft-bob@example.com', passwordHash: 'hash', displayName: 'Bob' })
     const content = database.createContent(alice.id, { title: '原文', bookId: null, contentJson: {}, contentHtml: '<p>原文</p>', excerpt: '', coverImage: null, tags: [], status: 'draft', favorite: false, wordCount: 2, imageCount: 0, videoCount: 0 })
     const result = { platform: 'wechat' as const, title: '生成标题', html: '<p>生成结果</p>', markdown: null, text: '生成结果', previewMode: 'article' as const, themeColor: '#00b96b', meta: { wordCount: 4, imageCount: 0, videoCount: 0, readMinutes: 1, tags: [], titleLength: 4, summary: '' }, cards: [], assets: [], videos: [], warnings: [], downloads: [], generatedAt: content.updatedAt }
-    const record = database.createRender(alice.id, { contentId: content.id, contentTitle: content.title, platforms: ['wechat'], options: {}, results: [result] })
+    const platformOptions = { xiaohongshu: { cardStyle: 'warm' as const, includeTags: false } }
+    const record = database.createRender(alice.id, { contentId: content.id, contentTitle: content.title, platforms: ['wechat'], options: {}, platformOptions, results: [result] })
     const draft = { ...result, title: '专属标题' }
     expect(database.saveRenderDraft(bob.id, record.id, draft)).toBe(false)
     expect(database.saveRenderDraft(alice.id, record.id, draft)).toBe(true)
+    expect(database.getRender(alice.id, record.id)?.platformOptions).toEqual(platformOptions)
     expect(database.getRender(alice.id, record.id)?.results[0].title).toBe('专属标题')
     expect(database.getRender(alice.id, record.id, true)?.results[0].title).toBe('生成标题')
     expect(database.getRender(bob.id, record.id)).toBeNull()
@@ -163,6 +165,36 @@ describe('database user isolation', () => {
     expect(database.getContentDetail(alice.id, content.id)?.title).toBe('原文')
     expect(database.resetRenderDraft(alice.id, record.id, 'wechat')).toBe(true)
     expect(database.getRender(alice.id, record.id)?.results[0].title).toBe('生成标题')
+  })
+
+  it('adds per-platform options to an existing renders table without losing old records', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'multipush-render-options-db-'))
+    directories.push(directory)
+    const filename = path.join(directory, 'legacy.sqlite')
+    const legacy = new DatabaseSync(filename)
+    legacy.exec(`
+      CREATE TABLE renders (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        content_id TEXT NOT NULL,
+        content_title TEXT NOT NULL,
+        platforms_json TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        options_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO renders (id, user_id, content_id, content_title, platforms_json, result_json, created_at)
+      VALUES ('r1', 'u1', 'c1', '旧记录', '[]', '[]', '2026-01-01T00:00:00Z');
+    `)
+    legacy.close()
+
+    const database = openDatabase(filename)
+    databases.push(database)
+    const check = new DatabaseSync(filename, { readOnly: true })
+    const columns = check.prepare('PRAGMA table_info(renders)').all().map((row) => String(row.name))
+    check.close()
+    expect(columns).toContain('platform_options_json')
+    expect(database.getRender('u1', 'r1')?.platformOptions).toEqual({})
   })
 
   it('does not expose another user\'s content or books', () => {

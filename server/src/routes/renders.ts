@@ -53,6 +53,7 @@ export function createRendersRouter(database: Database, config: AppConfig): Rout
           content,
           platforms: input.platforms,
           options,
+          platformOptions: input.platformOptions,
           authorName: user.displayName || user.username,
           baseUrl,
           // Video contents embed their latest exported cut so 渲染记录 previews it.
@@ -72,6 +73,7 @@ export function createRendersRouter(database: Database, config: AppConfig): Rout
         contentTitle: content.title,
         platforms: input.platforms,
         options,
+        platformOptions: input.platformOptions,
         results,
       })
       res.json({ render })

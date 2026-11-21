@@ -166,6 +166,7 @@ export class BatchService {
           content,
           platforms,
           options: input.options ?? {},
+          platformOptions: input.platformOptions,
           authorName,
           baseUrl,
           videoUrl: latestExportOutputUrl(this.database, userId, content.id),
@@ -175,6 +176,7 @@ export class BatchService {
           contentTitle: content.title,
           platforms,
           options: input.options ?? {},
+          platformOptions: input.platformOptions,
           results,
         })
         done += 1

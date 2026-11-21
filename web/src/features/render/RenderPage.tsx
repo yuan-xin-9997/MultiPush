@@ -19,6 +19,7 @@ import {
   FileCode2,
   FileJson,
   FileText,
+  Folder,
   Globe2,
   Heart,
   History,
@@ -28,7 +29,6 @@ import {
   MessageCircle,
   Music2,
   Package,
-  Palette,
   Play,
   RefreshCw,
   Search,
@@ -46,8 +46,10 @@ import {
   PLATFORMS,
   PLATFORM_ORDER,
   getPlatformInfo,
+  type Book,
   type ContentSummary,
   type PlatformId,
+  type PlatformOptionOverrides,
   type PlatformRender,
   type RenderListItem,
   type RenderOptions,
@@ -60,7 +62,7 @@ import { absoluteUrl, api } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { getErrorMessage } from '@/lib/errors'
 import { formatNumber } from '@/lib/format'
-import { formatDate, formatDateTime, relativeTime, safeFilename, copyRichHtml, copyText, downloadBlob } from '@/lib/utils'
+import { cn, formatDate, formatDateTime, relativeTime, safeFilename, copyRichHtml, copyText, downloadBlob } from '@/lib/utils'
 import {
   buildAllZip,
   buildXhsZip,
@@ -74,15 +76,12 @@ import {
   type ExportedCardImage,
   type ExportReport,
 } from './downloads'
-import {
-  CARD_STYLE_OPTIONS,
-  resolveCardStyle,
-  type CardStyle,
-} from './types'
+import { resolveCardStyle, type CardStyle } from './types'
 import { useElementWidth } from './hooks'
 import PlatformGlyph from './platform-glyph'
 import XhsCardView from './XhsCardView'
 import PlatformEditor from './PlatformEditor'
+import PlatformSettings from './PlatformSettings'
 import { layoutCards, overflowingText, verifyCardImages } from './card-layout'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Modal from '@/components/Modal'
@@ -90,6 +89,8 @@ import EmptyState from '@/components/EmptyState'
 import './render.css'
 
 const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'douyin', 'sspai', 'blog']
+
+const PICKER_UNFILED_ID = 'unfiled'
 
 const DOWNLOAD_LABELS = {
   html: 'HTML 页面',
@@ -105,14 +106,32 @@ const DOWNLOAD_ICONS = {
   json: FileJson,
 } as const
 
-function renderSignature(contentId: string | null | undefined, platforms: PlatformId[], options: RenderOptions): string {
+function normalizedOptions(options: RenderOptions | undefined): RenderOptions {
+  return {
+    cardStyle: resolveCardStyle(options?.cardStyle),
+    includeTags: options?.includeTags !== false,
+    includeToc: options?.includeToc === true,
+    authorName: (options?.authorName ?? '').trim(),
+    ...(options?.themeColor ? { themeColor: options.themeColor } : {}),
+    ...(options?.accountName ? { accountName: options.accountName.trim() } : {}),
+  }
+}
+
+function renderSignature(
+  contentId: string | null | undefined,
+  platforms: PlatformId[],
+  options: RenderOptions,
+  platformOptions: PlatformOptionOverrides = {},
+): string {
+  const selected = [...platforms].sort()
   return JSON.stringify({
     contentId: contentId ?? '',
-    platforms: [...platforms].sort(),
-    cardStyle: resolveCardStyle(options.cardStyle),
-    includeTags: options.includeTags !== false,
-    includeToc: options.includeToc === true,
-    authorName: (options.authorName ?? '').trim(),
+    platforms: selected,
+    options: normalizedOptions(options),
+    platformOptions: selected.flatMap((platform) => {
+      const override = platformOptions[platform]
+      return override && Object.keys(override).length > 0 ? [[platform, normalizedOptions(override)]] : []
+    }),
   })
 }
 
@@ -346,35 +365,6 @@ function WeiboScene({ render, author, exporting, onCopy }: WeiboSceneProps) {
   )
 }
 
-interface ToggleProps {
-  checked: boolean
-  onChange: () => void
-  label: string
-  hint?: string
-  disabled?: boolean
-}
-
-function Toggle({ checked, onChange, label, hint, disabled }: ToggleProps) {
-  return (
-    <button
-      type="button"
-      className="render-toggle-row"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={onChange}
-    >
-      <span>
-        <strong>{label}</strong>
-        {hint ? <small>{hint}</small> : null}
-      </span>
-      <span className={`render-switch${checked ? ' is-on' : ''}`} aria-hidden="true">
-        <span />
-      </span>
-    </button>
-  )
-}
-
 export default function RenderPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -388,8 +378,10 @@ export default function RenderPage() {
   const [selectedContent, setSelectedContent] = useState<ContentSummary | null>(null)
   const [platforms, setPlatforms] = useState<PlatformId[]>(defaults?.platforms ?? DEFAULT_PLATFORMS)
   const [options, setOptions] = useState<RenderOptions>(defaults?.options ?? { cardStyle: 'clean', includeTags: true, includeToc: false })
+  const [platformOptions, setPlatformOptions] = useState<PlatformOptionOverrides>(defaults?.platformOptions ?? {})
   const [authorName, setAuthorName] = useState(defaults?.options.authorName ?? '')
   const [generatedOptions, setGeneratedOptions] = useState<RenderOptions>({})
+  const [generatedPlatformOptions, setGeneratedPlatformOptions] = useState<PlatformOptionOverrides>({})
   const [editorOpen, setEditorOpen] = useState(false)
   const [adjusting, setAdjusting] = useState(false)
   const [confirmAction, setConfirmAction] = useState<'reset' | 'regenerate' | null>(null)
@@ -402,7 +394,7 @@ export default function RenderPage() {
   const [checkingAssets, setCheckingAssets] = useState(false)
   const captureCache = useRef({ key: '', images: new Map<string, ExportedCardImage>() })
   const captureFailureRef = useRef(new Map<string, string>())
-  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [results, setResults] = useState<PlatformRender[] | null>(null)
   const [renderId, setRenderId] = useState<string | null>(null)
   const [generatedAt, setGeneratedAt] = useState<string | null>(null)
@@ -417,20 +409,29 @@ export default function RenderPage() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerQuery, setPickerQuery] = useState('')
   const [pickerContents, setPickerContents] = useState<ContentSummary[]>([])
+  const [pickerBooks, setPickerBooks] = useState<Book[]>([])
+  const [pickerExpanded, setPickerExpanded] = useState<Set<string>>(new Set())
   const [pickerLoading, setPickerLoading] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<RenderListItem[]>([])
-  const [historyLoading, setHistoryLoading] = useState(false)
+  const [contentHistory, setContentHistory] = useState<RenderListItem[]>([])
+  const [historyScope, setHistoryScope] = useState<'content' | 'all'>('all')
+  const [historyPlatform, setHistoryPlatform] = useState<PlatformId | null>(null)
   const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null)
   const autoPendingRef = useRef(false)
   const autoHandledRef = useRef<string | null>(null)
   const cardNodeRefs = useRef(new Map<string, HTMLDivElement>())
 
-  const cardStyle = resolveCardStyle(generatedOptions.cardStyle)
+  const generatedXhsOptions = { ...generatedOptions, ...(generatedPlatformOptions.xiaohongshu ?? {}) }
+  const cardStyle = resolveCardStyle(generatedXhsOptions.cardStyle)
+  const customPlatformCount = platforms.filter((platform) => {
+    const override = platformOptions[platform]
+    return Boolean(override && Object.keys(override).length > 0)
+  }).length
   const xhsRender = results?.find((render) => render.platform === 'xiaohongshu') ?? null
   const activeRender = results?.find((render) => render.platform === activePlatform) ?? results?.[0] ?? null
   const activeInfo = activeRender ? getPlatformInfo(activeRender.platform) : null
-  const currentKey = renderSignature(selectedContent?.id, platforms, { ...options, authorName })
+  const currentKey = renderSignature(selectedContent?.id, platforms, { ...options, authorName }, platformOptions)
   const sourceStale = Boolean(results?.some((result) => result.sourceUpdatedAt && result.sourceUpdatedAt !== selectedContent?.updatedAt))
   const stale = sourceStale || Boolean(results) && Boolean(lastRequestKey) && currentKey !== lastRequestKey
   const cards = activeRender?.platform === 'xiaohongshu' ? activeRender.cards : []
@@ -481,9 +482,26 @@ export default function RenderPage() {
     }
   }, [])
 
+  const refreshContentHistory = useCallback(async (contentId: string) => {
+    try {
+      const result = await api.renders.list(contentId)
+      setContentHistory(result.renders)
+    } catch {
+      // History is secondary; the workbench remains usable without it.
+    }
+  }, [])
+
   useEffect(() => {
     void refreshHistory()
   }, [refreshHistory])
+
+  useEffect(() => {
+    if (!selectedContent?.id) {
+      setContentHistory([])
+      return
+    }
+    void refreshContentHistory(selectedContent.id)
+  }, [selectedContent?.id, refreshContentHistory])
 
   const applyContent = useCallback((content: ContentSummary) => {
     setSelectedContent(content)
@@ -501,10 +519,12 @@ export default function RenderPage() {
     setGeneratedAt(record.createdAt)
     setPlatforms(record.platforms)
     setOptions(record.options)
+    setPlatformOptions(record.platformOptions ?? {})
     setGeneratedOptions(record.options)
+    setGeneratedPlatformOptions(record.platformOptions ?? {})
     setAuthorName(record.options.authorName ?? '')
     setLastRequestKey(
-      renderSignature(content?.id ?? record.contentId, record.platforms, record.options),
+      renderSignature(content?.id ?? record.contentId, record.platforms, record.options, record.platformOptions ?? {}),
     )
     setRenderError(null)
     setCardIndex(0)
@@ -515,25 +535,41 @@ export default function RenderPage() {
   }, [])
 
   const runRender = useCallback(
-    async (content: ContentSummary | null, targetPlatforms: PlatformId[], targetOptions: RenderOptions, confirmed = false) => {
+    async (
+      content: ContentSummary | null,
+      targetPlatforms: PlatformId[],
+      targetOptions: RenderOptions,
+      confirmed = false,
+      targetPlatformOptions: PlatformOptionOverrides = platformOptions,
+    ) => {
       if (!content || targetPlatforms.length === 0 || rendering || exporting || adjusting || layoutBusy) return
       if (!confirmed && results?.some((result) => result.editedAt)) { setConfirmAction('regenerate'); return }
       setRendering(true)
       setRenderError(null)
       try {
+        const platformOptionsForRequest = Object.fromEntries(
+          targetPlatforms.flatMap((platform) => {
+            const override = targetPlatformOptions[platform]
+            return override && Object.keys(override).length > 0 ? [[platform, override]] : []
+          }),
+        )
         const { render } = await api.renders.create({
           contentId: content.id,
           platforms: targetPlatforms,
           options: { ...targetOptions, authorName: (targetOptions.authorName ?? '').trim() || undefined },
+          platformOptions: platformOptionsForRequest,
         })
         setResults(render.results)
         setRenderId(render.id)
         setGeneratedAt(render.createdAt)
         setGeneratedOptions(render.options)
+        setGeneratedPlatformOptions(render.platformOptions ?? {})
+        // Keep settings for temporarily deselected platforms.
+        setPlatformOptions((current) => ({ ...current, ...(render.platformOptions ?? {}) }))
         const sourceUpdatedAt = render.results[0]?.sourceUpdatedAt
         if (sourceUpdatedAt) setSelectedContent((current) => current?.id === content.id ? { ...current, updatedAt: sourceUpdatedAt } : current)
         setLastRequestKey(
-          renderSignature(content.id, render.platforms, { ...targetOptions, authorName: (targetOptions.authorName ?? '').trim() }),
+          renderSignature(content.id, render.platforms, { ...targetOptions, authorName: (targetOptions.authorName ?? '').trim() }, render.platformOptions ?? {}),
         )
         setActivePlatform((current) =>
           render.results.some((result) => result.platform === current)
@@ -546,6 +582,7 @@ export default function RenderPage() {
         window.history.replaceState(null, '', `/render?renderId=${encodeURIComponent(render.id)}`)
         toast.success('渲染完成，可以预览和下载了')
         void refreshHistory()
+        void refreshContentHistory(content.id)
       } catch (error) {
         setRenderError(getErrorMessage(error, '渲染失败，请稍后重试'))
         toast.error(getErrorMessage(error, '渲染失败，请稍后重试'))
@@ -553,11 +590,11 @@ export default function RenderPage() {
         setRendering(false)
       }
     },
-    [refreshHistory, rendering, exporting, adjusting, layoutBusy, results],
+    [refreshHistory, rendering, exporting, adjusting, layoutBusy, results, platformOptions],
   )
 
   const loadRecord = useCallback(
-    async (id: string) => {
+    async (id: string, focusPlatform?: PlatformId) => {
       setHistoryLoadingId(id)
       try {
         const { render } = await api.renders.get(id)
@@ -570,6 +607,9 @@ export default function RenderPage() {
         }
         if (content) setSelectedContent(content)
         applyRecord(render, content)
+        if (focusPlatform && render.results.some((result) => result.platform === focusPlatform)) {
+          setActivePlatform(focusPlatform)
+        }
         setHistoryOpen(false)
         window.history.replaceState(null, '', `/render?renderId=${encodeURIComponent(render.id)}`)
       } catch (error) {
@@ -653,24 +693,76 @@ export default function RenderPage() {
     if (!pickerOpen) return
     let cancelled = false
     setPickerLoading(true)
-    const timer = window.setTimeout(() => {
-      api.contents
-        .list({ pageSize: 50, q: pickerQuery.trim() || undefined, sort: 'updated_desc' })
-        .then((result) => {
-          if (!cancelled) setPickerContents(result.items)
-        })
-        .catch((error) => {
-          if (!cancelled) toast.error(getErrorMessage(error, '加载内容失败'))
-        })
-        .finally(() => {
-          if (!cancelled) setPickerLoading(false)
-        })
-    }, 220)
+    const load = async () => {
+      try {
+        const [{ books }, first] = await Promise.all([
+          api.books.list(),
+          api.contents.list({ page: 1, pageSize: 100, sort: 'updated_desc' }),
+        ])
+        const pageCount = Math.min(20, Math.max(1, Math.ceil(first.total / 100)))
+        const rest = pageCount > 1
+          ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) =>
+              api.contents.list({ page: index + 2, pageSize: 100, sort: 'updated_desc' })))
+          : []
+        if (cancelled) return
+        const items = [first, ...rest].flatMap((result) => result.items)
+        setPickerBooks(books)
+        setPickerContents(items)
+        if (selectedContent) {
+          setPickerExpanded(new Set([selectedContent.bookId ?? PICKER_UNFILED_ID]))
+        } else {
+          const firstBookWithContents = books.find((book) => items.some((item) => item.bookId === book.id))
+          setPickerExpanded(new Set(firstBookWithContents ? [firstBookWithContents.id] : []))
+        }
+      } catch (error) {
+        if (!cancelled) toast.error(getErrorMessage(error, '加载内容失败'))
+      } finally {
+        if (!cancelled) setPickerLoading(false)
+      }
+    }
+    void load()
     return () => {
       cancelled = true
-      window.clearTimeout(timer)
     }
-  }, [pickerOpen, pickerQuery])
+  }, [pickerOpen, selectedContent?.id, selectedContent?.bookId])
+
+  const pickerGroups = useMemo(() => {
+    const query = pickerQuery.trim().toLowerCase()
+    const filtered = query
+      ? pickerContents.filter((content) =>
+          [content.title, content.excerpt, content.bookName ?? '', ...content.tags]
+            .some((value) => value.toLowerCase().includes(query)))
+      : pickerContents
+    const byBook = new Map<string, ContentSummary[]>()
+    for (const content of filtered) {
+      const key = content.bookId ?? PICKER_UNFILED_ID
+      const items = byBook.get(key) ?? []
+      items.push(content)
+      byBook.set(key, items)
+    }
+    const groups = pickerBooks.map((book) => ({
+      id: book.id,
+      name: book.name,
+      color: book.color,
+      items: byBook.get(book.id) ?? [],
+    }))
+    const unfiledItems = byBook.get(PICKER_UNFILED_ID) ?? []
+    if (unfiledItems.length > 0 || (!query && selectedContent && !selectedContent.bookId)) {
+      groups.push({ id: PICKER_UNFILED_ID, name: '未分组', color: '#8f959e', items: unfiledItems })
+    }
+    if (query) return groups.filter((group) => group.items.length > 0)
+    // Keep knowledge bases with content first; empty ones stay available below them.
+    return [...groups.filter((group) => group.items.length > 0), ...groups.filter((group) => group.items.length === 0)]
+  }, [pickerBooks, pickerContents, pickerQuery, selectedContent])
+
+  const togglePickerBook = useCallback((id: string) => {
+    setPickerExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     if (!xhsRender) return
@@ -703,8 +795,25 @@ export default function RenderPage() {
     [],
   )
 
-  const setCardStyle = useCallback((style: CardStyle) => {
-    setOptions((current) => ({ ...current, cardStyle: style }))
+  const changeBaseOptions = useCallback((patch: Partial<RenderOptions>) => {
+    setOptions((current) => ({ ...current, ...patch }))
+    if (patch.authorName !== undefined) setAuthorName(patch.authorName)
+  }, [])
+
+  const changePlatformOptions = useCallback((platform: PlatformId, patch: Partial<RenderOptions>) => {
+    setPlatformOptions((current) => {
+      const next = { ...current[platform], ...patch }
+      return { ...current, [platform]: next }
+    })
+  }, [])
+
+  const resetPlatformOptions = useCallback((platform: PlatformId) => {
+    setPlatformOptions((current) => {
+      if (!current[platform]) return current
+      const next = { ...current }
+      delete next[platform]
+      return next
+    })
   }, [])
 
   const captureCard = useCallback(
@@ -867,6 +976,7 @@ export default function RenderPage() {
     try {
       await api.renders.remove(id)
       setHistory((current) => current.filter((item) => item.id !== id))
+      setContentHistory((current) => current.filter((item) => item.id !== id))
       if (renderId === id) {
         setResults(null)
         setRenderId(null)
@@ -946,10 +1056,33 @@ export default function RenderPage() {
 
   function saveDefaults() {
     try {
-      localStorage.setItem(preferenceKey, JSON.stringify({ platforms, options: { ...options, authorName } }))
-      toast.success('已记住当前账号的默认平台、风格、署名与开关')
+      localStorage.setItem(preferenceKey, JSON.stringify({ platforms, options: { ...options, authorName }, platformOptions }))
+      toast.success('已记住当前账号的默认平台、风格、署名、开关与平台独立设置')
     } catch { toast.error('浏览器无法保存默认设置') }
   }
+
+  const openHistory = useCallback((scope: 'content' | 'all') => {
+    setHistoryScope(scope === 'content' && selectedContent ? 'content' : 'all')
+    setHistoryPlatform(null)
+    setHistoryOpen(true)
+    if (scope === 'content' && selectedContent) void refreshContentHistory(selectedContent.id)
+    else void refreshHistory()
+  }, [selectedContent, refreshContentHistory, refreshHistory])
+
+  const historyBase = historyScope === 'content' ? contentHistory : history
+  const historyPlatformCounts = useMemo(() => {
+    const counts = new Map<PlatformId, number>()
+    for (const item of historyBase) {
+      for (const platform of item.platforms) counts.set(platform, (counts.get(platform) ?? 0) + 1)
+    }
+    return PLATFORM_ORDER.flatMap((platform) => {
+      const count = counts.get(platform)
+      return count ? [[platform, count] as const] : []
+    })
+  }, [historyBase])
+  const visibleHistory = historyPlatform
+    ? historyBase.filter((item) => item.platforms.includes(historyPlatform))
+    : historyBase
 
   const checks = activeRender ? publishChecks(activeRender, stale) : []
   const failedAssets = assetChecks.filter((item) => item.error)
@@ -964,13 +1097,20 @@ export default function RenderPage() {
             Render Studio
           </span>
           <h1>智能渲染</h1>
-          <p>一次创作，生成公众号排版、小红书卡片、知乎长文、豆瓣日记、抖音竖屏文案、少数派 Matrix 文章与个人博客排版，预览确认后下载发布。</p>
+          <p>一次创作，生成公众号、知乎、小红书、抖音、微博、博客等平台的发布排版，预览确认后下载或发布。</p>
         </div>
         <div className="render-head-actions">
-          <button type="button" className="btn" onClick={() => setHistoryOpen(true)}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => openHistory(selectedContent ? 'content' : 'all')}
+            title={selectedContent ? `查看《${selectedContent.title}》各平台的历次渲染` : '查看全部渲染历史'}
+          >
             <History size={16} />
             渲染历史
-            {history.length > 0 ? <span className="render-history-count">{history.length}</span> : null}
+            {(selectedContent ? contentHistory.length : history.length) > 0 ? (
+              <span className="render-history-count">{selectedContent ? contentHistory.length : history.length}</span>
+            ) : null}
           </button>
           <button
             type="button"
@@ -1042,70 +1182,32 @@ export default function RenderPage() {
 
         <button
           type="button"
-          className={`btn render-options-trigger${optionsOpen ? ' is-active' : ''}`}
-          onClick={() => setOptionsOpen((value) => !value)}
+          className={`btn render-options-trigger${settingsOpen ? ' is-active' : ''}`}
+          onClick={() => setSettingsOpen(true)}
         >
           <Settings2 size={16} />
-          渲染设置
+          平台设置
+          {customPlatformCount > 0 ? <span className="render-options-count">{customPlatformCount}</span> : null}
         </button>
       </section>
 
-      {optionsOpen ? (
-        <section className="render-options">
-          <div className="render-option-group render-option-styles">
-            <span className="render-option-label">
-              <Palette size={14} />
-              小红书卡片风格
-            </span>
-            <div className="render-style-options">
-              {CARD_STYLE_OPTIONS.map((style) => (
-                <button
-                  key={style.id}
-                  type="button"
-                  className={`render-style-option${resolveCardStyle(options.cardStyle) === style.id ? ' is-active' : ''}`}
-                  onClick={() => setCardStyle(style.id)}
-                >
-                  <span className="render-style-swatches">
-                    {style.swatches.map((swatch) => (
-                      <i key={swatch} style={{ background: swatch }} />
-                    ))}
-                  </span>
-                  <span>
-                    <strong>{style.name}</strong>
-                    <small>{style.hint}</small>
-                  </span>
-                  {resolveCardStyle(options.cardStyle) === style.id ? <Check size={13} /> : null}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="render-option-group render-option-toggles">
-            <Toggle
-              checked={options.includeTags !== false}
-              onChange={() => setOptions((current) => ({ ...current, includeTags: current.includeTags === false }))}
-              label="带话题标签"
-              hint="小红书生成 #话题"
-            />
-            <Toggle
-              checked={options.includeToc === true}
-              onChange={() => setOptions((current) => ({ ...current, includeToc: !current.includeToc }))}
-              label="文章自动目录"
-              hint="公众号和知乎根据标题生成目录"
-            />
-            <label className="render-author-field">
-              <span>作者署名</span>
-              <input
-                className="input"
-                value={authorName}
-                onChange={(event) => setAuthorName(event.target.value)}
-                placeholder={user?.displayName || '默认使用账号昵称'}
-                maxLength={40}
-              />
-            </label>
-            <button className="btn btn-sm" type="button" title="在当前浏览器记忆设置，按账号区分" onClick={saveDefaults}>保存为我的默认设置</button>
-          </div>
-        </section>
+      {selectedContent && contentHistory.length > 0 ? (
+        <button
+          type="button"
+          className="render-content-history-hint"
+          onClick={() => openHistory('content')}
+          title="查看这篇内容在不同平台的历次渲染"
+        >
+          <History size={13} />
+          <span>
+            当前内容已渲染 <strong>{contentHistory.length}</strong> 次，覆盖{' '}
+            <strong>{new Set(contentHistory.flatMap((item) => item.platforms)).size}</strong> 个平台
+          </span>
+          <span className="render-content-history-hint-action">
+            按平台查看
+            <ChevronRight size={13} />
+          </span>
+        </button>
       ) : null}
 
       {stale ? (
@@ -1169,8 +1271,8 @@ export default function RenderPage() {
                 <span className="render-empty-spark render-empty-spark-one">✦</span>
                 <span className="render-empty-spark render-empty-spark-two">✦</span>
               </div>
-              <span className="render-empty-eyebrow">ONE SOURCE · FOUR FORMATS</span>
-              <h2>把一篇内容，变成八种发布形态</h2>
+              <span className="render-empty-eyebrow">ONE SOURCE · MANY FORMATS</span>
+              <h2>把一篇内容，变成多种发布形态</h2>
               <p>选择内容与平台，MultiPush 会按照每个平台的阅读习惯重新排版，生成可直接交付的素材。</p>
               <div className="render-empty-actions">
                 {selectedContent ? (
@@ -1968,7 +2070,7 @@ export default function RenderPage() {
                 </li>
                 <li>
                   <span>02</span>
-                  调整渲染设置
+                  按平台调整设置（可选）
                 </li>
                 <li>
                   <span>03</span>
@@ -2256,6 +2358,20 @@ export default function RenderPage() {
       </fieldset>
 
       {editorOpen && activeRender ? <PlatformEditor render={activeRender} style={cardStyle} onClose={() => setEditorOpen(false)} onSave={saveAdjustment} /> : null}
+      <PlatformSettings
+        open={settingsOpen}
+        platforms={platforms}
+        baseOptions={options}
+        baseAuthorName={authorName}
+        platformOptions={platformOptions}
+        displayName={user?.displayName || user?.username || ''}
+        onChangeBase={changeBaseOptions}
+        onChangePlatform={changePlatformOptions}
+        onResetPlatform={resetPlatformOptions}
+        onResetAll={() => setPlatformOptions({})}
+        onSaveDefaults={saveDefaults}
+        onClose={() => setSettingsOpen(false)}
+      />
       <ConfirmDialog open={confirmAction !== null} title={confirmAction === 'reset' ? '恢复生成结果？' : '生成新的渲染版本？'} tone="primary"
         description={confirmAction === 'reset' ? '将移除当前平台的专属调整，恢复此记录最初生成的内容。原文和其他平台保持不变。' : '新结果会根据原文生成，不会带入平台专属调整；旧记录及其调整仍可从历史中打开。'}
         loading={adjusting || rendering} onClose={() => setConfirmAction(null)} onConfirm={async () => {
@@ -2267,7 +2383,7 @@ export default function RenderPage() {
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         title="选择内容"
-        subtitle="从内容库中选择一篇文档，渲染为八个平台的发布格式"
+        subtitle="按知识库浏览并选择文档，再渲染为多个平台的发布格式"
         size="wide"
       >
         <div className="render-picker-search">
@@ -2281,12 +2397,30 @@ export default function RenderPage() {
           />
           {pickerLoading ? <LoaderCircle size={15} className="spin" /> : null}
         </div>
-        <div className="render-picker-list">
+        <div className="render-picker-toolbar">
+          <span>
+            {pickerLoading ? '正在加载内容库…' : `${pickerContents.length} 篇内容 · ${pickerGroups.length} 个知识库`}
+          </span>
+          <div>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={pickerGroups.length === 0}
+              onClick={() => setPickerExpanded(new Set(pickerGroups.map((group) => group.id)))}
+            >
+              展开全部
+            </button>
+            <button type="button" className="btn btn-sm" disabled={pickerExpanded.size === 0} onClick={() => setPickerExpanded(new Set())}>
+              收起全部
+            </button>
+          </div>
+        </div>
+        <div className="render-picker-list is-tree">
           {pickerContents.length === 0 && !pickerLoading ? (
             <EmptyState
               icon={<BookOpen size={20} />}
-              title="没有找到内容"
-              description="换个关键词试试，或先去内容库创建一篇文档。"
+              title={pickerQuery.trim() ? '没有找到内容' : '内容库还是空的'}
+              description={pickerQuery.trim() ? '换个关键词试试，或检查内容是否在其他知识库。' : '先去内容库创建一篇文档，再回来渲染。'}
               action={
                 <button type="button" className="btn btn-primary" onClick={() => navigate('/library')}>
                   去内容库
@@ -2294,33 +2428,66 @@ export default function RenderPage() {
               }
             />
           ) : (
-            pickerContents.map((content) => (
-              <button
-                type="button"
-                key={content.id}
-                className={`render-picker-item${content.id === selectedContent?.id ? ' is-active' : ''}`}
-                onClick={() => selectContent(content)}
-              >
-                {content.coverImage ? (
-                  <img src={absoluteUrl(content.coverImage)} alt="" />
-                ) : (
-                  <span className="render-picker-cover">
-                    <FileText size={17} />
-                  </span>
-                )}
-                <span className="render-picker-copy">
-                  <span className="render-picker-title">
-                    {content.title}
-                    {content.status === 'ready' ? <em>待渲染</em> : null}
-                  </span>
-                  <small>
-                    {content.bookName || '未分组'} · {formatNumber(content.wordCount)} 字 · {relativeTime(content.updatedAt)}更新
-                  </small>
-                  {content.excerpt ? <p>{content.excerpt}</p> : null}
-                </span>
-                {content.id === selectedContent?.id ? <Check size={16} /> : <ChevronRight size={15} />}
-              </button>
-            ))
+            pickerGroups.map((group) => {
+              const expanded = pickerQuery.trim().length > 0 || pickerExpanded.has(group.id)
+              return (
+                <section className="render-picker-book" key={group.id}>
+                  <button
+                    type="button"
+                    className="render-picker-book-head"
+                    aria-expanded={expanded}
+                    onClick={() => togglePickerBook(group.id)}
+                  >
+                    {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <span className="render-picker-book-icon" style={{ color: group.color }}>
+                      <Folder size={14} />
+                    </span>
+                    <span className="render-picker-book-name">{group.name}</span>
+                    <span className="render-picker-book-count">{group.items.length} 篇</span>
+                  </button>
+                  {expanded ? (
+                    <div className="render-picker-book-items">
+                      {group.items.length === 0 ? (
+                        <p className="render-picker-book-empty">这个知识库还没有内容</p>
+                      ) : (
+                        group.items.map((content) => (
+                          <button
+                            type="button"
+                            key={content.id}
+                            className={`render-picker-item is-child${content.id === selectedContent?.id ? ' is-active' : ''}`}
+                            onClick={() => selectContent(content)}
+                            title={content.excerpt || content.title}
+                          >
+                            {content.coverImage ? (
+                              <img src={absoluteUrl(content.coverImage)} alt="" />
+                            ) : (
+                              <span className="render-picker-cover">
+                                <FileText size={15} />
+                              </span>
+                            )}
+                            <span className="render-picker-copy">
+                              <span className="render-picker-title">
+                                {content.title}
+                                {content.status === 'ready' ? <em>待渲染</em> : null}
+                              </span>
+                              <small>
+                                {content.kind === 'video' ? '视频' : content.kind === 'gallery' ? '图文' : '文章'} ·{' '}
+                                {content.kind === 'video'
+                                  ? `${formatNumber(content.videoCount)} 段视频`
+                                  : content.kind === 'gallery'
+                                    ? `${formatNumber(content.imageCount)} 张图`
+                                    : `${formatNumber(content.wordCount)} 字`} · {relativeTime(content.updatedAt)}更新
+                              </small>
+                            </span>
+                            {content.id === selectedContent?.id ? <Check size={16} /> : <ChevronRight size={15} />}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                </section>
+              )
+            })
           )}
         </div>
       </Modal>
@@ -2329,23 +2496,95 @@ export default function RenderPage() {
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
         title="渲染历史"
-        subtitle="最近生成的渲染结果，可随时重新打开或删除"
+        subtitle={historyScope === 'content' && selectedContent
+          ? `查看《${selectedContent.title}》在各平台的历次渲染，点击记录即可重新打开。`
+          : '最近生成的渲染结果，可按平台筛选并重新打开。'}
         size="wide"
       >
-        {history.length === 0 ? (
+        <div className="render-history-toolbar">
+          <div className="render-history-scope" role="group" aria-label="选择历史范围">
+            <button
+              type="button"
+              className={cn('render-history-scope-btn', historyScope === 'content' && 'is-active')}
+              disabled={!selectedContent}
+              onClick={() => {
+                setHistoryScope('content')
+                setHistoryPlatform(null)
+                if (selectedContent) void refreshContentHistory(selectedContent.id)
+              }}
+            >
+              当前内容
+            </button>
+            <button
+              type="button"
+              className={cn('render-history-scope-btn', historyScope === 'all' && 'is-active')}
+              onClick={() => {
+                setHistoryScope('all')
+                setHistoryPlatform(null)
+                void refreshHistory()
+              }}
+            >
+              全部内容
+            </button>
+          </div>
+          <span className="render-history-summary">
+            {historyScope === 'content' && selectedContent ? `${selectedContent.title} · ` : ''}
+            {visibleHistory.length} 条记录
+          </span>
+        </div>
+
+        {historyBase.length > 0 ? (
+          <div className="render-history-platforms" role="group" aria-label="按平台筛选渲染历史">
+            <button
+              type="button"
+              className={cn('render-history-platform-filter', !historyPlatform && 'is-active')}
+              onClick={() => setHistoryPlatform(null)}
+            >
+              全部平台
+              <small>{historyBase.length}</small>
+            </button>
+            {historyPlatformCounts.map(([platform, count]) => {
+              const info = getPlatformInfo(platform)
+              return (
+                <button
+                  key={platform}
+                  type="button"
+                  className={cn('render-history-platform-filter', historyPlatform === platform && 'is-active')}
+                  style={{ '--platform-color': info.color, '--platform-soft': info.softColor } as CSSProperties}
+                  onClick={() => setHistoryPlatform(platform)}
+                >
+                  <PlatformGlyph platform={platform} size={13} />
+                  {info.shortName}
+                  <small>{count}</small>
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+
+        {visibleHistory.length === 0 ? (
           <EmptyState
             icon={<History size={20} />}
-            title="还没有渲染记录"
-            description="选择一篇内容完成首次渲染后，记录会出现在这里。"
+            title={historyBase.length > 0 ? '该平台还没有渲染记录' : '还没有渲染记录'}
+            description={historyBase.length > 0
+              ? '切换到其他平台，或使用「全部平台」查看当前范围的全部记录。'
+              : historyScope === 'content'
+                ? '这篇内容完成首次渲染后，各平台的历史会出现在这里。'
+                : '选择一篇内容完成首次渲染后，记录会出现在这里。'}
+            action={historyBase.length > 0 ? (
+              <button type="button" className="btn" onClick={() => setHistoryPlatform(null)}>
+                查看全部平台
+              </button>
+            ) : undefined}
           />
         ) : (
           <div className="render-history-list">
-            {history.map((item) => (
+            {visibleHistory.map((item) => (
               <div className={`render-history-item${renderId === item.id ? ' is-active' : ''}`} key={item.id}>
                 <button
                   type="button"
                   className="render-history-main"
-                  onClick={() => void loadRecord(item.id)}
+                  onClick={() => void loadRecord(item.id, historyPlatform ?? undefined)}
                   disabled={historyLoadingId !== null}
                 >
                   <span className="render-history-icons">
@@ -2354,7 +2593,7 @@ export default function RenderPage() {
                       return (
                         <span
                           key={platform}
-                          className="render-history-platform"
+                          className={cn('render-history-platform', historyPlatform === platform && 'is-focused')}
                           style={{ color: info.color, background: info.softColor }}
                           title={info.name}
                         >
@@ -2364,10 +2603,11 @@ export default function RenderPage() {
                     })}
                   </span>
                   <span className="render-history-copy">
-                    <strong>{item.contentTitle}</strong>
+                    <strong>{historyScope === 'content' ? formatDateTime(item.createdAt) : item.contentTitle}</strong>
                     <small>
-                      {item.platforms.map((platform) => getPlatformInfo(platform).shortName).join(' · ')} ·{' '}
-                      {formatDateTime(item.createdAt)}
+                      {historyScope === 'content'
+                        ? `${item.platforms.length} 个平台 · ${item.platforms.map((platform) => getPlatformInfo(platform).shortName).join(' · ')}`
+                        : `${item.platforms.map((platform) => getPlatformInfo(platform).shortName).join(' · ')} · ${formatDateTime(item.createdAt)}`}
                     </small>
                   </span>
                   {historyLoadingId === item.id ? (

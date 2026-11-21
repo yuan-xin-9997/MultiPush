@@ -1,4 +1,4 @@
-import { getPlatformInfo, PLATFORM_ORDER, type PlatformId, type PlatformRender, type RenderOptions, type XhsCard } from './types'
+import { getPlatformInfo, PLATFORM_ORDER, type PlatformId, type PlatformOptionOverrides, type PlatformRender, type RenderOptions, type XhsCard } from './types'
 
 export function createCardId(): string {
   // Unlike randomUUID(), getRandomValues() also works on HTTP LAN origins.
@@ -96,17 +96,50 @@ export function publishChecks(render: PlatformRender, stale = false): PublishChe
   ]
 }
 
-export interface RenderPreferences { platforms: PlatformId[]; options: RenderOptions }
+export interface RenderPreferences {
+  platforms: PlatformId[]
+  options: RenderOptions
+  platformOptions: PlatformOptionOverrides
+}
+
+function parseBaseOptions(value: unknown): RenderOptions {
+  const options = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    cardStyle: options.cardStyle === 'warm' || options.cardStyle === 'bold' ? options.cardStyle : 'clean',
+    includeTags: options.includeTags !== false,
+    includeToc: options.includeToc === true,
+    authorName: typeof options.authorName === 'string' ? options.authorName.slice(0, 40) : '',
+  }
+}
+
+/** Keep only explicitly overridden fields so base options still apply everywhere else. */
+function parsePlatformOptions(value: unknown): PlatformOptionOverrides {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const input = value as Record<string, unknown>
+  const result: PlatformOptionOverrides = {}
+  for (const platform of PLATFORM_ORDER) {
+    const raw = input[platform]
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const options = raw as Record<string, unknown>
+    const parsed: RenderOptions = {}
+    if (options.cardStyle === 'clean' || options.cardStyle === 'warm' || options.cardStyle === 'bold') parsed.cardStyle = options.cardStyle
+    if (typeof options.includeTags === 'boolean') parsed.includeTags = options.includeTags
+    if (typeof options.includeToc === 'boolean') parsed.includeToc = options.includeToc
+    if (typeof options.authorName === 'string') parsed.authorName = options.authorName.slice(0, 40)
+    if (Object.keys(parsed).length > 0) result[platform] = parsed
+  }
+  return result
+}
+
 export function parsePreferences(value: unknown): RenderPreferences | null {
   if (!value || typeof value !== 'object') return null
   const input = value as Record<string, unknown>
   if (!Array.isArray(input.platforms)) return null
   const platforms = PLATFORM_ORDER.filter((platform) => (input.platforms as unknown[]).includes(platform))
   if (!platforms.length) return null
-  const options = input.options && typeof input.options === 'object' ? input.options as Record<string, unknown> : {}
-  return { platforms, options: {
-    cardStyle: options.cardStyle === 'warm' || options.cardStyle === 'bold' ? options.cardStyle : 'clean',
-    includeTags: options.includeTags !== false, includeToc: options.includeToc === true,
-    authorName: typeof options.authorName === 'string' ? options.authorName.slice(0, 40) : '',
-  } }
+  return {
+    platforms,
+    options: parseBaseOptions(input.options),
+    platformOptions: parsePlatformOptions(input.platformOptions),
+  }
 }

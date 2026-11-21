@@ -1,9 +1,11 @@
-import type { ContentDetail, PlatformId, PlatformRender, RenderOptions } from '../../../shared/types'
+import type { ContentDetail, PlatformId, PlatformOptionOverrides, PlatformRender, RenderOptions } from '../../../shared/types'
 
 export interface RenderInput {
   content: ContentDetail
   platforms: PlatformId[]
   options: RenderOptions
+  /** Per-platform overrides merged on top of `options` for each renderer. */
+  platformOptions?: PlatformOptionOverrides
   authorName: string
   /** Absolute base URL, e.g. http://192.168.0.111:34080 (no trailing slash). */
   baseUrl: string

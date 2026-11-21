@@ -48,7 +48,7 @@ Express (single Node process, 0.0.0.0:34080)
 | `video_projects` | content_id, user_id, timeline_json | 视频内容剪辑时间线（有序片段，引用 media 资产） |
 | `video_exports` | id, user_id, content_id, status, progress, message, timeline_json, output_media_id | 视频导出异步任务（服务端 ffmpeg） |
 | `v2ex_*` | accounts / publications / resolutions | V2EX 浏览器会话、主题发布记录与人工核实 |
-| `renders` | id, user_id, content_id, platforms, options_json, result_json | 渲染历史；结果完整存储 |
+| `renders` | id, user_id, content_id, platforms, options_json, platform_options_json, result_json | 渲染历史；结果完整存储；平台选项按 `PlatformId` 保存覆盖值 |
 | `weibo_*` | accounts / publications / resolutions | 微博会话、发布记录与人工核实 |
 | `toutiao_*` | accounts / publications / resolutions | 今日头条会话、文章发布记录与人工核实 |
 | `baijiahao_*` | accounts / publications / resolutions | 百家号会话、文章发布记录与人工核实 |
@@ -95,7 +95,7 @@ Express (single Node process, 0.0.0.0:34080)
 
 ## 渲染流水线
 
-1. `POST /api/renders` 校验平台列表和内容归属。
+1. `POST /api/renders` 校验平台列表和内容归属，按平台合并默认选项与 `platformOptions` 覆盖。
 2. 读取 `ContentDetail`（Tiptap JSON + HTML）与用户显示名。
 3. 构造 `RenderInput`：`content`、`platforms`、`options`、`authorName`、`baseUrl`。
 4. `renderPlatforms()` 分派到 `wechat.ts` / `xiaohongshu.ts` / `zhihu.ts` / `weibo.ts` / `toutiao.ts` / `baijiahao.ts` / `douban.ts` / `juejin.ts` / `jianshu.ts` / `douyin.ts` / `sspai.ts` / `blog.ts`：

@@ -15,6 +15,7 @@ import type {
   MediaKind,
   MediaStats,
   PlatformId,
+  PlatformOptionOverrides,
   RenderListItem,
   RenderOptions,
   RenderRecord,
@@ -136,6 +137,18 @@ function parseOptions(value: unknown): RenderOptions {
   const parsed = parseJson(value)
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as RenderOptions
   return {}
+}
+
+function parsePlatformOptions(value: unknown): PlatformOptionOverrides {
+  const parsed = parseJson(value)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  const result: PlatformOptionOverrides = {}
+  for (const [platform, options] of Object.entries(parsed)) {
+    if (!(PLATFORM_ORDER as string[]).includes(platform)) continue
+    if (!options || typeof options !== 'object' || Array.isArray(options)) continue
+    result[platform as PlatformId] = options as RenderOptions
+  }
+  return result
 }
 
 function escapeLike(value: string): string {
@@ -280,6 +293,7 @@ export interface CreateRenderValues {
   contentTitle: string
   platforms: PlatformId[]
   options: RenderOptions
+  platformOptions?: PlatformOptionOverrides
   results: RenderRecord['results']
 }
 
@@ -580,6 +594,7 @@ export class Database {
         platforms_json TEXT NOT NULL,
         result_json TEXT NOT NULL,
         options_json TEXT NOT NULL DEFAULT '{}',
+        platform_options_json TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_renders_user_created ON renders(user_id, created_at DESC);
@@ -1197,7 +1212,7 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_v2ex_resolutions_publication ON v2ex_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 20;
+      PRAGMA user_version = 21;
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
@@ -1206,6 +1221,7 @@ export class Database {
     this.ensureMediaFolders()
     this.ensureDoubanPublicationColumns()
     this.ensureAiColumns()
+    this.ensureRenderPlatformOptions()
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     this.run(`UPDATE douyin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先核实抖音发布结果，避免重复发布。', nowIso()])
     // Never resend an operation that may already have reached WeChat before a restart.
@@ -1248,11 +1264,14 @@ export class Database {
     if (!columns.has('mode')) this.database.exec("ALTER TABLE douban_publications ADD COLUMN mode TEXT NOT NULL DEFAULT 'publish'")
   }
 
-  /**
-   * Additive migration for video contents: `contents.kind`, `media.meta_json`
-   * and the video project/export tables. Older databases keep working and
-   * existing rows default to the article kind.
-   */
+  /** Additive migration for per-platform render settings on older databases. */
+  private ensureRenderPlatformOptions(): void {
+    const columns = new Set(this.all('PRAGMA table_info(renders)').map((row) => text(row.name)))
+    if (!columns.has('platform_options_json')) {
+      this.database.exec("ALTER TABLE renders ADD COLUMN platform_options_json TEXT NOT NULL DEFAULT '{}'")
+    }
+  }
+
   /** Additive migration for AI message attachments on older databases. */
   private ensureAiColumns(): void {
     const columns = new Set(this.all('PRAGMA table_info(ai_messages)').map((row) => text(row.name)))
@@ -1261,6 +1280,11 @@ export class Database {
     }
   }
 
+  /**
+   * Additive migration for video contents: `contents.kind`, `media.meta_json`
+   * and the video project/export tables. Older databases keep working and
+   * existing rows default to the article kind.
+   */
   private ensureVideoColumns(): void {
     const contentColumns = new Set(this.all('PRAGMA table_info(contents)').map((row) => text(row.name)))
     if (!contentColumns.has('kind')) {
@@ -2198,6 +2222,7 @@ export class Database {
       platforms: parsePlatforms(row.platforms_json),
       results: parseResults(row.result_json),
       options: parseOptions(row.options_json),
+      platformOptions: parsePlatformOptions(row.platform_options_json),
       createdAt: text(row.created_at),
     }
   }
@@ -2206,8 +2231,8 @@ export class Database {
     const id = randomUUID()
     const createdAt = nowIso()
     this.run(
-      `INSERT INTO renders (id, user_id, content_id, content_title, platforms_json, result_json, options_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO renders (id, user_id, content_id, content_title, platforms_json, result_json, options_json, platform_options_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         userId,
@@ -2216,6 +2241,7 @@ export class Database {
         JSON.stringify(values.platforms),
         JSON.stringify(values.results),
         JSON.stringify(values.options ?? {}),
+        JSON.stringify(values.platformOptions ?? {}),
         createdAt,
       ],
     )
@@ -2226,6 +2252,7 @@ export class Database {
       platforms: values.platforms,
       results: values.results,
       options: values.options ?? {},
+      platformOptions: values.platformOptions ?? {},
       createdAt,
     }
   }

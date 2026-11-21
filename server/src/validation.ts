@@ -177,6 +177,8 @@ export const renderOptionsSchema = z.object({
   accountName: z.string().trim().max(100, '账号名最多 100 个字符').optional(),
 })
 
+const platformOptionsSchema = z.partialRecord(platformSchema, renderOptionsSchema)
+
 export const renderRequestSchema = z.object({
   contentId: z.string().trim().min(1, '请选择要渲染的内容').max(100),
   platforms: z
@@ -184,6 +186,7 @@ export const renderRequestSchema = z.object({
     .min(1, '请至少选择一个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
+  platformOptions: platformOptionsSchema.optional(),
 })
 
 export const renderListQuerySchema = z.object({
@@ -213,6 +216,7 @@ export const batchRenderSchema = z.object({
     .min(1, '请至少选择一个平台')
     .transform((platforms) => [...new Set(platforms)]),
   options: renderOptionsSchema.optional(),
+  platformOptions: platformOptionsSchema.optional(),
 }).strict()
 
 export const batchPublishSchema = z.object({

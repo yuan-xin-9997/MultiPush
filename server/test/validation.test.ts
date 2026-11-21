@@ -22,6 +22,8 @@ describe('security input validation', () => {
     expect(renderRequestSchema.parse({ contentId: 'content-1', platforms: PLATFORM_ORDER }).platforms).toEqual(PLATFORM_ORDER)
     expect(batchRenderSchema.safeParse({ contentIds: ['content-1'], platforms: PLATFORM_ORDER }).success).toBe(true)
     expect(renderRequestSchema.safeParse({ contentId: 'content-1', platforms: ['unknown'] }).success).toBe(false)
+    expect(renderRequestSchema.safeParse({ contentId: 'content-1', platforms: ['wechat'], platformOptions: { xiaohongshu: { includeTags: false } } }).success).toBe(true)
+    expect(renderRequestSchema.safeParse({ contentId: 'content-1', platforms: ['wechat'], platformOptions: { unknown: { includeTags: false } } }).success).toBe(false)
   })
 
   it('rejects SVG uploads including uppercase extensions while allowing raster images', () => {
