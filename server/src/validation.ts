@@ -225,8 +225,8 @@ export const batchPublishSchema = z.object({
   options: renderOptionsSchema.optional(),
 }).strict()
 
-const wechatAppIdSchema = z.string().trim().regex(/^wx[0-9a-fA-F]{16}$/, 'AppID 格式不正确，应以 wx 开头并共 18 位，可在公众号「设置与开发 → 基本配置」查看')
-const wechatAppSecretSchema = z.string().trim().regex(/^[0-9a-fA-F]{32}$/, 'AppSecret 格式不正确，应为 32 位字母或数字，可在公众号「设置与开发 → 基本配置」查看')
+const wechatAppIdSchema = z.string().trim().regex(/^wx[0-9a-fA-F]{16}$/, 'AppID 格式不正确，应以 wx 开头并共 18 位，可在微信开发者平台「我的业务 → 公众号/服务号 → 基础信息」查看')
+const wechatAppSecretSchema = z.string().trim().regex(/^[0-9a-fA-F]{32}$/, 'AppSecret 格式不正确，应为 32 位字母或数字，可在微信开发者平台「我的业务 → 公众号/服务号 → 基础信息 → 开发密钥」查看')
 
 export const wechatpicConnectSchema = z.object({
   appId: wechatAppIdSchema,

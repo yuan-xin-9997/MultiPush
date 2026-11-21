@@ -14,9 +14,11 @@
 
 ## 连接与凭据
 
-- 在公众号后台「设置与开发 → 基本配置」获取 AppID 与 AppSecret，在发布中心「公众号贴图」页连接；AppSecret 用 AES-256-GCM 按用户加密写入 SQLite，密钥在 `DATA_DIR/.wechatpic-session-key`，不返回浏览器、不写日志。
+- 在[微信开发者平台](https://developers.weixin.qq.com/platform/)「我的业务 → 公众号/服务号 → 基础信息」获取 AppID，同一页面「开发密钥」里查看 AppSecret，再在发布中心「公众号贴图」页连接；AppSecret 用 AES-256-GCM 按用户加密写入 SQLite，密钥在 `DATA_DIR/.wechatpic-session-key`，不返回浏览器、不写日志。
+- 微信公众平台后台的「设置与开发 → 开发接口管理」模块已迁移至微信开发者平台（公众平台后台不再有「基本配置」入口）；平台上只显示一次 AppSecret，忘记只能「重置」重新生成。
+- 登录开发者平台需要是该公众号的**管理员或开发者**，运营者账号看不到账号信息；个人主体账号启用 AppSecret 前需在公众平台「设置与开发 → 人员设置 → 管理员信息」完成管理员实名。
 - 连接时通过 `cgi-bin/token` 验证凭证，并尝试 `cgi-bin/account/getaccountbasicinfo` 读取公众号名称（无权限时回退显示 AppID）。
-- **IP 白名单**：调用公众号 API 的服务器出口 IP 必须加入「基本配置 → IP 白名单」。未加入时接口返回 409 `wechatpic_ip_not_allowed`，错误信息中包含当前出口 IP，按提示在后台添加后重试。服务器 IP 变化（换网络/换服务器）后需要重新维护白名单。
+- **IP 白名单**：调用公众号 API 的服务器出口 IP 必须加入「基础信息 → 开发密钥 → API IP 白名单」。未加入时接口返回 409 `wechatpic_ip_not_allowed`，错误信息中包含当前出口 IP，按提示在开发者平台添加后重试。服务器 IP 变化（换网络/换服务器）后需要重新维护白名单。
 - AppSecret 重置会使已保存连接失效，系统在下一次调用时标记连接过期，需要重新输入。
 
 ## 发布流程

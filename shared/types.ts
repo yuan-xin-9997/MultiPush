@@ -569,7 +569,7 @@ export interface WechatpicAccount {
 }
 
 export interface WechatpicConnectInput {
-  /** 公众号 AppID，在「设置与开发 → 基本配置」查看。 */
+  /** 公众号 AppID，在微信开发者平台「我的业务 → 公众号/服务号 → 基础信息」查看。 */
   appId: string
   /** 公众号 AppSecret，连接后按用户加密保存。 */
   appSecret: string

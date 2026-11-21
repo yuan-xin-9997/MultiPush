@@ -65,13 +65,13 @@ function toApiError(payload: Json, fallbackCode: string, fallbackMessage: string
   const message = errmsg(payload)
   if (code === 40164 || /not in whitelist|无效.*IP|ip.*whitelist/i.test(message)) {
     const ip = /invalid ip ([0-9a-fA-F:.]+)/.exec(message)?.[1]
-    return new ApiError(409, 'wechatpic_ip_not_allowed', `本机出口 IP 不在公众号 IP 白名单${ip ? `（当前 IP：${ip}）` : ''}。请在公众号后台「设置与开发 → 基本配置 → IP 白名单」添加后重试。${message ? `（微信返回：${message}）` : ''}`)
+    return new ApiError(409, 'wechatpic_ip_not_allowed', `本机出口 IP 不在公众号 IP 白名单${ip ? `（当前 IP：${ip}）` : ''}。请在微信开发者平台「我的业务 → 公众号/服务号 → 基础信息 → 开发密钥 → API IP 白名单」添加后重试。${message ? `（微信返回：${message}）` : ''}`)
   }
   if (code === 40001 || code === 40013 || code === 40125 || code === 41002 || code === 41004) {
     return new ApiError(409, 'wechatpic_auth_failed', 'AppID 或 AppSecret 无效，请核对后重新连接')
   }
   if (code === 48001) {
-    return new ApiError(409, 'wechatpic_unauthorized', '该公众号没有调用此接口的权限，请在公众号后台「开发者中心」确认接口状态')
+    return new ApiError(409, 'wechatpic_unauthorized', '该公众号没有调用此接口的权限，请在微信开发者平台「我的业务 → 公众号/服务号 → 接口管理 → 接口权限与额度」确认接口权限')
   }
   if (code === 45009) {
     return new ApiError(429, 'wechatpic_rate_limited', '调用超过微信接口频率限制，请稍后再试')

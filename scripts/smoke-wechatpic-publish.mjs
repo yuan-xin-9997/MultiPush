@@ -46,7 +46,7 @@ app.post('/api/wechatpic/connect', (req, res) => {
 app.delete('/api/wechatpic/account', (_req, res) => { connected = false; res.json({ ok: true }) })
 app.post('/api/wechatpic/publications', (req, res) => {
   if (!connected) { res.status(409).json({ error: 'wechatpic_auth_failed', message: '请先在系统中连接公众号（AppID / AppSecret）' }); return }
-  if (mode === 'ip') { res.status(409).json({ error: 'wechatpic_ip_not_allowed', message: '本机出口 IP 不在公众号 IP 白名单（当前 IP：203.0.113.7）。请在公众号后台「设置与开发 → 基本配置 → IP 白名单」添加后重试。' }); return }
+  if (mode === 'ip') { res.status(409).json({ error: 'wechatpic_ip_not_allowed', message: '本机出口 IP 不在公众号 IP 白名单（当前 IP：203.0.113.7）。请在微信开发者平台「我的业务 → 公众号/服务号 → 基础信息 → 开发密钥 → API IP 白名单」添加后重试。' }); return }
   submissions.push(req.body)
   const item = { id: `pub-${submissions.length}`, renderId: render.id, title: sticker.title, mode: 'draft', status: 'running', message: '正在上传贴图图片并创建草稿', url: null, remoteId: null, createdAt: time, updatedAt: time }
   publications.unshift(item); res.status(202).json({ publication: item })
