@@ -8,7 +8,7 @@
 必须实现：
 
 1. 多用户注册、登录、退出，JWT 鉴权，数据严格按用户隔离。
-2. 内容库：知识库（Book）分组、全部内容、收藏、回收站、搜索、排序、卡片/列表视图、新建、编辑、复制、删除/恢复、移动分组。
+2. 内容库：知识库（Book）分组、全部内容、收藏、回收站、搜索、排序、卡片/列表视图、新建、编辑、复制、删除/恢复、移动分组；素材库支持图片/视频/文档上传、文件夹、移动、筛选、预览、下载和删除。
 3. 内容导入/导出：支持批量导入 Markdown、HTML、TXT、MultiPush JSON；支持单篇导出 Markdown / HTML / JSON，支持多选打包 ZIP 导出。
 4. 类语雀的富文本编辑器：标题、正文、图片、视频、表格、代码块、引用、任务列表、分割线、链接、文字颜色/高亮、对齐、撤销重做、字数统计、目录大纲、自动保存、封面（本地上传或选用正文图片）、标签、状态。
 5. 智能渲染：选择内容 + 平台（微信公众号 / 公众号贴图 / 小红书 / 知乎 / 微博 / 今日头条 / 百家号 / 豆瓣 / 掘金 / CSDN / 简书 / 抖音 / 少数派 / 个人博客），调用模板规则渲染。渲染结果保存在历史记录中。
@@ -83,12 +83,12 @@ docs/                    文档
 
 ### 3.3 内容库
 
-- 头部：面包屑/标题、文档数、搜索框、排序、视图切换、新建按钮（新建图文 / 新建视频）。
-- 文档卡片：标题、摘要、封面缩略图、标签、所属知识库、更新时间、字数、收藏按钮、更多菜单（渲染、复制、移动、删除）；视频内容带「视频」角标并显示片段数。
+- 头部：面包屑/标题、文档数、搜索框、排序、视图切换、新建按钮（导入 / 新建图文 / 新建视频 / 新建文章）。
+- 文档卡片：标题、摘要、封面缩略图、标签、所属知识库、更新时间、字数或图片/视频数量、收藏按钮、更多菜单（渲染、复制、移动、删除）；图文内容带紫色「图文」角标并显示图片数，视频内容带「视频」角标并显示片段数。
 - 列表视图：表格样式，适合快速扫读。
 - 回收站：只显示已删除；支持恢复、彻底删除（二次确认）。
 - 空状态友好；加载骨架屏；操作 toast 反馈。
-- 点击卡片进入 `/editor/:id`；视频内容进入 `/video/:id`；新建先创建空内容再跳转。
+- 点击卡片进入 `/editor/:id`；图文内容进入 `/gallery/:id`；视频内容进入 `/video/:id`；新建先创建空内容再跳转。
 
 #### 导入 / 导出
 
@@ -107,10 +107,22 @@ docs/                    文档
 - 正文：Tiptap 编辑器，居中最大宽度约 760px，舒适行高；工具栏包含：
   一级/二级/三级标题、加粗、斜体、下划线、删除线、文字颜色、背景高亮、无序/有序/任务列表、引用、代码块、表格、分割线、链接、图片、视频、对齐、清除格式、撤销/重做。
 - 粘贴/拖拽图片自动上传；支持插入本地上传的视频（`<video controls>`）。
+- 工具栏和 `/` 快捷菜单提供「从素材库插入」：可从全库或指定文件夹选择已有图片、视频和文档；图片/视频直接插入正文，文档插入为带文件名和下载链接的段落。
 - 空文档显示占位提示；输入 `/` 唤起快捷插入菜单，支持正文、标题、列表、引用、代码块、分割线、表格、图片、视频和链接；可继续输入关键词筛选，使用 `↑`/`↓` 选择、`Enter` 插入、`Esc` 关闭。支持 Markdown 快捷输入（Tiptap StarterKit 自带）。
 - 自动保存：内容变化后 debounce 约 1.2s 保存；`Ctrl/Cmd+S` 立即保存；离开前若未保存给出提示。
 - 标题为空时保存为“无标题文档”。
 - 编辑器内容保存 `contentJson` + `contentHtml`；后端计算摘要、字数、图片/视频数量。
+
+#### 图文工作台（`kind: "gallery"`）
+
+- 面向公众号贴图、抖音图文、小红书等以图片为主的内容：标题 + 有序图片（可逐图填写图注）+ 配文。
+- 顶栏：返回、图文标识、保存状态、收藏、渲染、更多（复制 / 导出 Markdown、HTML、JSON / 删除）。
+- 图片区：批量上传（JPG/PNG/WebP/GIF，单张 ≤20MB，最多 35 张），也可「从素材库添加」已有图片；拖拽手柄或 ↑/↓ 调序，星标选择封面，删除图片；触屏设备常显图片工具栏。
+- 封面默认第一张；删除封面图自动回退到新的第一张。
+- 配文为纯文本多行输入，每行保存为一段；标签、草稿/待发布状态可编辑。
+- 自动保存约 0.8s；`Ctrl/Cmd+S` 立即保存；离开前提示未保存；顶部显示保存状态。
+- 图片保存为标准 Tiptap `figure`（`image` + 可选 `figcaption`），配文保存为 `paragraph`；同时生成 `contentHtml` 供现有渲染、发布、导出和批量任务复用。
+- 右下/侧栏展示公众号贴图（20）、小红书（18）、抖音图文（35）的图片上限提醒。
 
 ### 3.5 智能渲染
 
@@ -172,6 +184,21 @@ docs/                    文档
 - 弹窗显示任务进度、每篇状态、失败原因，以及打开排版/发布记录的链接。
 - 任务在服务端顺序执行；运行中关闭弹窗不终止任务，结果持久保存。
 
+### 3.10 素材库
+
+- 左侧导航「素材库」位于「AI 创作」和「内容库」之间，路由 `/assets`。
+- 顶部展示当前范围（全库或当前文件夹）的素材数量/占用空间以及图片、视频、文档数量；按类型筛选（全部/图片/视频/文档）和文件名搜索。
+- 支持上传：
+  - 图片：JPG / JPEG / PNG / WebP / GIF，单张 ≤20MB；
+  - 视频：MP4 / WebM / MOV，单个 ≤200MB；
+  - 文档：PDF / Word / Excel / PPT / TXT / Markdown / CSV / JSON / HTML / XML / YAML / RTF，单个 ≤50MB。
+- 文件夹：支持新建、重命名、删除；可把素材移动到「未分组」或任意文件夹；删除文件夹时素材移入「未分组」，不删除素材本身。同名文件夹（不区分大小写）不允许重复。
+- 素材卡片展示缩略图/类型角标/文件名/大小/时间；支持预览（图片、视频、PDF iframe、文本类文档源码）、下载、复制链接、在新标签打开、删除。
+- 图片和文本类文档在小于 1MB 时可在弹窗内预览；Office 文档提示下载后查看。删除素材会同时删除文件，引用该 URL 的内容将无法显示。
+- 所有上传入口（编辑器、图文工作台、视频工作台、AI 创作、发布页）共用素材表，新上传的文件会自动出现在素材库；当前所在文件夹中的上传会直接归入该文件夹。
+- 素材复用：文章编辑器可通过工具栏或 `/` 菜单「从素材库插入」图片、视频和文档；图文工作台「从素材库添加」图片；视频工作台「从素材库添加视频」把已有视频加入时间线。选择器支持类型切换、文件夹筛选、搜索和分页。
+- 移动端：文件夹卡片换行展示，素材卡片单列，无横向溢出。
+
 ## 4. 后端 API 契约
 
 统一前缀 `/api`。除注册/登录/健康检查/平台元数据外都需要 `Authorization: Bearer <token>`。错误格式：
@@ -200,9 +227,9 @@ docs/                    文档
 
 ### 内容
 
-- `GET /api/contents?bookId=&favorite=true&trash=true&q=&kind=article|video&sort=updated_desc|created_desc|title_asc&page=1&pageSize=20` → `ContentListResult`
+- `GET /api/contents?bookId=&favorite=true&trash=true&q=&kind=article|gallery|video&sort=updated_desc|created_desc|title_asc&page=1&pageSize=20` → `ContentListResult`
   - 默认排除回收站；`trash=true` 只返回回收站；`bookId=unfiled` 返回未分组。
-- `POST /api/contents` `ContentInput`（含 `kind: "article" | "video"`）→ `{ content: ContentDetail }`（图文默认标题“无标题文档”，视频默认“无标题视频”）
+- `POST /api/contents` `ContentInput`（含 `kind: "article" | "gallery" | "video"`）→ `{ content: ContentDetail }`（客户端通常显式传入“无标题文章 / 无标题图文 / 无标题视频”作为初始标题）
 - `GET /api/contents/:id` → `{ content: ContentDetail }`（回收站中的文档也可读取，用于恢复前查看）
 - `PATCH /api/contents/:id` `ContentInput` → `{ content: ContentDetail }`
 - `DELETE /api/contents/:id` → 软删除 `{ ok: true }`；`?permanent=true` 彻底删除。
@@ -223,11 +250,17 @@ docs/                    文档
 
 ### 媒体
 
-- `POST /api/media` multipart 字段 `file` → `{ media: MediaAsset }`
-  - 图片：jpg/jpeg/png/webp/gif/svg，≤ 20MB；视频：mp4/webm/mov，≤ 200MB。
-  - 存储文件名随机（uuid + 扩展名），静态路径 `/uploads/<filename>`；原始文件名仅存数据库。
-- `GET /api/media` → `{ media: MediaAsset[] }`（当前用户，最近 100 个）
-- `DELETE /api/media/:id` → `{ ok: true }`（仅删除记录与文件；被正文引用的图片仍可继续通过 URL 访问直到删除）
+- `POST /api/media` multipart 字段 `file`、可选 `folderId` → `{ media: MediaAsset }`
+  - 图片：jpg/jpeg/png/webp/gif，≤20MB；视频：mp4/webm/mov，≤200MB；文档：pdf/doc/docx/xls/xlsx/ppt/pptx/txt/md/markdown/csv/json/html/htm/xml/yml/yaml/rtf，≤50MB。
+  - 存储文件名随机（uuid + 扩展名），静态路径 `/uploads/<filename>`；原始文件名仅存数据库；`kind` 为 `image | video | document`，`folderId` 为空表示未分组。
+- `GET /api/media?kind=&q=&folderId=&page=&pageSize=` → `{ media, total, page, pageSize }`（`folderId=unfiled` 表示未分组；默认 pageSize 100 保持旧调用兼容）
+- `GET /api/media/stats?folderId=` → `{ stats: { total, images, videos, documents, bytes } }`（不传为全库，传 `unfiled` 或文件夹 ID 为当前范围）
+- `PATCH /api/media/:id` `{ folderId: string | null }` → `{ media }`（移动素材到文件夹或未分组；文件夹必须属于当前用户）
+- `GET /api/media/folders` → `{ folders: MediaFolder[] }`（含 `assetCount`）
+- `POST /api/media/folders` `{ name }` → `{ folder }`；同名（NOCASE）返回 409 `media_folder_exists`
+- `PATCH /api/media/folders/:id` `{ name }` → `{ folder }`；同名返回 409
+- `DELETE /api/media/folders/:id` → `{ ok: true, moved }`（素材移到未分组，不删除素材）
+- `DELETE /api/media/:id` → `{ ok: true }`（删除记录与文件；引用该 URL 的内容会失效）
 - `GET /uploads/:filename` 无需鉴权（随机文件名），支持 Range（视频拖动）。
 
 ### 平台与渲染

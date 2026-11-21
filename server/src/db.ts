@@ -11,7 +11,9 @@ import type {
   ContentStatus,
   ContentSummary,
   MediaAsset,
+  MediaFolder,
   MediaKind,
+  MediaStats,
   PlatformId,
   RenderListItem,
   RenderOptions,
@@ -138,6 +140,13 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`)
 }
 
+/** Persisted `contents.kind` values: keep older/unknown values on the article path. */
+function normalizeContentKind(value: unknown): ContentKind {
+  if (value === 'video') return 'video'
+  if (value === 'gallery') return 'gallery'
+  return 'article'
+}
+
 /** Effective seconds a stored clip plays after its trim is applied. */
 function clipTrimDuration(clip: StoredVideoClip): number {
   if (clip.trimEnd !== null) return Math.max(0, clip.trimEnd - clip.trimStart)
@@ -209,8 +218,23 @@ export interface CreateMediaValues {
   originalName: string
   mimeType: string
   size: number
+  folderId?: string | null
   /** ffprobe metadata for videos; stored as JSON in media.meta_json. */
   meta?: MediaProbeMeta | null
+}
+
+export interface MediaListOptions {
+  kind?: MediaKind
+  q?: string
+  folderId?: string
+  page: number
+  pageSize: number
+}
+
+export interface MediaFilterOptions {
+  kind?: MediaKind
+  q?: string
+  folderId?: string
 }
 
 /** Lightweight probe result persisted next to a video media asset. */
@@ -468,7 +492,7 @@ export class Database {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         book_id TEXT REFERENCES books(id) ON DELETE SET NULL,
-        kind TEXT NOT NULL DEFAULT 'article' CHECK (kind IN ('article', 'video')),
+        kind TEXT NOT NULL DEFAULT 'article' CHECK (kind IN ('article', 'gallery', 'video')),
         title TEXT NOT NULL,
         excerpt TEXT NOT NULL DEFAULT '',
         content_json TEXT NOT NULL DEFAULT '{}',
@@ -490,10 +514,21 @@ export class Database {
       CREATE INDEX IF NOT EXISTS idx_contents_user_deleted ON contents(user_id, deleted_at);
       CREATE INDEX IF NOT EXISTS idx_contents_book ON contents(book_id);
 
+      CREATE TABLE IF NOT EXISTS media_folders (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_media_folders_user_name ON media_folders(user_id, name COLLATE NOCASE);
+      CREATE INDEX IF NOT EXISTS idx_media_folders_user_updated ON media_folders(user_id, updated_at DESC);
+
       CREATE TABLE IF NOT EXISTS media (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        kind TEXT NOT NULL CHECK (kind IN ('image', 'video')),
+        folder_id TEXT REFERENCES media_folders(id) ON DELETE SET NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('image', 'video', 'document')),
         filename TEXT NOT NULL UNIQUE,
         original_name TEXT NOT NULL,
         mime_type TEXT NOT NULL,
@@ -1122,6 +1157,9 @@ export class Database {
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
+    this.ensureGalleryKind()
+    this.ensureDocumentMediaKind()
+    this.ensureMediaFolders()
     this.ensureDoubanPublicationColumns()
     this.ensureAiColumns()
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
@@ -1186,6 +1224,126 @@ export class Database {
     if (!mediaColumns.has('meta_json')) {
       this.database.exec('ALTER TABLE media ADD COLUMN meta_json TEXT')
     }
+  }
+
+  /**
+   * Older databases constrain `contents.kind` to article/video. SQLite cannot
+   * alter a CHECK constraint in place, so rebuild the table once to allow the
+   * image-first `gallery` kind. Foreign keys are disabled only for the rebuild
+   * and checked again before returning.
+   */
+  private ensureGalleryKind(): void {
+    const row = this.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'contents'")
+    const tableSql = text(row?.sql)
+    if (!tableSql || tableSql.includes("'gallery'")) return
+    if (!/check\s*\(\s*kind\s+in/i.test(tableSql)) return
+
+    this.database.exec('PRAGMA foreign_keys = OFF')
+    try {
+      this.transaction(() => {
+        this.database.exec(`
+          DROP TABLE IF EXISTS contents_gallery_migration;
+          CREATE TABLE contents_gallery_migration (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            book_id TEXT REFERENCES books(id) ON DELETE SET NULL,
+            kind TEXT NOT NULL DEFAULT 'article' CHECK (kind IN ('article', 'gallery', 'video')),
+            title TEXT NOT NULL,
+            excerpt TEXT NOT NULL DEFAULT '',
+            content_json TEXT NOT NULL DEFAULT '{}',
+            content_html TEXT NOT NULL DEFAULT '',
+            content_html_hash TEXT,
+            content_json_stale INTEGER NOT NULL DEFAULT 0,
+            cover_image TEXT,
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'ready')),
+            favorite INTEGER NOT NULL DEFAULT 0,
+            word_count INTEGER NOT NULL DEFAULT 0,
+            image_count INTEGER NOT NULL DEFAULT 0,
+            video_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT
+          );
+          INSERT INTO contents_gallery_migration
+            (id, user_id, book_id, kind, title, excerpt, content_json, content_html, content_html_hash,
+             content_json_stale, cover_image, tags_json, status, favorite, word_count, image_count,
+             video_count, created_at, updated_at, deleted_at)
+          SELECT id, user_id, book_id, kind, title, excerpt, content_json, content_html, content_html_hash,
+             content_json_stale, cover_image, tags_json, status, favorite, word_count, image_count,
+             video_count, created_at, updated_at, deleted_at
+          FROM contents;
+          DROP TABLE contents;
+          ALTER TABLE contents_gallery_migration RENAME TO contents;
+          CREATE INDEX IF NOT EXISTS idx_contents_user_updated ON contents(user_id, updated_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_contents_user_deleted ON contents(user_id, deleted_at);
+          CREATE INDEX IF NOT EXISTS idx_contents_book ON contents(book_id);
+        `)
+      })
+    } finally {
+      this.database.exec('PRAGMA foreign_keys = ON')
+    }
+    const violations = this.all('PRAGMA foreign_key_check')
+    if (violations.length > 0) {
+      throw new Error('contents table migration for gallery kind broke foreign keys')
+    }
+  }
+
+  /**
+   * Older databases restrict `media.kind` to image/video. Rebuild the table
+   * once to allow document assets; media has no incoming foreign keys, so only
+   * its own rows and index need to be preserved.
+   */
+  private ensureDocumentMediaKind(): void {
+    const row = this.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media'")
+    const tableSql = text(row?.sql)
+    if (!tableSql || tableSql.includes("'document'")) return
+    if (!/check\s*\(\s*kind\s+in/i.test(tableSql)) return
+
+    this.database.exec('PRAGMA foreign_keys = OFF')
+    try {
+      this.transaction(() => {
+        this.database.exec(`
+          DROP TABLE IF EXISTS media_document_migration;
+          CREATE TABLE media_document_migration (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            folder_id TEXT REFERENCES media_folders(id) ON DELETE SET NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('image', 'video', 'document')),
+            filename TEXT NOT NULL UNIQUE,
+            original_name TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            meta_json TEXT,
+            created_at TEXT NOT NULL
+          );
+          INSERT INTO media_document_migration
+            (id, user_id, kind, filename, original_name, mime_type, size, meta_json, created_at)
+          SELECT id, user_id, kind, filename, original_name, mime_type, size, meta_json, created_at
+          FROM media;
+          DROP TABLE media;
+          ALTER TABLE media_document_migration RENAME TO media;
+          CREATE INDEX IF NOT EXISTS idx_media_user_created ON media(user_id, created_at DESC);
+        `)
+      })
+    } finally {
+      this.database.exec('PRAGMA foreign_keys = ON')
+    }
+    const violations = this.all('PRAGMA foreign_key_check')
+    if (violations.length > 0) {
+      throw new Error('media table migration for document kind broke foreign keys')
+    }
+  }
+
+  /** Additive migration: folder support for existing media tables. */
+  private ensureMediaFolders(): void {
+    const columns = new Set(
+      this.all('PRAGMA table_info(media)').map((row) => text(row.name)),
+    )
+    if (!columns.has('folder_id')) {
+      this.database.exec('ALTER TABLE media ADD COLUMN folder_id TEXT REFERENCES media_folders(id) ON DELETE SET NULL')
+    }
+    this.database.exec('CREATE INDEX IF NOT EXISTS idx_media_folder ON media(folder_id)')
   }
 
   /** Additive migration: older databases keep working and are backfilled once. */
@@ -1423,7 +1581,7 @@ export class Database {
   private mapContentSummary(row: Row): ContentSummary {
     return {
       id: text(row.id),
-      kind: row.kind === 'video' ? 'video' : 'article',
+      kind: normalizeContentKind(row.kind),
       bookId: nullableText(row.book_id),
       bookName: nullableText(row.book_name),
       title: text(row.title),
@@ -1549,7 +1707,7 @@ export class Database {
         id,
         userId,
         values.bookId,
-        values.kind === 'video' ? 'video' : 'article',
+        normalizeContentKind(values.kind),
         values.title,
         values.excerpt,
         JSON.stringify(values.contentJson ?? {}),
@@ -1581,7 +1739,7 @@ export class Database {
        WHERE id = ? AND user_id = ?`,
       [
         values.bookId,
-        values.kind === 'video' ? 'video' : 'article',
+        normalizeContentKind(values.kind),
         values.title,
         values.excerpt,
         JSON.stringify(values.contentJson ?? {}),
@@ -1639,11 +1797,91 @@ export class Database {
 
   // ---------------------------------------------------------------- media
 
+  private mapMediaFolder(row: Row): MediaFolder {
+    return {
+      id: text(row.id),
+      name: text(row.name),
+      assetCount: numberValue(row.asset_count),
+      createdAt: text(row.created_at),
+      updatedAt: text(row.updated_at),
+    }
+  }
+
+  listMediaFolders(userId: string): MediaFolder[] {
+    return this.all(
+      `SELECT f.*, COUNT(m.id) AS asset_count
+       FROM media_folders f
+       LEFT JOIN media m ON m.folder_id = f.id AND m.user_id = f.user_id
+       WHERE f.user_id = ?
+       GROUP BY f.id
+       ORDER BY f.name COLLATE NOCASE ASC, f.created_at ASC`,
+      [userId],
+    ).map((row) => this.mapMediaFolder(row))
+  }
+
+  getMediaFolder(userId: string, folderId: string): MediaFolder | null {
+    const row = this.get(
+      `SELECT f.*,
+        (SELECT COUNT(*) FROM media m WHERE m.folder_id = f.id AND m.user_id = f.user_id) AS asset_count
+       FROM media_folders f WHERE f.id = ? AND f.user_id = ?`,
+      [folderId, userId],
+    )
+    return row ? this.mapMediaFolder(row) : null
+  }
+
+  getMediaFolderByName(userId: string, name: string): MediaFolder | null {
+    const row = this.get(
+      `SELECT f.*,
+        (SELECT COUNT(*) FROM media m WHERE m.folder_id = f.id AND m.user_id = f.user_id) AS asset_count
+       FROM media_folders f WHERE f.user_id = ? AND f.name = ? COLLATE NOCASE`,
+      [userId, name],
+    )
+    return row ? this.mapMediaFolder(row) : null
+  }
+
+  createMediaFolder(userId: string, name: string): MediaFolder {
+    const id = randomUUID()
+    const now = nowIso()
+    this.run(
+      'INSERT INTO media_folders (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      [id, userId, name, now, now],
+    )
+    const folder = this.getMediaFolder(userId, id)
+    if (!folder) throw new Error('Failed to create media folder')
+    return folder
+  }
+
+  renameMediaFolder(userId: string, folderId: string, name: string): MediaFolder | null {
+    const changes = this.run(
+      'UPDATE media_folders SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+      [name, nowIso(), folderId, userId],
+    )
+    return changes > 0 ? this.getMediaFolder(userId, folderId) : null
+  }
+
+  deleteMediaFolder(userId: string, folderId: string): { moved: number } | null {
+    if (!this.getMediaFolder(userId, folderId)) return null
+    let moved = 0
+    this.transaction(() => {
+      moved = this.run('UPDATE media SET folder_id = NULL WHERE folder_id = ? AND user_id = ?', [folderId, userId])
+      this.run('DELETE FROM media_folders WHERE id = ? AND user_id = ?', [folderId, userId])
+    })
+    return { moved }
+  }
+
+  moveMedia(userId: string, mediaId: string, folderId: string | null): MediaAsset | null {
+    const changes = this.run(
+      'UPDATE media SET folder_id = ? WHERE id = ? AND user_id = ?',
+      [folderId, mediaId, userId],
+    )
+    return changes > 0 ? this.getMedia(userId, mediaId) : null
+  }
+
   private mapMedia(row: Row): MediaAsset {
     const meta = parseJson(row.meta_json) as MediaProbeMeta | null
     return {
       id: text(row.id),
-      kind: row.kind === 'video' ? 'video' : 'image',
+      kind: row.kind === 'video' ? 'video' : row.kind === 'document' ? 'document' : 'image',
       filename: text(row.filename),
       originalName: text(row.original_name),
       mimeType: text(row.mime_type),
@@ -1652,6 +1890,7 @@ export class Database {
       duration: meta && typeof meta.duration === 'number' ? meta.duration : null,
       width: meta && typeof meta.width === 'number' ? meta.width : null,
       height: meta && typeof meta.height === 'number' ? meta.height : null,
+      folderId: nullableText(row.folder_id),
       createdAt: text(row.created_at),
     }
   }
@@ -1660,10 +1899,10 @@ export class Database {
     const id = randomUUID()
     const createdAt = nowIso()
     this.run(
-      `INSERT INTO media (id, user_id, kind, filename, original_name, mime_type, size, meta_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, userId, values.kind, values.filename, values.originalName, values.mimeType, values.size,
-        values.meta ? JSON.stringify(values.meta) : null, createdAt],
+      `INSERT INTO media (id, user_id, folder_id, kind, filename, original_name, mime_type, size, meta_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, userId, values.folderId ?? null, values.kind, values.filename, values.originalName,
+        values.mimeType, values.size, values.meta ? JSON.stringify(values.meta) : null, createdAt],
     )
     return {
       id,
@@ -1676,6 +1915,7 @@ export class Database {
       duration: values.meta?.duration ?? null,
       width: values.meta?.width ?? null,
       height: values.meta?.height ?? null,
+      folderId: values.folderId ?? null,
       createdAt,
     }
   }
@@ -1685,10 +1925,61 @@ export class Database {
     return this.run('UPDATE media SET meta_json = ? WHERE id = ? AND user_id = ?', [JSON.stringify(meta), mediaId, userId]) > 0
   }
 
-  listMedia(userId: string): MediaAsset[] {
-    return this.all('SELECT * FROM media WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100', [
-      userId,
-    ]).map((row) => this.mapMedia(row))
+  private mediaWhere(userId: string, options: MediaFilterOptions): { clause: string; params: SqlValue[] } {
+    const where = ['user_id = ?']
+    const params: SqlValue[] = [userId]
+    if (options.kind) {
+      where.push('kind = ?')
+      params.push(options.kind)
+    }
+    if (options.folderId === 'unfiled') {
+      where.push('folder_id IS NULL')
+    } else if (options.folderId) {
+      where.push('folder_id = ?')
+      params.push(options.folderId)
+    }
+    const search = (options.q ?? '').trim()
+    if (search) {
+      const pattern = `%${escapeLike(search)}%`
+      where.push("(original_name LIKE ? ESCAPE '\\' OR mime_type LIKE ? ESCAPE '\\')")
+      params.push(pattern, pattern)
+    }
+    return { clause: where.join(' AND '), params }
+  }
+
+  listMedia(userId: string, options: Partial<MediaListOptions> = {}): MediaAsset[] {
+    const page = Math.max(1, options.page ?? 1)
+    const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 100))
+    const { clause, params } = this.mediaWhere(userId, options)
+    return this.all(
+      `SELECT * FROM media WHERE ${clause} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+      [...params, pageSize, (page - 1) * pageSize],
+    ).map((row) => this.mapMedia(row))
+  }
+
+  countMedia(userId: string, options: MediaFilterOptions = {}): number {
+    const { clause, params } = this.mediaWhere(userId, options)
+    return numberValue(this.get(`SELECT COUNT(*) AS total FROM media WHERE ${clause}`, params)?.total)
+  }
+
+  getMediaStats(userId: string, options: MediaFilterOptions = {}): MediaStats {
+    const { clause, params } = this.mediaWhere(userId, options)
+    const row = this.get(
+      `SELECT COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN kind = 'image' THEN 1 ELSE 0 END), 0) AS images,
+        COALESCE(SUM(CASE WHEN kind = 'video' THEN 1 ELSE 0 END), 0) AS videos,
+        COALESCE(SUM(CASE WHEN kind = 'document' THEN 1 ELSE 0 END), 0) AS documents,
+        COALESCE(SUM(size), 0) AS bytes
+       FROM media WHERE ${clause}`,
+      params,
+    )
+    return {
+      total: numberValue(row?.total),
+      images: numberValue(row?.images),
+      videos: numberValue(row?.videos),
+      documents: numberValue(row?.documents),
+      bytes: numberValue(row?.bytes),
+    }
   }
 
   getMedia(userId: string, mediaId: string): MediaAsset | null {

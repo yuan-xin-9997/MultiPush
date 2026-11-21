@@ -33,6 +33,7 @@ import {
   Copy,
   Eraser,
   FileDown,
+  FolderOpen,
   Heading1,
   Heading2,
   Heading3,
@@ -66,12 +67,13 @@ import {
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Book, ContentDetail, ContentStatus, RichTextJson } from '@shared/types'
+import type { Book, ContentDetail, ContentStatus, MediaAsset, RichTextJson } from '@shared/types'
 import { api, absoluteUrl } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { exportContentFile, groupImageCaptions, type ExportFormat } from '@/lib/content-io'
 import { cn, formatDateTime, safeFilename } from '@/lib/utils'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import MediaPicker from '@/components/MediaPicker'
 import Dropdown from '@/components/Dropdown'
 import Logo from '@/components/Logo'
 import Modal from '@/components/Modal'
@@ -276,6 +278,7 @@ export default function EditorPage() {
   const [coverUploading, setCoverUploading] = useState(false)
   const [coverBusySource, setCoverBusySource] = useState<string | null>(null)
   const [coverPickerOpen, setCoverPickerOpen] = useState(false)
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false)
   const [bodyImages, setBodyImages] = useState<CoverImageCandidate[]>([])
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null)
 
@@ -434,6 +437,34 @@ export default function EditorPage() {
     },
     [],
   )
+
+  const insertLibraryMedia = useCallback((assets: MediaAsset[]) => {
+    const activeEditor = editorRef.current
+    if (!activeEditor || assets.length === 0) return
+    const nodes: Array<Record<string, unknown>> = []
+    for (const media of assets) {
+      if (media.kind === 'image') {
+        nodes.push({ type: 'image', attrs: { src: media.url, alt: media.originalName } })
+      } else if (media.kind === 'video') {
+        nodes.push({ type: 'video', attrs: { src: media.url } })
+      } else {
+        nodes.push({
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: '附件：' },
+            {
+              type: 'text',
+              text: media.originalName,
+              marks: [{ type: 'link', attrs: { href: absoluteUrl(media.url), target: '_blank', rel: 'noopener noreferrer' } }],
+            },
+          ],
+        })
+      }
+    }
+    if (nodes.length === 0) return
+    activeEditor.chain().focus().insertContent(nodes).run()
+    toast.success(nodes.length === 1 ? '素材已插入正文' : `已插入 ${nodes.length} 个素材`)
+  }, [])
 
   const editor = useEditor({
     extensions: [
@@ -649,6 +680,15 @@ export default function EditorPage() {
           keywords: ['video', 'movie', '视频', '短片'],
           icon: <Video size={17} />,
           action: () => videoInputRef.current?.click(),
+        },
+        {
+          id: 'asset-library',
+          label: '素材库',
+          description: '从素材库插入图片、视频或文档',
+          group: '插入',
+          keywords: ['asset', 'library', '素材库', '图片', '视频', '文档'],
+          icon: <FolderOpen size={17} />,
+          action: () => setAssetPickerOpen(true),
         },
         {
           id: 'link',
@@ -875,9 +915,13 @@ export default function EditorPage() {
       .get(id)
       .then(({ content: detail }) => {
         if (cancelled) return
-        // Video contents have their own full-screen workspace.
+        // Video and image-first contents have their own full-screen workspaces.
         if (detail.kind === 'video') {
           navigate(`/video/${detail.id}`, { replace: true })
+          return
+        }
+        if (detail.kind === 'gallery') {
+          navigate(`/gallery/${detail.id}`, { replace: true })
           return
         }
         setContent(detail)
@@ -1676,6 +1720,9 @@ export default function EditorPage() {
                   <ToolbarButton label="插入视频" onClick={() => videoInputRef.current?.click()}>
                     <Video size={16} />
                   </ToolbarButton>
+                  <ToolbarButton label="从素材库插入" onClick={() => setAssetPickerOpen(true)}>
+                    <FolderOpen size={16} />
+                  </ToolbarButton>
                   <ToolbarButton label="左对齐" active={editor.isActive({ textAlign: 'left' })} onClick={() => editor.chain().focus().setTextAlign('left').run()}>
                     <AlignLeft size={16} />
                   </ToolbarButton>
@@ -1970,6 +2017,14 @@ export default function EditorPage() {
           </>
         )}
       </Modal>
+
+      <MediaPicker
+        open={assetPickerOpen}
+        onClose={() => setAssetPickerOpen(false)}
+        onSelect={insertLibraryMedia}
+        kinds={['image', 'video', 'document']}
+        title="从素材库插入"
+      />
 
       <ConfirmDialog
         open={deleteOpen}

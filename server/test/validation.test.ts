@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { registerSchema, changePasswordSchema, loginSchema } from '../src/validation'
-import { getMediaDescriptor } from '../src/upload'
+import { DOCUMENT_MAX_BYTES, getMediaDescriptor, maxBytesFor } from '../src/upload'
 
 describe('security input validation', () => {
   it('limits new passwords by UTF-8 bytes for registration and password changes', () => {
@@ -20,5 +20,14 @@ describe('security input validation', () => {
     expect(getMediaDescriptor('payload.svg')).toBeNull()
     expect(getMediaDescriptor('payload.SVG')).toBeNull()
     expect(getMediaDescriptor('photo.png')?.kind).toBe('image')
+  })
+
+  it('accepts common image, video and document extensions', () => {
+    expect(getMediaDescriptor('clip.MP4')?.kind).toBe('video')
+    for (const name of ['report.pdf', 'notes.markdown', 'sheet.XLSX', 'slides.pptx', 'archive.rtf']) {
+      expect(getMediaDescriptor(name)?.kind).toBe('document')
+    }
+    expect(maxBytesFor(getMediaDescriptor('report.pdf')!)).toBe(DOCUMENT_MAX_BYTES)
+    expect(getMediaDescriptor('archive.exe')).toBeNull()
   })
 })

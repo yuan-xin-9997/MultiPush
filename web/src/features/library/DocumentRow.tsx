@@ -1,5 +1,5 @@
 import type { KeyboardEvent, MouseEvent } from 'react'
-import { Clapperboard, Folder, Star } from 'lucide-react'
+import { Clapperboard, Folder, Images, Star } from 'lucide-react'
 import type { ContentSummary } from '@shared/types'
 import { cn, formatDateTime, relativeTime } from '@/lib/utils'
 import { formatNumber } from '@/lib/format'
@@ -52,7 +52,7 @@ export default function DocumentRow({ item, mode, selected, actions, onToggleSel
 
       <div className="document-row-main">
         <div className="document-row-cover">
-          <DocumentCover image={item.coverImage} title={title} variant="mini" />
+          <DocumentCover image={item.coverImage} title={title} variant="mini" kind={item.kind} />
         </div>
         <div className="document-row-copy">
           <div className="document-row-title" title={title}>
@@ -60,6 +60,11 @@ export default function DocumentRow({ item, mode, selected, actions, onToggleSel
               <span className="document-kind-badge" title="视频内容">
                 <Clapperboard size={12} />
                 视频
+              </span>
+            ) : item.kind === 'gallery' ? (
+              <span className="document-kind-badge is-gallery" title="图文内容">
+                <Images size={12} />
+                图文
               </span>
             ) : null}
             {title}
@@ -83,7 +88,11 @@ export default function DocumentRow({ item, mode, selected, actions, onToggleSel
       </div>
 
       <div className="document-row-cell document-row-words">
-        {item.kind === 'video' ? `${formatNumber(item.videoCount)} 段视频` : `${formatNumber(item.wordCount)} 字`}
+        {item.kind === 'video'
+          ? `${formatNumber(item.videoCount)} 段视频`
+          : item.kind === 'gallery'
+            ? `${formatNumber(item.imageCount)} 张图`
+            : `${formatNumber(item.wordCount)} 字`}
       </div>
 
       <div className="document-row-cell document-row-time" title={formatDateTime(isTrash ? item.deletedAt : item.updatedAt)}>

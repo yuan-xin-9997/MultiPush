@@ -77,7 +77,7 @@ const contentTagsSchema = z.array(z.string().max(200))
 
 export const contentInputSchema = z.object({
   title: z.string().max(500, '标题最多 500 个字符').optional(),
-  kind: z.enum(['article', 'video']).optional(),
+  kind: z.enum(['article', 'gallery', 'video']).optional(),
   bookId: z.string().trim().min(1, '知识库 ID 不能为空').max(100).nullable().optional(),
   contentJson: contentJsonSchema.optional(),
   contentHtml: z.string().optional(),
@@ -100,11 +100,26 @@ export const contentListQuerySchema = z.object({
   favorite: booleanQuery,
   trash: booleanQuery,
   q: z.string().trim().max(200, '搜索关键词最多 200 个字符').optional(),
-  kind: z.enum(['article', 'video']).optional(),
+  kind: z.enum(['article', 'gallery', 'video']).optional(),
   sort: z.enum(['updated_desc', 'created_desc', 'title_asc']).optional().default('updated_desc'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 })
+
+export const mediaListQuerySchema = z.object({
+  kind: z.enum(['image', 'video', 'document']).optional(),
+  q: z.string().trim().max(200, '搜索关键词最多 200 个字符').optional(),
+  folderId: z.string().trim().min(1).max(100).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(100),
+})
+
+const mediaFolderNameSchema = z.string().trim().min(1, '请输入文件夹名称').max(40, '文件夹名称最多 40 个字符')
+export const mediaStatsQuerySchema = z.object({
+  folderId: z.string().trim().min(1).max(100).optional(),
+})
+export const mediaFolderInputSchema = z.object({ name: mediaFolderNameSchema })
+export const mediaMoveInputSchema = z.object({ folderId: z.string().trim().min(1).max(100).nullable() })
 
 const clipTrimSchema = z.number().min(0, '剪辑起点不能为负').max(86_400, '剪辑起点最大 24 小时')
 const clipDurationSchema = z.number().min(0.05, '片段最短 0.05 秒').max(86_400, '片段最长 24 小时')

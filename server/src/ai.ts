@@ -171,7 +171,7 @@ const SYSTEM_PROMPT = `你是 MultiPush 的 AI 创作助手。MultiPush 是一�
 
 你的能力：
 - 读取用户的内容库、知识库、素材、渲染记录、平台连接状态和发布记录；
-- 新建或修改文章；管理视频内容（视频为主、带标题和正文的内容类型）；
+- 新建或修改文章与图文（以图片为主的内容类型，适配公众号贴图、抖音图文、小红书）；管理视频内容（视频为主、带标题和正文的内容类型）；
 - 通过剪辑时间线操控视频内容：查看片段、调整顺序、修剪片段起止点（单位：秒）、增删片段，并触发服务端 ffmpeg 导出成片；
 - 为文章生成微信公众号、小红书、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、抖音、少数派和个人博客排版；
 - 将文章保存为平台草稿或正式发布；抖音视频笔记可使用导出的成片素材（videoMediaId）发布；
@@ -179,7 +179,7 @@ const SYSTEM_PROMPT = `你是 MultiPush 的 AI 创作助手。MultiPush 是一�
 
 附件使用规则（用户消息可能附带图片、视频或文本文档）：
 - 附件元数据中带"素材 ID"的可以直接传给工具的 mediaIds 参数；没有素材 ID 的内容一律不要编造。
-- 用户上传图片并要求写文章：调用 create_content 或 update_content 时传 mediaIds，系统会把图片按顺序插入正文末尾，第一张默认作为封面（可用 coverImage 覆盖）。如需把图穿插在正文中，可在 html 里引用附件的 url（/uploads/... 路径）。
+- 用户上传图片并要求写文章或图文：调用 create_content（kind="article" 或 "gallery"）或 update_content 时传 mediaIds，系统会把图片按顺序插入正文末尾，第一张默认作为封面（可用 coverImage 覆盖）。如需把图穿插在正文中，可在 html 里引用附件的 url（/uploads/... 路径）。
 - 用户上传视频并要求新建视频内容：调用 create_content(kind="video", mediaIds=...)，系统会用这些视频按顺序初始化剪辑时间线；之后可用 update_video_timeline 调整顺序和裁剪，export_video 导出成片。
 - 文档附件提供提取后的纯文本，是写作素材，可以引用、改写或总结；文本可能被截断，缺尾时说明即可，不要编造缺失部分。
 - 图片内容以视觉信息为准；如果无法确认图片内容，先向用户描述你看到的内容并确认，不要臆测。
@@ -223,7 +223,7 @@ export const AI_TOOLS: ToolDefinition[] = [
           bookId: { type: 'string', description: '知识库 ID' },
           favorite: { type: 'boolean', description: '只看收藏' },
           trash: { type: 'boolean', description: '只看回收站' },
-          kind: { type: 'string', enum: ['article', 'video'], description: '按类型筛选：article 图文，video 视频内容' },
+          kind: { type: 'string', enum: ['article', 'gallery', 'video'], description: '按类型筛选：article 文章，gallery 图文，video 视频内容' },
           page: { type: 'number', description: '页码，从 1 开始' },
           pageSize: { type: 'number', description: '每页数量，最多 50' },
         },
@@ -243,14 +243,14 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'create_content',
-      description: '在内容库中新建一篇内容。html 必须是完整正文的语义 HTML，不要包含 script/style/iframe。kind 为 video 时创建视频内容（视频片段需后续通过剪辑时间线管理）。',
+      description: '在内容库中新建一篇内容。html 必须是完整正文的语义 HTML，不要包含 script/style/iframe。kind 为 video 时创建视频内容（视频片段需后续通过剪辑时间线管理）；kind 为 gallery 时创建以图片为主的图文内容。',
       parameters: {
         type: 'object',
         properties: {
           title: { type: 'string', description: '文章标题' },
-          kind: { type: 'string', enum: ['article', 'video'], description: '内容类型，默认 article' },
+          kind: { type: 'string', enum: ['article', 'gallery', 'video'], description: '内容类型，默认 article；gallery 为以图片为主的图文（公众号贴图 / 抖音图文 / 小红书）' },
           html: { type: 'string', description: '文章正文 HTML' },
-          mediaIds: { type: 'array', items: { type: 'string' }, description: '素材 ID 列表：article 时为按顺序插入正文末尾的图片（第一张默认作为封面），video 时为按顺序初始化剪辑时间线的视频' },
+          mediaIds: { type: 'array', items: { type: 'string' }, description: '素材 ID 列表：article/gallery 时为按顺序插入正文末尾的图片（第一张默认作为封面），video 时为按顺序初始化剪辑时间线的视频' },
           excerpt: { type: 'string', description: '摘要，可选；不传则自动生成' },
           tags: { type: 'array', items: { type: 'string' }, description: '标签，最多 10 个' },
           bookId: { type: 'string', description: '知识库 ID，可选' },
@@ -288,8 +288,8 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'list_media',
-      description: '列出当前用户已上传的图片和视频素材，用于选择封面、剪辑时间线或抖音素材。',
-      parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['image', 'video'] } }, additionalProperties: false },
+      description: '列出当前用户已上传的图片、视频和文档素材，用于选择封面、剪辑时间线、抖音素材或素材库文件。',
+      parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['image', 'video', 'document'] } }, additionalProperties: false },
     },
   },
   {
@@ -979,7 +979,7 @@ export class AiService {
   private listContents(userId: string, args: JsonObject) {
     const page = Math.max(1, Math.min(100, Number(args.page) || 1))
     const pageSize = Math.max(1, Math.min(50, Number(args.pageSize) || 20))
-    const kind = args.kind === 'video' ? 'video' : args.kind === 'article' ? 'article' : undefined
+    const kind = args.kind === 'video' ? 'video' : args.kind === 'gallery' ? 'gallery' : args.kind === 'article' ? 'article' : undefined
     return this.database.listContents(userId, {
       favorite: optionalBoolean(args, 'favorite') ?? false,
       trash: optionalBoolean(args, 'trash') ?? false,
@@ -1025,10 +1025,10 @@ export class AiService {
     const bookId = stringArg(args, 'bookId') ?? null
     if (bookId && !this.database.getBook(userId, bookId)) throw notFound('知识库不存在')
     const tags = normalizeTags(stringArrayArg(args, 'tags'))
-    const kind = args.kind === 'video' ? 'video' as const : 'article' as const
+    const kind = args.kind === 'video' ? 'video' as const : args.kind === 'gallery' ? 'gallery' as const : 'article' as const
     const mediaIds = stringArrayArg(args, 'mediaIds')
     const timelineMedia = kind === 'video' ? this.mediaByIds(userId, mediaIds, 'video') : []
-    const images = kind === 'article' ? this.mediaByIds(userId, mediaIds, 'image') : []
+    const images = kind !== 'video' ? this.mediaByIds(userId, mediaIds, 'image') : []
     if (kind === 'video' && mediaIds.length && !timelineMedia.length) throw new ApiError(400, 'ai_media_kind', '视频内容需要至少一个视频素材 ID')
     const htmlWithImages = images.length ? this.appendImagesHtml(html, images) : html
     const metrics = deriveContentMetrics({ contentHtml: htmlWithImages, contentJson: {}, excerpt: stringArg(args, 'excerpt') })
@@ -1064,7 +1064,7 @@ export class AiService {
     const contentId = stringArg(args, 'contentId', true)!
     const current = this.database.getContentDetail(userId, contentId)
     if (!current) throw notFound('内容不存在')
-    const appendedImages = current.kind === 'article' ? this.mediaByIds(userId, stringArrayArg(args, 'mediaIds'), 'image') : []
+    const appendedImages = current.kind !== 'video' ? this.mediaByIds(userId, stringArrayArg(args, 'mediaIds'), 'image') : []
     const baseHtml = args.html !== undefined ? cleanHtml(stringArg(args, 'html', true)!) : current.contentHtml
     const html = appendedImages.length ? this.appendImagesHtml(baseHtml, appendedImages) : baseHtml
     const htmlChanged = html !== current.contentHtml

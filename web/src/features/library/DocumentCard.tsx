@@ -1,5 +1,5 @@
 import type { KeyboardEvent, MouseEvent } from 'react'
-import { Clapperboard, Folder, Star } from 'lucide-react'
+import { Clapperboard, Folder, Images, Star } from 'lucide-react'
 import type { ContentSummary } from '@shared/types'
 import { formatDateTime, relativeTime } from '@/lib/utils'
 import { formatNumber } from '@/lib/format'
@@ -43,11 +43,16 @@ export default function DocumentCard({ item, mode, selected, actions, onToggleSe
       onKeyDown={handleKeyDown}
     >
       <div className="document-cover">
-        <DocumentCover image={item.coverImage} title={title} />
+        <DocumentCover image={item.coverImage} title={title} kind={item.kind} />
         {item.kind === 'video' ? (
           <span className="document-kind-badge" title="视频内容">
             <Clapperboard size={13} />
             视频
+          </span>
+        ) : item.kind === 'gallery' ? (
+          <span className="document-kind-badge is-gallery" title="图文内容">
+            <Images size={13} />
+            图文
           </span>
         ) : null}
         <label
@@ -105,7 +110,9 @@ export default function DocumentCard({ item, mode, selected, actions, onToggleSe
         <span className="document-wordcount">
           {item.kind === 'video'
             ? `${formatNumber(item.videoCount)} 段视频`
-            : `${formatNumber(item.wordCount)} 字`}
+            : item.kind === 'gallery'
+              ? `${formatNumber(item.imageCount)} 张图`
+              : `${formatNumber(item.wordCount)} 字`}
         </span>
         <DocumentMenu item={item} mode={mode} actions={actions} />
       </div>

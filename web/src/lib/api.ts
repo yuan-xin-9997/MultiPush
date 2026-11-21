@@ -11,6 +11,10 @@ import type {
   ContentSummary,
   LoginInput,
   MediaAsset,
+  MediaFolder,
+  MediaKind,
+  MediaListResult,
+  MediaStats,
   PlatformInfo,
   PublicationDeletion,
   PlatformId,
@@ -185,7 +189,12 @@ function qs(params: Record<string, string | number | boolean | null | undefined>
   return text ? `?${text}` : ''
 }
 
-function uploadWithProgress<T>(path: string, file: File, onProgress?: (percent: number) => void): Promise<T> {
+function uploadWithProgress<T>(
+  path: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+  fields?: Record<string, string>,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${API_BASE}${path}`)
@@ -210,6 +219,7 @@ function uploadWithProgress<T>(path: string, file: File, onProgress?: (percent: 
     }
     const form = new FormData()
     form.append('file', file)
+    for (const [name, value] of Object.entries(fields ?? {})) form.append(name, value)
     xhr.send(form)
   })
 }
@@ -280,9 +290,40 @@ export const api = {
   },
 
   media: {
-    upload: (file: File, onProgress?: (percent: number) => void) =>
-      uploadWithProgress<{ media: MediaAsset }>('/api/media', file, onProgress),
-    list: () => request<{ media: MediaAsset[] }>('/api/media'),
+    upload: (file: File, onProgress?: (percent: number) => void, folderId?: string | null) =>
+      uploadWithProgress<{ media: MediaAsset }>(
+        '/api/media',
+        file,
+        onProgress,
+        folderId ? { folderId } : undefined,
+      ),
+    list: (query: { kind?: MediaKind; q?: string; folderId?: string; page?: number; pageSize?: number } = {}) =>
+      request<MediaListResult>(
+        `/api/media${qs({
+          kind: query.kind,
+          q: query.q,
+          folderId: query.folderId,
+          page: query.page,
+          pageSize: query.pageSize,
+        })}`,
+      ),
+    stats: (query: { folderId?: string } = {}) =>
+      request<{ stats: MediaStats }>(`/api/media/stats${qs({ folderId: query.folderId })}`),
+    folders: () => request<{ folders: MediaFolder[] }>('/api/media/folders'),
+    createFolder: (name: string) =>
+      request<{ folder: MediaFolder }>('/api/media/folders', { method: 'POST', body: JSON.stringify({ name }) }),
+    renameFolder: (id: string, name: string) =>
+      request<{ folder: MediaFolder }>(`/api/media/folders/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      }),
+    removeFolder: (id: string) =>
+      request<{ ok: true; moved: number }>(`/api/media/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    move: (id: string, folderId: string | null) =>
+      request<{ media: MediaAsset }>(`/api/media/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ folderId }),
+      }),
     probe: (id: string) => request<{ probe: { duration: number | null; width: number | null; height: number | null; hasAudio: boolean; videoCodec: string | null; audioCodec: string | null; fps: number | null; formatName: string | null } }>(`/api/media/${encodeURIComponent(id)}/probe`),
     remove: (id: string) => request<{ ok: true }>(`/api/media/${id}`, { method: 'DELETE' }),
   },

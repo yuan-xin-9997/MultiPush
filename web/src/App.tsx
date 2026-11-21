@@ -5,8 +5,10 @@ import { useAuth } from '@/contexts/AuthContext'
 import AppShell from '@/components/AppShell'
 import LoginPage from '@/features/auth/LoginPage'
 import RegisterPage from '@/features/auth/RegisterPage'
+import AssetsPage from '@/features/assets/AssetsPage'
 import LibraryPage from '@/features/library/LibraryPage'
 import EditorPage from '@/features/editor/EditorPage'
+import GalleryPage from '@/features/gallery/GalleryPage'
 import VideoWorkspacePage from '@/features/video/VideoWorkspacePage'
 import RenderPage from '@/features/render/RenderPage'
 import PublishPage from '@/features/publish/PublishPage'
@@ -48,6 +50,14 @@ export default function App() {
         }
       />
       <Route
+        path="/gallery/:id"
+        element={
+          <Protected>
+            <GalleryPage />
+          </Protected>
+        }
+      />
+      <Route
         path="/video/:id"
         element={
           <Protected>
@@ -63,6 +73,7 @@ export default function App() {
         }
       >
         <Route path="/" element={<Navigate to="/library" replace />} />
+        <Route path="/assets" element={<AssetsPage />} />
         <Route path="/library" element={<LibraryPage />} />
         <Route path="/library/favorites" element={<LibraryPage />} />
         <Route path="/library/trash" element={<LibraryPage />} />
