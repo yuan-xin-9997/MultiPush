@@ -633,9 +633,17 @@
 
 /* ---------- Document grid ---------- */
 .document-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(246px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 16px;
+}
+
+/* 卡片随行宽伸缩：满行保持等宽，最后一排也能铺满，不在右侧留空洞。 */
+.document-grid > * {
+  flex: 1 1 246px;
+  max-width: 430px;
+  min-width: 0;
 }
 
 .document-card {
@@ -1372,8 +1380,12 @@
   }
 
   .document-grid {
-    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
     gap: 12px;
+  }
+
+  .document-grid > * {
+    flex-basis: 210px;
+    max-width: 380px;
   }
 
   .document-list-head {
@@ -1414,8 +1426,9 @@
 }
 
 @media (max-width: 480px) {
-  .document-grid {
-    grid-template-columns: minmax(0, 1fr);
+  .document-grid > * {
+    flex-basis: 100%;
+    max-width: none;
   }
 }
 
