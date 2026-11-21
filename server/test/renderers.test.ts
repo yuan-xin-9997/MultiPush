@@ -319,6 +319,16 @@ describe('renderPlatforms', () => {
     expect(result.downloads[1].content).toContain('核心流程')
   })
 
+  it('warns when Zhihu has to convert tables to lists', async () => {
+    const [withTable] = await renderPlatforms(input(['zhihu']))
+    expect(withTable.html).not.toContain('<table')
+    expect(withTable.html).toContain('<li ')
+    expect(withTable.warnings.some((warning) => warning.includes('不保留表格') && warning.includes('1 张表'))).toBe(true)
+
+    const [plain] = await renderPlatforms(input(['zhihu'], { contentHtml: '<h2>小节</h2><p>正文</p>' }))
+    expect(plain.warnings.some((warning) => warning.includes('表格'))).toBe(false)
+  })
+
   it('renders Douyin caption, hashtags and vertical preview', async () => {
     const [result] = await renderPlatforms(input(['douyin']))
     expect(result.platform).toBe('douyin')

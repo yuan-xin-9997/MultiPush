@@ -1,3 +1,4 @@
+import { load } from 'cheerio'
 import { getPlatformInfo } from '../../../shared/types'
 import type { PlatformRender } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
@@ -67,7 +68,10 @@ export async function renderZhihu(input: RenderInput, context?: RendererContext)
   const info = getPlatformInfo('zhihu')
   const prepared = prepareContent(input, context, info)
   const title = truncateToChars(prepared.rawTitle, info.limits.titleMax ?? 100)
-  const warnings = buildPlatformWarnings(prepared)
+  const tableCount = load(prepared.html, null, false)('table').length
+  const warnings = buildPlatformWarnings(prepared, tableCount
+    ? [`知乎草稿接口不保留表格，已将 ${tableCount} 张表转为等价列表。`]
+    : [])
 
   const article = buildStyledArticle(prepareZhihuContent(prepared.html), {
     styles: ZHIHU_STYLES,

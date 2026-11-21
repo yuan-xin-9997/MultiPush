@@ -8,7 +8,7 @@ import { ApiError } from '../src/errors'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey } from '../src/publisher-session'
 import { renderPlatforms } from '../src/renderers'
 import { CsdnService } from '../src/csdn'
-import { csdnArticleUrl, csdnEditorContainsArticle, parseCsdnArticleId, parseCsdnIdentity, parseCsdnSaveResponse, type CsdnDriver, type CsdnLoginAttempt } from '../src/csdn-browser'
+import { csdnArticleUrl, csdnEarlySaveNeedsCheck, csdnEditorContainsArticle, csdnTitleMatches, parseCsdnArticleId, parseCsdnIdentity, parseCsdnSaveResponse, type CsdnDriver, type CsdnLoginAttempt } from '../src/csdn-browser'
 import type { ContentDetail } from '../../shared/types'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -167,10 +167,32 @@ describe('CSDN parsing', () => {
     expect(csdnEditorContainsArticle(markdown, '正文', editorText)).toBe(true)
     expect(csdnEditorContainsArticle(markdown, '正文', `\u200b${editorText.replace(/调参/g, '调\u200b参')}`)).toBe(true)
     expect(csdnEditorContainsArticle(markdown, '正文', editorText.slice(0, editorText.indexOf('最后一段')))).toBe(false)
+    const middle = Math.floor(editorText.length / 2)
+    expect(csdnEditorContainsArticle(markdown, '正文', editorText.slice(0, middle - 100) + editorText.slice(middle + 100))).toBe(false)
     expect(csdnEditorContainsArticle(markdown, '正文', [
       '欢迎使用Markdown编辑器',
       '这里写自定义目录标题',
       '# 欢迎使用Markdown编辑器',
     ].join('\n\n'))).toBe(false)
+  })
+
+  it('accepts a long CSDN title when the title bar truncates it', () => {
+    const title = '一次讲清 OR-Tools 的三层结构：MPSolver、pywraplp 与后端求解器到底谁是谁，如何选型，以及什么时候应该更换求解后端'
+    expect(csdnTitleMatches(title, title)).toBe(true)
+    expect(csdnTitleMatches(title.slice(0, 40) + '…', title)).toBe(true)
+    expect(csdnTitleMatches(title.replace(/\s+/g, ' '), title)).toBe(true)
+    expect(csdnTitleMatches('完全不同的标题', title)).toBe(false)
+    expect(csdnTitleMatches(title.slice(0, 10), title)).toBe(false)
+    expect(csdnTitleMatches('短标', '短标题')).toBe(false)
+    expect(csdnTitleMatches('短标题', '短标题')).toBe(true)
+  })
+
+  it('treats an auto-save during import as a result that needs checking', () => {
+    expect(csdnEarlySaveNeedsCheck('准备 CSDN 编辑器', true)).toBe(true)
+    expect(csdnEarlySaveNeedsCheck('导入 CSDN 正文', true)).toBe(true)
+    expect(csdnEarlySaveNeedsCheck('打开发布设置', true)).toBe(true)
+    expect(csdnEarlySaveNeedsCheck('保存 CSDN 草稿', true)).toBe(false)
+    expect(csdnEarlySaveNeedsCheck('发布 CSDN 文章', true)).toBe(false)
+    expect(csdnEarlySaveNeedsCheck('导入 CSDN 正文', false)).toBe(false)
   })
 })

@@ -95,8 +95,34 @@ export function csdnEditorContainsArticle(markdown: string, text: string, editor
   const probe = markdownProbe.length >= 6 ? markdownProbe : editorProbe(text)
   if (probe.length < 6) return false
   if (probe.length <= 120) return haystack.includes(probe)
-  // Require both ends: a partial import or a leftover title must not pass.
-  return haystack.includes(probe.slice(0, 40)) && haystack.includes(probe.slice(-40))
+  // Require the head, middle and tail: a partial import, a leftover title or a
+  // dropped middle section must not pass.
+  const middleStart = Math.floor((probe.length - 40) / 2)
+  return haystack.includes(probe.slice(0, 40))
+    && haystack.includes(probe.slice(middleStart, middleStart + 40))
+    && haystack.includes(probe.slice(-40))
+}
+
+function titleText(value: string): string {
+  return value.replace(/[\s\u200b\ufeff]+/g, '').replace(/[.…]+$/u, '')
+}
+
+/** The CSDN title bar may truncate long titles; accept a whitespace-free prefix. */
+export function csdnTitleMatches(shown: string, title: string): boolean {
+  const expected = titleText(title)
+  const actual = titleText(shown)
+  if (!expected || !actual) return false
+  if (actual === expected) return true
+  return expected.startsWith(actual) && actual.length >= Math.min(20, expected.length)
+}
+
+/**
+ * If the editor autosaved while importing or filling the title, a later failure
+ * may still leave a draft behind. Such a result must be verified by the user,
+ * not retried as if nothing had been submitted.
+ */
+export function csdnEarlySaveNeedsCheck(stage: string, saveRequested: boolean): boolean {
+  return saveRequested && stage !== '保存 CSDN 草稿' && stage !== '发布 CSDN 文章'
 }
 
 /** Read the signed-in identity from CSDN cookies. UserToken alone is not enough. */
@@ -342,8 +368,11 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
     await input.fill(title)
     await input.press('Enter')
     await page.waitForTimeout(300)
+    const value = (await input.inputValue().catch(() => '')).trim()
     const shown = (await display.innerText().catch(() => '')).trim()
-    if (shown !== title) throw new ApiError(502, 'csdn_title_failed', `CSDN 标题没有正确写入（当前为“${shown.slice(0, 30)}”），请稍后重试`)
+    if (value !== title && !csdnTitleMatches(shown, title)) {
+      throw new ApiError(502, 'csdn_title_failed', `CSDN 标题没有正确写入（当前为“${(value || shown).slice(0, 40)}”），请稍后重试`)
+    }
   }
 
   private async importMarkdown(page: Page, article: CsdnArticle): Promise<void> {
@@ -448,6 +477,12 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
     try {
       const page = await this.openEditor(context)
       try {
+        // CSDN may autosave while the article is being imported or titled.
+        // Track every write from the moment the editor exists so a later
+        // failure is never mistaken for "nothing was submitted".
+        page.on('request', request => {
+          if (request.method() === 'POST' && request.url().includes(SAVE_API)) saveRequested = true
+        })
         await page.waitForTimeout(800)
         await this.dismissEditorHints(page)
         progress({ message: '正在导入 CSDN 正文' })
@@ -455,9 +490,6 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
         await this.importMarkdown(page, article)
         await this.dismissEditorHints(page)
         await this.fillTitle(page, article.title)
-        page.on('request', request => {
-          if (request.method() === 'POST' && request.url().includes(SAVE_API)) saveRequested = true
-        })
         if (article.mode === 'draft') {
           progress({ message: '正在保存 CSDN 草稿' })
           stage = '保存 CSDN 草稿'
@@ -499,6 +531,9 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
         return { state: await context.storageState(), status: 'published' as const, remoteId: result.id, url, message: `已发布到 CSDN：${url}` }
       } finally { await page.close().catch(() => {}) }
     } catch (error) {
+      if (csdnEarlySaveNeedsCheck(stage, saveRequested)) {
+        throw uncertain(`CSDN ${stage}时编辑器已自动提交过保存请求，后续操作失败${error instanceof ApiError ? `（${error.message}）` : ''}；结果未确认，请先到 CSDN 草稿箱核实，避免重复创建`)
+      }
       if (error instanceof ApiError) throw error
       if (saveRequested) throw uncertain(`CSDN ${stage}时页面或网络异常，结果未确认；请先到 CSDN 草稿箱和文章列表核实，避免重复发布`)
       throw new ApiError(502, 'csdn_publish_failed', `CSDN ${stage}时页面异常，尚未提交保存，请稍后重试`)
