@@ -1,3 +1,4 @@
+import { createHmac, randomUUID } from 'node:crypto'
 import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright-core'
 import { load } from 'cheerio'
 import type { CsdnPublication } from '../../shared/types'
@@ -24,6 +25,7 @@ export interface CsdnDriver {
   beginLogin(): Promise<CsdnLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: CsdnIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string, url?: string | null): Promise<{ state: PublisherStorageState; status: 'published' | 'missing' | 'unknown'; url: string | null; message: string }>
+  deleteDraft(state: PublisherStorageState, remoteId: string): Promise<{ state: PublisherStorageState; remoteDeleted: boolean; message: string }>
   publish(state: PublisherStorageState, article: CsdnArticle, progress: (value: Partial<Pick<CsdnPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   close(): Promise<void>
 }
@@ -31,10 +33,32 @@ export interface CsdnDriver {
 const LOGIN = 'https://passport.csdn.net/login'
 const EDITOR = 'https://editor.csdn.net/md/?not_checkout=1'
 const SAVE_API = '/blog-console-api/v3/mdeditor/saveArticle'
+const DELETE_API = 'https://bizapi.csdn.net/blog/phoenix/console/v1/article/del'
+const APP_KEY = '203803574'
+const APP_SECRET = '9znpamsyl2c7cdrr9sas0le9vbc3r6ba'
 const TITLE_INPUT = 'input.article-bar__title--input'
 const TITLE_DISPLAY = '.article-bar__title-display'
 const EDITOR_BODY = 'pre.editor__inner'
 const PUBLISH_MODAL = '.modal__publish-article'
+/** CSDN's console API signs requests with the public web app key. */
+function signedHeaders(contentType: string): Record<string, string> {
+  const nonce = randomUUID()
+  const signed: Record<string, string> = { 'x-ca-key': APP_KEY, 'x-ca-nonce': nonce }
+  const names = Object.keys(signed).sort()
+  let text = `POST\n*/*\n\n${contentType}\n\n`
+  for (const name of names) text += `${name}:${signed[name]}\n`
+  text += '/blog/phoenix/console/v1/article/del'
+  return {
+    Accept: '*/*',
+    'Content-Type': contentType,
+    'X-Ca-Stage': '',
+    'X-Ca-Key': APP_KEY,
+    'X-Ca-Nonce': nonce,
+    'X-Ca-Signature': createHmac('sha256', APP_SECRET).update(text).digest('base64'),
+    'X-Ca-Signature-Headers': names.join(','),
+  }
+}
+
 const expired = () => new ApiError(409, 'csdn_session_expired', 'CSDN 登录状态已失效，请重新扫码连接')
 const uncertain = (message: string) => new ApiError(502, 'csdn_result_uncertain', message)
 type Data = Record<string, unknown>
@@ -251,6 +275,30 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
     } finally { await context.close().catch(() => {}) }
   }
 
+  async deleteDraft(state: PublisherStorageState, remoteId: string) {
+    const context = await this.context(state)
+    try {
+      const identity = await this.identity(context)
+      if (!identity) throw expired()
+      const contentType = 'application/json;charset=UTF-8'
+      const response = await context.request.post(DELETE_API, {
+        data: { articleId: remoteId, deep: true },
+        headers: { ...signedHeaders(contentType), Origin: 'https://mp.csdn.net', Referer: 'https://mp.csdn.net/mp_blog/manage/article' },
+        timeout: 30_000,
+      })
+      const body = object(await response.json().catch(() => null))
+      const code = Number(body.code)
+      const message = textOf(body.message) || textOf(body.msg)
+      if (response.status() === 401 || response.status() === 403 || code === 401 || code === 403) throw expired()
+      if (response.ok() && code === 200) return { state: await context.storageState(), remoteDeleted: true, message: 'CSDN 草稿已删除' }
+      if (/不存在|已删除|找不到|not\s*found/i.test(message)) return { state: await context.storageState(), remoteDeleted: false, message: 'CSDN 草稿已不存在，已清理本系统记录' }
+      throw new ApiError(502, 'csdn_delete_failed', `CSDN 删除草稿失败：${message || `HTTP ${response.status()}${Number.isFinite(code) ? ` / 错误码 ${code}` : ''}`}`)
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'csdn_delete_failed', 'CSDN 删除草稿未完成，请检查网络后重试')
+    } finally { await context.close().catch(() => {}) }
+  }
+
   /**
    * CSDN opens a template-library modal and a coach-mark guide on some editor
    * boots. Both overlay the title bar and the editor, so pointer actions time
@@ -288,7 +336,6 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
     const display = page.locator(TITLE_DISPLAY).first()
     if (await display.count()) {
       await display.click({ timeout: 5_000 }).catch(async () => { await display.dispatchEvent('click').catch(() => {}) })
-      await page.waitForTimeout(150)
     }
     const input = page.locator(`${TITLE_INPUT}:visible`).first()
     if (!await input.count()) throw new ApiError(502, 'csdn_editor_unavailable', 'CSDN 编辑器没有找到标题输入框，页面可能已改版')

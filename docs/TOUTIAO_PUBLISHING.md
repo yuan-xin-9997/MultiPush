@@ -67,7 +67,7 @@
 | `DELETE /api/toutiao/account` | 断开连接 |
 | `POST /api/toutiao/publications` | 提交 `{renderId}` |
 | `GET /api/toutiao/publications` | 当前用户最近 50 条记录 |
-| `GET /api/toutiao/publications/:id` | 查询进度、文章链接 |
+| `DELETE /api/toutiao/publications/:id` | 删除本系统的草稿或失败记录，不会操作今日头条后台；已发布、处理中和结果待核实记录不可删除 |
 | `POST /api/toutiao/publications/:id/resolve` | `{action:"check"}` 异步复查；`{action:"not_published"}` 人工确认未发布；`{action:"published",articleUrl}` 人工关联已发布文章 |
 
 ## 验证与限制

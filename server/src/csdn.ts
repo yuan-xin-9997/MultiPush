@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { CsdnAccount, CsdnLogin, CsdnPublication, CsdnPublishInput, CsdnResolveInput } from '../../shared/types'
+import type { CsdnAccount, CsdnLogin, CsdnPublication, CsdnPublishInput, CsdnResolveInput, PublicationDeletion } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -182,6 +182,31 @@ export class CsdnService {
     const value = this.database.getCsdnPublication(userId, id)
     if (!value) throw notFound('CSDN 发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'csdn_delete_busy', 'CSDN 任务正在处理，请等待完成后再删除')
+    if (current.status === 'uncertain') throw new ApiError(409, 'csdn_delete_uncertain', '请先核实这条 CSDN 任务的结果，再删除发布记录')
+    if (current.status === 'published') throw new ApiError(409, 'csdn_delete_published', '已发布的 CSDN 文章不能删除；如需下架请到 CSDN 后台处理')
+    this.active.add(userId)
+    try {
+      let remoteDeleted = false
+      if (current.remoteId && current.mode === 'draft') {
+        const account = this.database.getCsdnAccount(userId)
+        try {
+          const result = await this.driver.deleteDraft(this.state(userId), current.remoteId)
+          if (account) this.save(userId, result.state, { accountId: account.accountId, name: account.name || account.accountId })
+          remoteDeleted = result.remoteDeleted
+        } catch (error) {
+          this.expire(userId, error)
+          if (current.status === 'draft') throw error
+        }
+      }
+      if (!this.database.deleteCsdnPublication(userId, id)) throw notFound('CSDN 发布记录不存在')
+      return { ok: true, remoteDeleted }
+    } finally { this.active.delete(userId) }
   }
 
   async resolve(userId: string, id: string, input: CsdnResolveInput): Promise<CsdnPublication> {

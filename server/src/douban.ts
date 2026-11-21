@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { load } from 'cheerio'
-import type { DoubanAccount, DoubanLogin, DoubanPublication, DoubanPublishInput, DoubanResolveInput } from '../../shared/types'
+import type { DoubanAccount, DoubanLogin, DoubanPublication, DoubanPublishInput, DoubanResolveInput, PublicationDeletion } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -196,6 +196,16 @@ export class DoubanService {
     const value = this.database.getDoubanPublication(userId, id)
     if (!value) throw notFound('豆瓣发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'douban_delete_busy', '豆瓣任务正在处理，请等待完成后再删除')
+    if (current.status === 'uncertain') throw new ApiError(409, 'douban_delete_uncertain', '请先核实这条豆瓣任务的结果，再删除发布记录')
+    if (current.status === 'published') throw new ApiError(409, 'douban_delete_published', '已发布的豆瓣日记不能通过这里删除；如需删除请到豆瓣日记页面操作')
+    if (!this.database.deleteDoubanPublication(userId, id)) throw notFound('豆瓣发布记录不存在')
+    return { ok: true, remoteDeleted: false }
   }
 
   async resolve(userId: string, id: string, input: DoubanResolveInput): Promise<DoubanPublication> {

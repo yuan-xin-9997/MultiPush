@@ -107,7 +107,7 @@
 | `DELETE /api/baijiahao/account` | 断开连接 |
 | `POST /api/baijiahao/publications` | 提交 `{renderId}` |
 | `GET /api/baijiahao/publications` | 当前用户最近 50 条记录 |
-| `GET /api/baijiahao/publications/:id` | 查询进度、文章链接 |
+| `DELETE /api/baijiahao/publications/:id` | 删除本系统的草稿或失败记录，不会操作百家号后台（平台删除接口需加密参数且列表页在无头浏览器中不渲染）；已发布、处理中和结果待核实记录不可删除 |
 | `POST /api/baijiahao/publications/:id/resolve` | `{action:"check"}` 异步复查；`{action:"not_published"}` 人工确认未发布；`{action:"published",articleUrl}` 人工关联已发布文章 |
 
 ## 验证与限制

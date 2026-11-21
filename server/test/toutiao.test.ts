@@ -103,6 +103,20 @@ describe('Toutiao publishing', () => {
     await expect(service.publish(alice.id, { renderId: clean.id }, 'http://127.0.0.1:34080')).rejects.toMatchObject({ code: 'toutiao_render_stale' })
   })
 
+
+  it('removes local draft records and keeps published articles', async () => {
+    const { service, alice, bob, article } = setup()
+    const render = await article()
+    const draft = await service.publish(alice.id, { renderId: render.id, mode: 'draft' })
+    const draftDone = await finish(service, alice.id, draft.id)
+    expect(draftDone).toMatchObject({ status: 'draft', remoteId: null })
+    await expect(service.remove(bob.id, draft.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: false })
+    const published = await service.publish(alice.id, { renderId: render.id, mode: 'publish' })
+    await finish(service, alice.id, published.id)
+    await expect(service.remove(alice.id, published.id)).rejects.toMatchObject({ code: 'toutiao_delete_published' })
+  })
+
   it('marks interrupted jobs uncertain after restart', async () => {
     const { database, alice, article, restart } = setup()
     const render = await article()

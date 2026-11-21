@@ -123,6 +123,19 @@ describe('Weibo publishing', () => {
     await expect(service.publish(alice.id, { renderId: clean.id }, 'http://127.0.0.1:34080')).rejects.toMatchObject({ code: 'weibo_render_stale' })
   })
 
+
+  it('removes local drafts and failed records but keeps published posts', async () => {
+    const { service, alice, bob, article } = setup()
+    const render = await article('<p>正文内容</p>')
+    const draft = await service.publish(alice.id, { renderId: render.id, mode: 'draft' })
+    expect(draft.status).toBe('draft')
+    await expect(service.remove(bob.id, draft.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: false })
+    const published = await service.publish(alice.id, { renderId: render.id, mode: 'publish' })
+    await finish(service, alice.id, published.id)
+    await expect(service.remove(alice.id, published.id)).rejects.toMatchObject({ code: 'weibo_delete_published' })
+  })
+
   it('marks interrupted jobs uncertain after restart', async () => {
     const { database, alice, article, restart } = setup()
     const render = await article()

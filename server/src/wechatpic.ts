@@ -177,19 +177,22 @@ export class WechatpicService {
     this.idle(userId)
     const current = this.get(userId, id)
     if (current.status === 'running') throw new ApiError(409, 'wechatpic_delete_busy', '贴图任务正在处理，请等待完成后再删除')
-    if (current.mode !== 'draft') throw new ApiError(409, 'wechatpic_delete_published', '只能删除贴图草稿记录')
+    if (current.status === 'published') throw new ApiError(409, 'wechatpic_delete_published', '已发表的贴图记录不能删除；如需删除请到公众号后台操作')
+    if (current.status === 'uncertain') throw new ApiError(409, 'wechatpic_delete_uncertain', '请先核实这条贴图任务的结果，再删除发布记录')
     this.active.add(userId)
     try {
       let remoteDeleted = false
       if (current.remoteId) {
-        const result = await this.driver.deleteDraft(this.credentials(userId), current.remoteId)
-        remoteDeleted = result.remoteDeleted
+        try {
+          const result = await this.driver.deleteDraft(this.credentials(userId), current.remoteId)
+          remoteDeleted = result.remoteDeleted
+        } catch (error) {
+          this.expire(userId, error)
+          if (current.status === 'draft') throw error
+        }
       }
       if (!this.database.deleteWechatpicPublication(userId, id)) throw notFound('贴图发布记录不存在')
       return { ok: true, remoteDeleted }
-    } catch (error) {
-      this.expire(userId, error)
-      throw error
     } finally { this.active.delete(userId) }
   }
 

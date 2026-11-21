@@ -47,7 +47,7 @@
 | `POST /api/wechatpic/publications` | 提交 `{renderId}`，创建贴图草稿（异步任务，202 返回记录） |
 | `GET /api/wechatpic/publications` | 当前用户最近 50 条发布记录 |
 | `GET /api/wechatpic/publications/:id` | 查询单条进度与结果 |
-| `DELETE /api/wechatpic/publications/:id` | 删除贴图草稿：同步删除后台草稿（已发表/已消失时自动清理本地记录） |
+| `DELETE /api/wechatpic/publications/:id` | 删除草稿或失败记录：草稿会同步删除后台草稿（已消失时自动清理本地记录）；已发表、处理中和结果待核实记录不可删除 |
 
 业务错误码：`wechatpic_auth_failed`（凭证无效/未连接）、`wechatpic_ip_not_allowed`（IP 白名单）、`wechatpic_unauthorized`（接口无权限）、`wechatpic_rate_limited`（频率限制）、`wechatpic_image_required/type/size/missing`（图片校验）、`wechatpic_title_invalid`、`wechatpic_body_invalid`、`wechatpic_render_stale`（原文已修改）、`wechatpic_result_uncertain`（结果待核实）。
 

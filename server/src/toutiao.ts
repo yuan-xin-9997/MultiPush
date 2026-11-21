@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { load } from 'cheerio'
-import type { ToutiaoAccount, ToutiaoLogin, ToutiaoPublication, ToutiaoPublishInput, ToutiaoResolveInput } from '../../shared/types'
+import type { PublicationDeletion, ToutiaoAccount, ToutiaoLogin, ToutiaoPublication, ToutiaoPublishInput, ToutiaoResolveInput } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -173,6 +173,16 @@ export class ToutiaoService {
     const value = this.database.getToutiaoPublication(userId, id)
     if (!value) throw notFound('今日头条发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'toutiao_delete_busy', '今日头条任务正在处理，请等待完成后再删除')
+    if (current.status === 'uncertain') throw new ApiError(409, 'toutiao_delete_uncertain', '请先核实这条今日头条任务的结果，再删除发布记录')
+    if (current.status === 'published') throw new ApiError(409, 'toutiao_delete_published', '已发布的今日头条文章不能通过这里删除；如需下架请到创作中心操作')
+    if (!this.database.deleteToutiaoPublication(userId, id)) throw notFound('今日头条发布记录不存在')
+    return { ok: true, remoteDeleted: false }
   }
 
   async resolve(userId: string, id: string, input: ToutiaoResolveInput): Promise<ToutiaoPublication> {

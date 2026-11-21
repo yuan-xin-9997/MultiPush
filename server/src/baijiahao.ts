@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { load } from 'cheerio'
-import type { BaijiahaoAccount, BaijiahaoLogin, BaijiahaoPublication, BaijiahaoPublishInput, BaijiahaoResolveInput } from '../../shared/types'
+import type { BaijiahaoAccount, BaijiahaoLogin, BaijiahaoPublication, BaijiahaoPublishInput, BaijiahaoResolveInput, PublicationDeletion } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -291,6 +291,16 @@ export class BaijiahaoService {
     const value = this.database.getBaijiahaoPublication(userId, id)
     if (!value) throw notFound('百家号发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'baijiahao_delete_busy', '百家号任务正在处理，请等待完成后再删除')
+    if (current.status === 'uncertain') throw new ApiError(409, 'baijiahao_delete_uncertain', '请先核实这条百家号任务的结果，再删除发布记录')
+    if (current.status === 'published') throw new ApiError(409, 'baijiahao_delete_published', '已发布的百家号文章不能通过这里删除；如需下架请到百家号后台操作')
+    if (!this.database.deleteBaijiahaoPublication(userId, id)) throw notFound('百家号发布记录不存在')
+    return { ok: true, remoteDeleted: false }
   }
 
   async resolve(userId: string, id: string, input: BaijiahaoResolveInput): Promise<BaijiahaoPublication> {

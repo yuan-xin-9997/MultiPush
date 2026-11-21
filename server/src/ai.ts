@@ -401,7 +401,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           renderId: { type: 'string' },
-          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] },
+          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] },
           mode: { type: 'string', enum: ['draft', 'publish'] },
           coverMediaId: { type: 'string', description: '封面素材 ID，公众号必填' },
           imageMediaIds: { type: 'array', items: { type: 'string' }, description: '抖音图文素材 ID' },
@@ -416,11 +416,11 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'delete_draft',
-      description: '删除平台草稿并清理本系统发布记录。只能删除草稿，不能删除已发表文章。',
+      description: '删除草稿或失败的发布记录，并尽量同步删除平台后台草稿。只能删除草稿（draft）和失败（failed）记录；已发布、处理中和结果待核实的记录不能删除。',
       parameters: {
         type: 'object',
         properties: {
-          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'sspai', 'blog'] },
+          platform: { type: 'string', enum: ['wechat', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] },
           publicationId: { type: 'string' },
         },
         required: ['platform', 'publicationId'],
@@ -1289,9 +1289,16 @@ export class AiService {
     const id = stringArg(args, 'publicationId', true)!
     if (target === 'wechat') return this.wechat.remove(userId, id)
     if (target === 'zhihu') return this.zhihu.remove(userId, id)
+    if (target === 'weibo') return this.weibo.remove(userId, id)
+    if (target === 'toutiao') return this.toutiao.remove(userId, id)
+    if (target === 'douban') return this.douban.remove(userId, id)
+    if (target === 'juejin') return this.juejin.remove(userId, id)
+    if (target === 'jianshu') return this.jianshu.remove(userId, id)
+    if (target === 'csdn') return this.csdn.remove(userId, id)
+    if (target === 'douyin') return this.douyin.remove(userId, id)
     if (target === 'sspai') return this.sspai.remove(userId, id)
     if (target === 'blog') return this.blog.remove(userId, id)
-    throw new ApiError(400, 'ai_platform', '该平台不支持删除草稿')
+    throw new ApiError(400, 'ai_platform', '该平台不支持通过 AI 删除发布记录')
   }
 
   private batchRender(userId: string, args: JsonObject) {

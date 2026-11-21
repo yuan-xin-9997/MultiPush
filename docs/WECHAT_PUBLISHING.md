@@ -45,7 +45,7 @@
 | `POST /api/wechat/publications` | 提交 `{renderId, mode: "draft"或"publish", coverMediaId, author?, digest?, sourceUrl?}` |
 | `GET /api/wechat/publications` | 当前用户最近 50 条发布记录 |
 | `GET /api/wechat/publications/:id` | 查询进度、安全二维码与最终链接 |
-| `DELETE /api/wechat/publications/:id` | 删除公众号草稿：同步删除微信后台草稿与本系统记录；已发表记录不可删除 |
+| `DELETE /api/wechat/publications/:id` | 删除草稿或失败记录：草稿会同步删除微信后台草稿；已发表、处理中和结果待核实记录不可删除 |
 
 ## 参考实现与维护
 

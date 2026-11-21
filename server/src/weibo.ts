@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { WeiboAccount, WeiboLogin, WeiboPublication, WeiboPublishInput, WeiboResolveInput } from '../../shared/types'
+import type { PublicationDeletion, WeiboAccount, WeiboLogin, WeiboPublication, WeiboPublishInput, WeiboResolveInput } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -204,6 +204,16 @@ export class WeiboService {
     const value = this.database.getWeiboPublication(userId, id)
     if (!value) throw notFound('微博发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'weibo_delete_busy', '微博任务正在处理，请等待完成后再删除')
+    if (current.status === 'uncertain') throw new ApiError(409, 'weibo_delete_uncertain', '请先核实这条微博任务的结果，再删除发布记录')
+    if (current.status === 'published') throw new ApiError(409, 'weibo_delete_published', '已发布的微博不能通过这里删除；如需删除请到微博主页操作')
+    if (!this.database.deleteWeiboPublication(userId, id)) throw notFound('微博发布记录不存在')
+    return { ok: true, remoteDeleted: false }
   }
 
   async resolve(userId: string, id: string, input: WeiboResolveInput): Promise<WeiboPublication> {

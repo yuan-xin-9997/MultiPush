@@ -26,6 +26,7 @@ function setup() {
     connect: vi.fn<JianshuDriver['connect']>().mockResolvedValue({ state, identity }),
     checkSession: vi.fn<JianshuDriver['checkSession']>().mockResolvedValue({ state, identity }),
     checkPublication: vi.fn<JianshuDriver['checkPublication']>().mockResolvedValue({ state, status: 'published', url: `https://www.jianshu.com/p/${slug}`, message: '已发布' }),
+    deleteDraft: vi.fn<JianshuDriver['deleteDraft']>().mockResolvedValue({ state, remoteDeleted: true, message: '简书草稿已删除' }),
     publish: vi.fn<JianshuDriver['publish']>().mockImplementation(async (_state, article) => article.mode === 'draft'
       ? { state, status: 'draft' as const, remoteId: '53149573', url: 'https://www.jianshu.com/writer#/notebooks/1/notes/53149573', message: '草稿已保存' }
       : { state, status: 'published' as const, remoteId: '53149573', url: `https://www.jianshu.com/p/${slug}`, message: '文章已发布' }),
@@ -81,6 +82,17 @@ describe('Jianshu publishing', () => {
     await expect(service.publish(alice.id, { renderId: render.id, mode: 'draft' })).rejects.toMatchObject({ code: 'jianshu_result_uncertain' })
     await service.resolve(alice.id, publication.id, { action: 'published', articleUrl: `https://www.jianshu.com/p/${slug}` })
     expect(service.get(alice.id, publication.id)).toMatchObject({ status: 'published' })
+  })
+
+  it('deletes a draft remotely and never removes published records', async () => {
+    const { service, alice, bob, driver, article } = setup()
+    await service.connect(alice.id, { cookie: 'remember_user_token=jianshu-session' })
+    const render = await article()
+    const draft = await service.publish(alice.id, { renderId: render.id, mode: 'draft' })
+    await finish(service, alice.id, draft.id)
+    await expect(service.remove(bob.id, draft.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: true })
+    expect(driver.deleteDraft).toHaveBeenCalledWith(state, '53149573')
   })
 
   it('marks interrupted jobs uncertain after restart', async () => {

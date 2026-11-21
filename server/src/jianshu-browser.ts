@@ -18,6 +18,7 @@ export interface JianshuDriver {
   connect(cookie: string): Promise<{ state: PublisherStorageState; identity: JianshuIdentity }>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: JianshuIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string, slug?: string | null): Promise<{ state: PublisherStorageState; status: 'published' | 'missing' | 'unknown'; url: string | null; message: string }>
+  deleteDraft(state: PublisherStorageState, remoteId: string): Promise<{ state: PublisherStorageState; remoteDeleted: boolean; message: string }>
   publish(state: PublisherStorageState, article: JianshuArticle, progress: (value: Partial<Pick<JianshuPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   close(): Promise<void>
 }
@@ -171,6 +172,25 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'jianshu_check_failed', '简书发布结果核实未完成，请稍后重试')
+    } finally { await context.close().catch(() => {}) }
+  }
+
+  async deleteDraft(state: PublisherStorageState, remoteId: string) {
+    const context = await this.context(state)
+    try {
+      const token = await this.csrf(context)
+      const headers = { ...CSRF_HEADERS, 'Content-Type': 'application/json', ...(token ? { 'X-CSRF-Token': token } : {}) }
+      const response = await context.request.post(`${NOTES}/${encodeURIComponent(remoteId)}/soft_destroy`, { data: {}, headers, timeout: 30_000 })
+      if (response.status() === 401 || response.status() === 403 || /\/(?:sign_in|login)(?:[/?#]|$)/i.test(response.url())) throw expired()
+      if (response.status() === 404 || response.status() === 410) return { state: await context.storageState(), remoteDeleted: false, message: '简书草稿已不存在，已清理本系统记录' }
+      if (!response.ok()) {
+        const body = await response.text().catch(() => '')
+        throw new ApiError(502, 'jianshu_delete_failed', `简书删除草稿失败（HTTP ${response.status()}）${body ? `：${body.slice(0, 120)}` : ''}`)
+      }
+      return { state: await context.storageState(), remoteDeleted: true, message: '简书草稿已移至回收站' }
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'jianshu_delete_failed', '简书删除草稿未完成，请检查网络后重试')
     } finally { await context.close().catch(() => {}) }
   }
 

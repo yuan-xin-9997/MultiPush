@@ -159,7 +159,7 @@ OpenCode Go 的 OpenAI 兼容接口要求 `x-opencode-session` 请求头。Multi
 - `create_content`、`update_content`（支持 `mediaIds`，见「对话附件」）
 - `get_video_project`、`update_video_timeline`、`export_video`、`get_video_export`
 - `render_content`、`get_render`、`list_renders`
-- `list_publications`、`publish_article`、`delete_draft`
+- `list_publications`、`publish_article`、`delete_draft`（删除草稿或失败记录；支持的平台会同步删除后台草稿，已发布/处理中/待核实记录禁止删除）
 - `batch_render`、`batch_publish`、`get_batch_job`
 
 发布是有外部影响的操作。系统提示要求模型只在用户明确要求时发布，默认优先保存草稿；公众号正式发表可能仍需管理员在本系统扫码确认。出现「结果待核实」时不要重复提交，应先到发布管理核实。

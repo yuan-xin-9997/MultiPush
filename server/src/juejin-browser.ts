@@ -23,6 +23,7 @@ export interface JuejinDriver {
   beginLogin(): Promise<JuejinLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: JuejinIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'missing' | 'unknown'; url: string | null; message: string }>
+  deleteDraft(state: PublisherStorageState, remoteId: string): Promise<{ state: PublisherStorageState; remoteDeleted: boolean; message: string }>
   publish(state: PublisherStorageState, article: JuejinArticle, progress: (value: Partial<Pick<JuejinPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   close(): Promise<void>
 }
@@ -33,6 +34,7 @@ const USER_API = 'https://api.juejin.cn/user_api/v1/user/get?aid=2608'
 const CATEGORY_API = 'https://api.juejin.cn/tag_api/v1/query_category_briefs'
 const TAG_API = 'https://api.juejin.cn/tag_api/v1/query_tag_list'
 const DRAFT_API = 'https://api.juejin.cn/content_api/v1/article_draft/create'
+const DRAFT_DELETE_API = 'https://api.juejin.cn/content_api/v1/article_draft/delete'
 const PUBLISH_API = 'https://api.juejin.cn/content_api/v1/article/publish'
 const QR = 'img.qrcode-img, .qrcode-img, img[class*="qrcode"], canvas[class*="qrcode"]'
 const DEFAULT_CATEGORY = '6809637769959178254'
@@ -227,6 +229,30 @@ export class PlaywrightJuejinDriver implements JuejinDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'juejin_check_failed', '掘金发布结果核实未完成，请稍后重试')
+    } finally { await context.close().catch(() => {}) }
+  }
+
+  async deleteDraft(state: PublisherStorageState, remoteId: string) {
+    const context = await this.context(state)
+    try {
+      const identity = await this.identity(context)
+      if (!identity) throw expired()
+      const token = await this.csrf(context)
+      const headers = { 'Content-Type': 'application/json', Origin: 'https://juejin.cn', Referer: `https://juejin.cn/editor/drafts/${encodeURIComponent(remoteId)}`, ...(token ? { 'x-csrf-token': token } : {}) }
+      const response = await context.request.post(DRAFT_DELETE_API, { data: { draft_id: remoteId }, headers, timeout: 30_000 })
+      const body = await response.json().catch(() => null)
+      const errNo = num(object(body).err_no)
+      const message = String(object(body).err_msg ?? '')
+      if (response.status() === 401 || response.status() === 403 || errNo === 403) throw expired()
+      if (!response.ok()) throw new ApiError(502, 'juejin_delete_failed', `掘金删除草稿失败（HTTP ${response.status()}），请稍后重试`)
+      if (errNo !== 0) {
+        if (/不存在|已删除|找不到|not\s*found/i.test(message)) return { state: await context.storageState(), remoteDeleted: false, message: '掘金草稿已不存在，已清理本系统记录' }
+        throw new ApiError(502, 'juejin_delete_failed', `掘金删除草稿失败：${message || `错误码 ${String(errNo)}`}`)
+      }
+      return { state: await context.storageState(), remoteDeleted: true, message: '掘金草稿已删除' }
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'juejin_delete_failed', '掘金删除草稿未完成，请检查网络后重试')
     } finally { await context.close().catch(() => {}) }
   }
 

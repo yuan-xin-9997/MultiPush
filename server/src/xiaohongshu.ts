@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { prepareXhsCaption } from '../../shared/render-workbench'
-import type { XhsAccount, XhsLogin, XhsPublishInput, XhsPublication, XhsResolveInput } from '../../shared/types'
+import type { PublicationDeletion, XhsAccount, XhsLogin, XhsPublishInput, XhsPublication, XhsResolveInput } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -167,6 +167,16 @@ export class XhsService {
     const value = this.database.getXhsPublication(userId, id)
     if (!value) throw notFound('小红书发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'xiaohongshu_delete_busy', '小红书任务正在处理，请等待完成后再删除')
+    if (current.status === 'uncertain') throw new ApiError(409, 'xiaohongshu_delete_uncertain', '请先核实这条小红书任务的结果，再删除发布记录')
+    if (current.status === 'published') throw new ApiError(409, 'xiaohongshu_delete_published', '已发布的小红书笔记不能通过这里删除；如需删除请到小红书后台操作')
+    if (!this.database.deleteXhsPublication(userId, id)) throw notFound('小红书发布记录不存在')
+    return { ok: true, remoteDeleted: false }
   }
 
   async resolve(userId: string, id: string, input: XhsResolveInput): Promise<XhsPublication> {

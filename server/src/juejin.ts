@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { JuejinAccount, JuejinLogin, JuejinPublication, JuejinPublishInput, JuejinResolveInput } from '../../shared/types'
+import type { JuejinAccount, JuejinLogin, JuejinPublication, JuejinPublishInput, JuejinResolveInput, PublicationDeletion } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -187,6 +187,31 @@ export class JuejinService {
     const value = this.database.getJuejinPublication(userId, id)
     if (!value) throw notFound('掘金发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'juejin_delete_busy', '掘金任务正在处理，请等待完成后再删除')
+    if (current.status === 'uncertain') throw new ApiError(409, 'juejin_delete_uncertain', '请先核实这条掘金任务的结果，再删除发布记录')
+    if (current.status === 'published') throw new ApiError(409, 'juejin_delete_published', '已发布的掘金文章不能删除；如需下架请到掘金后台处理')
+    this.active.add(userId)
+    try {
+      let remoteDeleted = false
+      if (current.remoteId && current.mode === 'draft') {
+        const account = this.database.getJuejinAccount(userId)
+        try {
+          const result = await this.driver.deleteDraft(this.state(userId), current.remoteId)
+          if (account) this.save(userId, result.state, { accountId: account.accountId, name: account.name || account.accountId })
+          remoteDeleted = result.remoteDeleted
+        } catch (error) {
+          this.expire(userId, error)
+          if (current.status === 'draft') throw error
+        }
+      }
+      if (!this.database.deleteJuejinPublication(userId, id)) throw notFound('掘金发布记录不存在')
+      return { ok: true, remoteDeleted }
+    } finally { this.active.delete(userId) }
   }
 
   async resolve(userId: string, id: string, input: JuejinResolveInput): Promise<JuejinPublication> {

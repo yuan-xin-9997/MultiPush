@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { JianshuAccount, JianshuConnectInput, JianshuPublication, JianshuPublishInput, JianshuResolveInput } from '../../shared/types'
+import type { JianshuAccount, JianshuConnectInput, JianshuPublication, JianshuPublishInput, JianshuResolveInput, PublicationDeletion } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -116,6 +116,31 @@ export class JianshuService {
     const value = this.database.getJianshuPublication(userId, id)
     if (!value) throw notFound('简书发布记录不存在')
     return value
+  }
+
+  async remove(userId: string, id: string): Promise<PublicationDeletion> {
+    this.idle(userId)
+    const current = this.get(userId, id)
+    if (current.status === 'running') throw new ApiError(409, 'jianshu_delete_busy', '简书任务正在处理，请等待完成后再删除')
+    if (current.status === 'uncertain') throw new ApiError(409, 'jianshu_delete_uncertain', '请先核实这条简书任务的结果，再删除发布记录')
+    if (current.status === 'published') throw new ApiError(409, 'jianshu_delete_published', '已发布的简书文章不能删除；如需下架请到简书后台处理')
+    this.active.add(userId)
+    try {
+      let remoteDeleted = false
+      if (current.remoteId && current.mode === 'draft') {
+        const account = this.database.getJianshuAccount(userId)
+        try {
+          const result = await this.driver.deleteDraft(this.state(userId), current.remoteId)
+          if (account) this.save(userId, result.state, { accountId: account.accountId, name: account.name || account.accountId })
+          remoteDeleted = result.remoteDeleted
+        } catch (error) {
+          this.expire(userId, error)
+          if (current.status === 'draft') throw error
+        }
+      }
+      if (!this.database.deleteJianshuPublication(userId, id)) throw notFound('简书发布记录不存在')
+      return { ok: true, remoteDeleted }
+    } finally { this.active.delete(userId) }
   }
 
   async resolve(userId: string, id: string, input: JianshuResolveInput): Promise<JianshuPublication> {

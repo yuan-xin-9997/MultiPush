@@ -32,6 +32,7 @@ function setup() {
     beginLogin: vi.fn<CsdnDriver['beginLogin']>().mockResolvedValue(attempt),
     checkSession: vi.fn<CsdnDriver['checkSession']>().mockResolvedValue({ state, identity }),
     checkPublication: vi.fn<CsdnDriver['checkPublication']>().mockResolvedValue({ state, status: 'published', url: 'https://blog.csdn.net/alice_csdn/article/details/13000000001', message: '已发布' }),
+    deleteDraft: vi.fn<CsdnDriver['deleteDraft']>().mockResolvedValue({ state, remoteDeleted: true, message: 'CSDN 草稿已删除' }),
     publish: vi.fn<CsdnDriver['publish']>().mockImplementation(async (_state, article) => article.mode === 'draft'
       ? { state, status: 'draft' as const, remoteId: '13000000002', url: 'https://editor.csdn.net/md/?articleId=13000000002', message: '草稿已保存' }
       : { state, status: 'published' as const, remoteId: '13000000001', url: 'https://blog.csdn.net/alice_csdn/article/details/13000000001', message: '文章已发布' }),
@@ -93,6 +94,19 @@ describe('CSDN publishing', () => {
     await expect(service.resolve(bob.id, publication.id, { action: 'not_published' })).rejects.toMatchObject({ status: 404 })
     await service.resolve(alice.id, publication.id, { action: 'published', articleUrl: 'https://blog.csdn.net/alice_csdn/article/details/13000000001' })
     expect(service.get(alice.id, publication.id)).toMatchObject({ status: 'published', remoteId: '13000000001', url: 'https://blog.csdn.net/alice_csdn/article/details/13000000001' })
+  })
+
+  it('deletes a draft remotely and never removes published records', async () => {
+    const { service, alice, bob, driver, article } = setup()
+    const render = await article()
+    const draft = await service.publish(alice.id, { renderId: render.id, mode: 'draft' })
+    await finish(service, alice.id, draft.id)
+    await expect(service.remove(bob.id, draft.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: true })
+    expect(driver.deleteDraft).toHaveBeenCalledWith(state, '13000000002')
+    const published = await service.publish(alice.id, { renderId: render.id, mode: 'publish' })
+    await finish(service, alice.id, published.id)
+    await expect(service.remove(alice.id, published.id)).rejects.toMatchObject({ code: 'csdn_delete_published' })
   })
 
   it('marks interrupted jobs uncertain after restart', async () => {

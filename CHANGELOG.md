@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 2026-11-20 · 全平台发布记录删除（草稿 / 失败）
+
+**改了什么**
+
+- 统一发布记录删除规则：所有平台只允许删除 `draft`（草稿）和 `failed`（失败）记录；`running`、`published`、`uncertain` 及公众号 `awaiting_confirmation` 一律拒绝，已发布内容不会被自动删除或下架。
+- 为微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、小红书补齐 `DELETE /api/<platform>/publications/:id` 和前端删除入口；AI `delete_draft` 同步扩展到已接入发布服务的平台（小红书自动发布已停用，仅保留本地删除）。删除按钮只出现在草稿/失败记录上。
+- 新增远端草稿删除：
+  - 掘金：`POST /content_api/v1/article_draft/delete`（`draft_id`），复用已保存会话与 CSRF；
+  - CSDN：`POST /blog/phoenix/console/v1/article/del`（`articleId`, `deep:true`），按网页端公开的 X-Ca 签名规则生成请求头；
+  - 简书：`POST /author/notes/:id/soft_destroy`，草稿移入简书回收站。
+- 微信公众号、公众号贴图、知乎、少数派、个人博客既有的远端草稿删除保持不变，同时允许清理失败记录；失败记录带远端草稿编号时尽量顺带删除，远端失败不阻塞本地清理。
+- 微博、豆瓣：草稿只存在于本系统，删除仅清理本地记录。
+- 抖音、今日头条、百家号、小红书：平台未返回可定位的草稿编号、写接口受限或自动发布已停用，删除仅清理本地记录，确认框会明确提示到平台后台清理。
+- 新增共享前端组件 `PublicationDeleteButton`，统一确认文案、远端/本地删除提示和失败反馈。
+- 更新 README、产品规格、验收计划、架构说明及 14 个平台发布文档。
+
+**验证**
+
+- `npm run typecheck -w server`、`npm run typecheck -w web` 通过。
+- 新增服务测试：掘金/CSDN/简书草稿远端删除、已发布拒绝删除、失败记录在远端清理失败时仍可本地清理；微博本地草稿删除与已发布拒绝；今日头条本地草稿删除；小红书本地删除路由。
+- `npm test`：server 43 个文件 / 422 项、web 2 个文件 / 20 项全部通过；`npm run build` 通过。
+- 远端删除当前未使用真实账号执行：掘金删除接口、CSDN 删除接口（签名已验证到「请登录后操作」鉴权层）、简书 `soft_destroy` 路径均来自平台公开网页实现，首次使用请先用测试草稿确认。
+
+
 ## 2026-11-20 · 修复知乎表格发布与 CSDN Markdown 导入
 
 **改了什么**
@@ -19,11 +43,6 @@
 - 真实知乎 API 验收：用失败稿件的原文生成 3 表/19 行正文（51 个列表项、1 张图），创建临时草稿 `2107241611868508742` 并回读；`table=0`、`li=51`，`verifyZhihuContent` 通过；随后删除草稿并确认 HTTP 404。临时草稿已清理，未发布文章。
 - 真实 CSDN 登录态 + 生产 Chromium：关闭模板/新手指引后，Markdown 导入校验通过，标题写入正确；拦截 `saveArticle` 响应检查请求体，标题、正文尾部均在且无欢迎页残留。强制走粘贴回退时，全选替换 4881 字后同样校验通过，保存请求体完整；两次均未实际创建 CSDN 草稿。
 - 2026-11-20 两次真实 CSDN 失败（21:18、21:30）的日志与上述复现一致：导入成功但校验失败，回退点击被浮层拦截。
-
-**部署**
-
-- Jenkins 构建 #119 成功（提交 `af6bc54`），`DEPLOYED_COMMIT=af6bc54f4ed853b564306bf0085947ff056b78ce`；服务重启后 `GET /api/health` 返回 `status=ok`，`.data` 未变更。
-- 生产 `server/dist/index.js` 已包含 `markdown paste verified`、`dismissed CSDN onboarding overlay` 与知乎表格转列表的校验文案，确认部署产物为本次修复。
 
 ## 2026-11-20 · 统一设置页与可视化大模型高可用配置
 

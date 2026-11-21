@@ -15,6 +15,16 @@ export function createXhsRouter(database: Database): Router {
     if (!publication) throw notFound('小红书发布记录不存在')
     res.json({ publication })
   }))
+  router.delete('/publications/:id', asyncHandler((req, res) => {
+    const userId = currentUser(req).id
+    const publication = database.getXhsPublication(userId, req.params.id)
+    if (!publication) throw notFound('小红书发布记录不存在')
+    if (publication.status === 'running') throw new ApiError(409, 'xiaohongshu_delete_busy', '小红书任务正在处理，请等待完成后再删除')
+    if (publication.status === 'uncertain') throw new ApiError(409, 'xiaohongshu_delete_uncertain', '请先核实这条小红书任务的结果，再删除发布记录')
+    if (publication.status === 'published') throw new ApiError(409, 'xiaohongshu_delete_published', '已发布的小红书笔记不能通过这里删除；如需删除请到小红书后台操作')
+    if (!database.deleteXhsPublication(userId, req.params.id)) throw notFound('小红书发布记录不存在')
+    res.json({ ok: true, remoteDeleted: false })
+  }))
   router.use(() => { throw new ApiError(410, 'xiaohongshu_automation_disabled', '小红书自动登录与发布已停用，请导出图片和文案后在官方 App 或创作中心手动发布') })
   return router
 }

@@ -34,6 +34,12 @@ it('disables all Xiaohongshu automation, clears saved sessions, and retains owne
     }
     expect(await (await fetch(`${base}/publications`, { headers })).json()).toMatchObject({ publications: [{ id: record.id }] })
     expect((await fetch(`${base}/publications/${record.id}`, { headers: { Authorization: `Bearer ${signToken(bob, config.jwtSecret)}` } })).status).toBe(404)
+    database.updateXhsPublication(alice.id, record.id, { status: 'failed' })
+    expect((await fetch(`${base}/publications/${record.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${signToken(bob, config.jwtSecret)}` } })).status).toBe(404)
+    const deleted = await fetch(`${base}/publications/${record.id}`, { method: 'DELETE', headers })
+    expect(deleted.status).toBe(200)
+    expect(await deleted.json()).toMatchObject({ ok: true, remoteDeleted: false })
+    expect(database.getXhsPublication(alice.id, record.id)).toBeNull()
     for (const method of Object.values(driver)) expect(method).not.toHaveBeenCalled()
   } finally {
     server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()))

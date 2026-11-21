@@ -4,6 +4,7 @@ import type { XhsPublication } from '@shared/types'
 import { api } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { formatDateTime } from '@/lib/utils'
+import PublicationDeleteButton from './PublicationDeleteButton'
 
 export default function XhsPublishPage() {
   const navigate = useNavigate(), [params] = useSearchParams()
@@ -26,7 +27,7 @@ export default function XhsPublishPage() {
     <section className="publish-panel publish-history"><h2>历史发布记录</h2>
       <p className="publish-muted">仅显示本地历史，不会自动访问小红书。未确认的结果请在官方 App 核实。</p>
       {error ? <p className="publish-error" role="alert">{error}</p> : null}
-      {records.map(item => <article className="publish-history-item" key={item.id}><strong>{item.title}</strong><small>{formatDateTime(item.createdAt)}</small><p>{item.message}</p></article>)}
+      {records.map(item => <article className="publish-history-item" key={item.id}><strong>{item.title}</strong><small>{formatDateTime(item.createdAt)}</small><p>{item.message}</p>{item.status === 'draft' || item.status === 'failed' ? <PublicationDeleteButton publication={item} remove={api.xiaohongshu.deletePublication} onDeleted={() => setRecords(current => current.filter(entry => entry.id !== item.id))} platformName="小红书" remote={false} /> : null}</article>)}
     </section>
   </div>
 }

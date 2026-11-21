@@ -240,12 +240,12 @@ export class WechatService {
     this.assertIdle(userId)
     const publication = this.get(userId, id)
     if (['running', 'awaiting_confirmation'].includes(publication.status)) throw new ApiError(409, 'wechat_delete_busy', '公众号任务正在处理，请等待完成后再删除')
-    if (publication.status === 'published') throw new ApiError(409, 'wechat_delete_published', '已发表的文章记录不能删除')
-    if (publication.mode !== 'draft') throw new ApiError(409, 'wechat_delete_published', '只能删除公众号草稿；已发表文章请到公众号后台处理')
+    if (publication.status === 'published') throw new ApiError(409, 'wechat_delete_published', '已发表的文章记录不能删除；如需删除文章请到公众号后台操作')
+    if (publication.status === 'uncertain') throw new ApiError(409, 'wechat_delete_uncertain', '请先核实这条公众号任务的结果，再删除发布记录')
     this.activeUsers.add(userId)
     try {
       let remoteDeleted = false
-      if (publication.remoteId) {
+      if (publication.mode === 'draft' && publication.remoteId) {
         try {
           const result = await this.driver.deleteDraft(this.readState(userId), publication.remoteId)
           this.saveState(userId, result.state)
@@ -255,7 +255,7 @@ export class WechatService {
             const account = this.database.getWechatAccount(userId)
             if (account) this.database.saveWechatAccount(userId, { ...account, status: 'expired', checkedAt: now() })
           }
-          throw error
+          if (publication.status === 'draft') throw error
         }
       }
       if (!this.database.deleteWechatPublication(userId, id)) throw notFound('发布记录不存在')

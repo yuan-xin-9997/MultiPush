@@ -63,6 +63,21 @@ Express (single Node process, 0.0.0.0:34080)
 
 所有业务表都有 `user_id`，查询必须带当前用户条件；跨用户访问统一返回 404。提供商池 Key 只存在于进程环境或受保护配置文件，数据库仅保存脱敏后的 Key 标识与状态。
 
+## 发布记录删除策略
+
+所有平台共用一套状态约束：只有 `draft`（草稿）和 `failed`（失败）记录允许删除；`running`、`published`、`uncertain` 以及公众号的 `awaiting_confirmation` 一律拒绝，已发布内容不会被自动删除或下架。
+
+| 平台 | 删除草稿时的远端行为 |
+| --- | --- |
+| 微信公众号、公众号贴图、知乎、少数派、个人博客 | 调用平台接口/浏览器流程删除后台草稿，成功后清理本地记录 |
+| 掘金 | `POST /content_api/v1/article_draft/delete`（`draft_id`） |
+| CSDN | `POST /blog/phoenix/console/v1/article/del`（`articleId`, `deep:true`），复用网页端 X-Ca 签名 |
+| 简书 | `POST /author/notes/:id/soft_destroy`（移入简书回收站） |
+| 微博、豆瓣 | 草稿只存在于本系统，仅清理本地记录 |
+| 抖音、今日头条、百家号、小红书 | 平台未返回可定位草稿编号或写接口受限/自动化停用，仅清理本地记录；界面会提示到平台后台删除 |
+
+失败记录优先清理本地记录；若记录带有远端草稿编号且模式为草稿，会尽量顺带删除远端草稿，远端失败不阻塞本地清理。关联接口：`DELETE /api/<platform>/publications/:id`，返回值统一为 `{ ok: true, remoteDeleted: boolean }`。
+
 ## AI 高可用调用链
 
 1. `AiService.chat()` 从 `ai_settings` 读取账号覆盖配置（若存在），否则为空；

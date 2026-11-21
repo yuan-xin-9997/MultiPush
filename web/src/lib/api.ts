@@ -348,6 +348,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/toutiao/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: ToutiaoPublication[] }>('/api/toutiao/publications', { cache: 'no-store' }),
     publish: (input: ToutiaoPublishInput) => request<{ publication: ToutiaoPublication }>('/api/toutiao/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/toutiao/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   baijiahao: {
     resolve: (id: string, input: BaijiahaoResolveInput) => request<{ publication: BaijiahaoPublication }>(`/api/baijiahao/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -357,6 +358,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/baijiahao/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: BaijiahaoPublication[] }>('/api/baijiahao/publications', { cache: 'no-store' }),
     publish: (input: BaijiahaoPublishInput) => request<{ publication: BaijiahaoPublication }>('/api/baijiahao/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/baijiahao/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   douban: {
     resolve: (id: string, input: DoubanResolveInput) => request<{ publication: DoubanPublication }>(`/api/douban/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -366,6 +368,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/douban/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: DoubanPublication[] }>('/api/douban/publications', { cache: 'no-store' }),
     publish: (input: DoubanPublishInput) => request<{ publication: DoubanPublication }>('/api/douban/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/douban/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   juejin: {
     resolve: (id: string, input: JuejinResolveInput) => request<{ publication: JuejinPublication }>(`/api/juejin/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -375,6 +378,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/juejin/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: JuejinPublication[] }>('/api/juejin/publications', { cache: 'no-store' }),
     publish: (input: JuejinPublishInput) => request<{ publication: JuejinPublication }>('/api/juejin/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/juejin/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   csdn: {
     resolve: (id: string, input: CsdnResolveInput) => request<{ publication: CsdnPublication }>(`/api/csdn/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -384,6 +388,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/csdn/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: CsdnPublication[] }>('/api/csdn/publications', { cache: 'no-store' }),
     publish: (input: CsdnPublishInput) => request<{ publication: CsdnPublication }>('/api/csdn/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/csdn/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   jianshu: {
     resolve: (id: string, input: JianshuResolveInput) => request<{ publication: JianshuPublication }>(`/api/jianshu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -392,6 +397,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/jianshu/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: JianshuPublication[] }>('/api/jianshu/publications', { cache: 'no-store' }),
     publish: (input: JianshuPublishInput) => request<{ publication: JianshuPublication }>('/api/jianshu/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/jianshu/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   weibo: {
     resolve: (id: string, input: WeiboResolveInput) => request<{ publication: WeiboPublication }>(`/api/weibo/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -401,6 +407,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/weibo/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: WeiboPublication[] }>('/api/weibo/publications', { cache: 'no-store' }),
     publish: (input: WeiboPublishInput) => request<{ publication: WeiboPublication }>('/api/weibo/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/weibo/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   xiaohongshu: {
     resolve: (id: string, input: XhsResolveInput) => request<{ publication: XhsPublication }>(`/api/xiaohongshu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
@@ -410,6 +417,7 @@ export const api = {
     disconnect: () => request<{ ok: true }>('/api/xiaohongshu/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: XhsPublication[] }>('/api/xiaohongshu/publications', { cache: 'no-store' }),
     publish: (input: XhsPublishInput) => request<{ publication: XhsPublication }>('/api/xiaohongshu/publications', { method: 'POST', body: JSON.stringify(input) }),
+    deletePublication: (id: string) => request<PublicationDeletion>(`/api/xiaohongshu/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   douyin: {
     resolve: (id: string, input: DouyinResolveInput) => request<{ publication: DouyinPublication }>(`/api/douyin/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),

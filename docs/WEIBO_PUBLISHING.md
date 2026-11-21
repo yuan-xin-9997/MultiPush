@@ -68,7 +68,7 @@
 | `DELETE /api/weibo/account` | 断开连接 |
 | `POST /api/weibo/publications` | 提交 `{renderId}` |
 | `GET /api/weibo/publications` | 当前用户最近 50 条记录 |
-| `GET /api/weibo/publications/:id` | 查询进度、微博链接 |
+| `DELETE /api/weibo/publications/:id` | 删除本系统的草稿或失败记录，不会操作微博；已发布、处理中和结果待核实记录不可删除 |
 | `POST /api/weibo/publications/:id/resolve` | `{action:"check"}` 异步复查；`{action:"not_published"}` 人工确认未发布；`{action:"published",articleUrl}` 人工关联已发布微博 |
 
 ## 验证与限制

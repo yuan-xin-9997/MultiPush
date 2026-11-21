@@ -26,6 +26,7 @@ function setup() {
     beginLogin: vi.fn<JuejinDriver['beginLogin']>().mockResolvedValue(attempt),
     checkSession: vi.fn<JuejinDriver['checkSession']>().mockResolvedValue({ state, identity }),
     checkPublication: vi.fn<JuejinDriver['checkPublication']>().mockResolvedValue({ state, status: 'published', url: 'https://juejin.cn/post/7000000000000000001', message: '已发布' }),
+    deleteDraft: vi.fn<JuejinDriver['deleteDraft']>().mockResolvedValue({ state, remoteDeleted: true, message: '掘金草稿已删除' }),
     publish: vi.fn<JuejinDriver['publish']>().mockImplementation(async (_state, article) => article.mode === 'draft'
       ? { state, status: 'draft' as const, remoteId: '7000000000000000002', url: 'https://juejin.cn/editor/drafts/7000000000000000002', message: '草稿已保存' }
       : { state, status: 'published' as const, remoteId: '7000000000000000001', url: 'https://juejin.cn/post/7000000000000000001', message: '文章已发布' }),
@@ -82,6 +83,31 @@ describe('Juejin publishing', () => {
     await expect(service.resolve(bob.id, publication.id, { action: 'not_published' })).rejects.toMatchObject({ status: 404 })
     await service.resolve(alice.id, publication.id, { action: 'published', articleUrl: 'https://juejin.cn/post/7000000000000000001' })
     expect(service.get(alice.id, publication.id)).toMatchObject({ status: 'published', remoteId: '7000000000000000001' })
+  })
+
+
+  it('deletes a draft remotely and never removes published records', async () => {
+    const { service, alice, bob, driver, article } = setup()
+    const render = await article()
+    const draft = await service.publish(alice.id, { renderId: render.id, mode: 'draft' })
+    await finish(service, alice.id, draft.id)
+    await expect(service.remove(bob.id, draft.id)).rejects.toMatchObject({ status: 404 })
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: true })
+    expect(driver.deleteDraft).toHaveBeenCalledWith(state, '7000000000000000002')
+    expect(() => service.get(alice.id, draft.id)).toThrow('掘金发布记录不存在')
+    const published = await service.publish(alice.id, { renderId: render.id, mode: 'publish' })
+    await finish(service, alice.id, published.id)
+    await expect(service.remove(alice.id, published.id)).rejects.toMatchObject({ code: 'juejin_delete_published' })
+  })
+
+  it('clears failed draft records locally even when remote cleanup fails', async () => {
+    const { database, service, alice, driver, article } = setup()
+    const render = await article()
+    const draft = await service.publish(alice.id, { renderId: render.id, mode: 'draft' })
+    await finish(service, alice.id, draft.id)
+    database.updateJuejinPublication(alice.id, draft.id, { status: 'failed' })
+    driver.deleteDraft.mockRejectedValueOnce(new ApiError(502, 'juejin_delete_failed', '删除失败'))
+    await expect(service.remove(alice.id, draft.id)).resolves.toEqual({ ok: true, remoteDeleted: false })
   })
 
   it('marks interrupted jobs uncertain after restart', async () => {
