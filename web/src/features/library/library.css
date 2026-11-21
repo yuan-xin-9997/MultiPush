@@ -1432,14 +1432,14 @@
   }
 }
 
-/* ---- video content badges ---- */
+/* ---- content kind badges ---- */
 .document-kind-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--douyin, #fe2c55);
+  background: var(--brand-dark, #007a47);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -1447,14 +1447,34 @@
   white-space: nowrap;
 }
 
+.document-kind-badge.is-article {
+  background: var(--brand-dark, #007a47);
+}
+
 .document-kind-badge.is-gallery {
   background: #6b4de0;
 }
 
-.document-cover .document-kind-badge {
+.document-kind-badge.is-video {
+  background: var(--douyin, #fe2c55);
+}
+
+.document-cover-top {
   position: absolute;
+  z-index: 2;
   top: 10px;
   left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.document-cover-top .document-select {
+  position: static;
+  flex: 0 0 auto;
+}
+
+.document-cover-top .document-kind-badge {
   box-shadow: var(--shadow-xs);
 }
 

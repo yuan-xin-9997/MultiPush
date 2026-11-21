@@ -1,9 +1,9 @@
 import type { KeyboardEvent, MouseEvent } from 'react'
-import { Clapperboard, Folder, Images, Star } from 'lucide-react'
+import { Folder, Star } from 'lucide-react'
 import type { ContentSummary } from '@shared/types'
-import { formatDateTime, relativeTime } from '@/lib/utils'
+import { cn, formatDateTime, relativeTime } from '@/lib/utils'
 import { formatNumber } from '@/lib/format'
-import { cn } from '@/lib/utils'
+import ContentKindBadge from './ContentKindBadge'
 import DocumentCover from './DocumentCover'
 import DocumentMenu, { type DocumentActions } from './DocumentMenu'
 import type { LibraryMode } from './types'
@@ -44,29 +44,21 @@ export default function DocumentCard({ item, mode, selected, actions, onToggleSe
     >
       <div className="document-cover">
         <DocumentCover image={item.coverImage} title={title} kind={item.kind} />
-        {item.kind === 'video' ? (
-          <span className="document-kind-badge" title="视频内容">
-            <Clapperboard size={13} />
-            视频
-          </span>
-        ) : item.kind === 'gallery' ? (
-          <span className="document-kind-badge is-gallery" title="图文内容">
-            <Images size={13} />
-            图文
-          </span>
-        ) : null}
-        <label
-          className="document-select"
-          onClick={(event) => event.stopPropagation()}
-          title={selected ? '取消选择' : '选择文档'}
-        >
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={(event) => onToggleSelected(item.id, event.target.checked)}
-            aria-label={`选择「${title}」`}
-          />
-        </label>
+        <div className="document-cover-top">
+          <ContentKindBadge kind={item.kind} />
+          <label
+            className="document-select"
+            onClick={(event) => event.stopPropagation()}
+            title={selected ? '取消选择' : '选择文档'}
+          >
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={(event) => onToggleSelected(item.id, event.target.checked)}
+              aria-label={`选择「${title}」`}
+            />
+          </label>
+        </div>
         {!isTrash ? (
           <button
             type="button"

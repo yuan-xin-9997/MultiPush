@@ -1,8 +1,9 @@
 import type { KeyboardEvent, MouseEvent } from 'react'
-import { Clapperboard, Folder, Images, Star } from 'lucide-react'
+import { Folder, Star } from 'lucide-react'
 import type { ContentSummary } from '@shared/types'
 import { cn, formatDateTime, relativeTime } from '@/lib/utils'
 import { formatNumber } from '@/lib/format'
+import ContentKindBadge from './ContentKindBadge'
 import DocumentCover from './DocumentCover'
 import DocumentMenu, { type DocumentActions } from './DocumentMenu'
 import type { LibraryMode } from './types'
@@ -56,17 +57,7 @@ export default function DocumentRow({ item, mode, selected, actions, onToggleSel
         </div>
         <div className="document-row-copy">
           <div className="document-row-title" title={title}>
-            {item.kind === 'video' ? (
-              <span className="document-kind-badge" title="视频内容">
-                <Clapperboard size={12} />
-                视频
-              </span>
-            ) : item.kind === 'gallery' ? (
-              <span className="document-kind-badge is-gallery" title="图文内容">
-                <Images size={12} />
-                图文
-              </span>
-            ) : null}
+            {item.kind !== 'article' ? <ContentKindBadge kind={item.kind} size={12} /> : null}
             {title}
           </div>
           <div className="document-row-excerpt">{item.excerpt || '暂无摘要'}</div>
