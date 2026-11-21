@@ -50,6 +50,8 @@ import type {
   CsdnResolution,
   JianshuPublication,
   JianshuResolution,
+  V2exPublication,
+  V2exResolution,
   AiMessage,
   AiMessageAttachment,
   AiSession,
@@ -289,6 +291,7 @@ export interface WechatAccountSession {
 }
 
 export interface ZhihuAccountSession extends WechatAccountSession { accountId: string }
+export interface V2exAccountSession extends WechatAccountSession { accountId: string }
 
 export interface BlogAccountSession {
   encryptedCredentials: string
@@ -426,6 +429,13 @@ export interface CreateJianshuPublicationValues {
   renderId: string
   title: string
   mode: JianshuPublication['mode']
+  idempotencyKey: string
+}
+
+export interface CreateV2exPublicationValues {
+  renderId: string
+  title: string
+  nodeName: string
   idempotencyKey: string
 }
 
@@ -1153,6 +1163,40 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_jianshu_resolutions_publication ON jianshu_publication_resolutions(publication_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS v2ex_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_session TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS v2ex_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        node_name TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_v2ex_publications_user_created ON v2ex_publications(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS v2ex_publication_resolutions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL REFERENCES v2ex_publications(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN ('check', 'not_published', 'published')),
+        message TEXT NOT NULL,
+        article_url TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_v2ex_resolutions_publication ON v2ex_publication_resolutions(publication_id, created_at DESC);
       PRAGMA user_version = 20;
     `)
     this.ensureContentSyncColumns()
@@ -1189,6 +1233,8 @@ export class Database {
       ['服务已重启，请先核对掘金草稿与文章发布结果，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE jianshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
       ['服务已重启，请先核对简书草稿与文章发布结果，系统不会自动重复发布。', nowIso()])
+    this.run(`UPDATE v2ex_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
+      ['服务已重启，请先核实 V2EX 主题是否已发布，避免重复发布。', nowIso()])
     this.run(`UPDATE csdn_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
       ['服务已重启，请先核对 CSDN 草稿箱与文章发布结果，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE batch_jobs SET status = 'failed', message = ?, updated_at = ? WHERE status IN ('queued', 'running')`,
@@ -3132,6 +3178,87 @@ export class Database {
       if (!current || !['uncertain', 'running'].includes(current.status)) return null
       this.run('INSERT INTO jianshu_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
       return this.updateJianshuPublication(userId, id, values)
+    })
+  }
+
+  getV2exAccount(userId: string): V2exAccountSession | null {
+    const row = this.get('SELECT * FROM v2ex_accounts WHERE user_id = ?', [userId])
+    return row ? { encryptedSession: text(row.encrypted_session), accountId: text(row.account_id), name: nullableText(row.name), status: row.status === 'expired' ? 'expired' : 'connected', checkedAt: text(row.checked_at) } : null
+  }
+
+  saveV2exAccount(userId: string, values: V2exAccountSession): void {
+    this.run(`INSERT INTO v2ex_accounts (user_id, encrypted_session, account_id, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET encrypted_session = excluded.encrypted_session,
+      account_id = excluded.account_id, name = excluded.name, status = excluded.status, checked_at = excluded.checked_at`,
+      [userId, values.encryptedSession, values.accountId, values.name, values.status, values.checkedAt])
+  }
+
+  deleteV2exAccount(userId: string): void { this.run('DELETE FROM v2ex_accounts WHERE user_id = ?', [userId]) }
+
+  private mapV2exPublication(row: Row): V2exPublication {
+    const resolutions: V2exResolution[] = this.all('SELECT * FROM v2ex_publication_resolutions WHERE publication_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 10', [text(row.id), text(row.user_id)])
+      .map(r => ({ id: text(r.id), action: r.action as V2exResolution['action'], message: text(r.message), articleUrl: nullableText(r.article_url), createdAt: text(r.created_at) }))
+    return {
+      id: text(row.id),
+      renderId: text(row.render_id),
+      title: text(row.title),
+      nodeName: text(row.node_name),
+      status: row.status as V2exPublication['status'],
+      message: text(row.message),
+      url: nullableText(row.url),
+      remoteId: nullableText(row.remote_id),
+      createdAt: text(row.created_at),
+      updatedAt: text(row.updated_at),
+      resolutions,
+    }
+  }
+
+  createV2exPublication(userId: string, values: CreateV2exPublicationValues): V2exPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO v2ex_publications (id, user_id, render_id, title, node_name, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?) ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+      [randomUUID(), userId, values.renderId, values.title, values.nodeName, '正在准备 V2EX 发布', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findV2exPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create V2EX publication')
+    return publication
+  }
+
+  getV2exPublication(userId: string, id: string): V2exPublication | null {
+    const row = this.get('SELECT * FROM v2ex_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapV2exPublication(row) : null
+  }
+
+  findV2exPublication(userId: string, key: string): V2exPublication | null {
+    const row = this.get('SELECT * FROM v2ex_publications WHERE user_id = ? AND idempotency_key = ?', [userId, key])
+    return row ? this.mapV2exPublication(row) : null
+  }
+
+  hasUncertainV2exPublication(userId: string): boolean {
+    return !!this.get("SELECT id FROM v2ex_publications WHERE user_id = ? AND status = 'uncertain' LIMIT 1", [userId])
+  }
+
+  listV2exPublications(userId: string): V2exPublication[] {
+    return this.all('SELECT * FROM v2ex_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapV2exPublication(row))
+  }
+
+  updateV2exPublication(userId: string, id: string, values: Partial<Pick<V2exPublication, 'status' | 'message' | 'url' | 'remoteId'>>): V2exPublication | null {
+    const current = this.getV2exPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE v2ex_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getV2exPublication(userId, id)
+  }
+
+  deleteV2exPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM v2ex_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
+  resolveV2exPublication(userId: string, id: string, action: V2exResolution['action'], values: Pick<V2exPublication, 'status' | 'message' | 'url' | 'remoteId'>): V2exPublication | null {
+    return this.transaction(() => {
+      const current = this.getV2exPublication(userId, id)
+      if (!current || !['uncertain', 'running'].includes(current.status)) return null
+      this.run('INSERT INTO v2ex_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
+      return this.updateV2exPublication(userId, id, values)
     })
   }
 

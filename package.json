@@ -42,7 +42,8 @@
     "smoke:video-ui": "npm run build && node scripts/smoke-video-ui.mjs",
     "smoke:gallery": "npm run build && node scripts/smoke-gallery-ui.mjs",
     "smoke:assets": "npm run build && node scripts/smoke-assets-ui.mjs",
-    "smoke:media-picker": "npm run build && node scripts/smoke-media-picker-ui.mjs"
+    "smoke:media-picker": "npm run build && node scripts/smoke-media-picker-ui.mjs",
+    "smoke:v2ex": "npm run build && node scripts/smoke-v2ex-ui.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

@@ -1,6 +1,6 @@
 # MultiPush · 多平台智能发布系统
 
-> 一次创作，智能渲染，适配微信公众号（图文/贴图）、小红书、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、抖音、少数派与个人博客。支持微信公众号、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、抖音、少数派和个人博客连接、保持会话与发布（微博、豆瓣为本地草稿；头条、百家号、抖音、掘金、CSDN、简书等保存到平台草稿箱）；公众号贴图通过官方 API 保存草稿、后台手动发表；小红书仅支持导出后手动发布。
+> 一次创作，智能渲染，适配微信公众号（图文/贴图）、小红书、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、V2EX、抖音、少数派与个人博客。支持微信公众号、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、V2EX、抖音、少数派和个人博客连接、保持会话与发布（微博、豆瓣为本地草稿；头条、百家号、抖音、掘金、CSDN、简书等保存到平台草稿箱）；公众号贴图通过官方 API 保存草稿、后台手动发表；小红书仅支持导出后手动发布。
 
 ![MultiPush](web/public/favicon.svg)
 
@@ -43,6 +43,7 @@
 - **掘金发布**：掘金扫码登录，选择分类与最多 5 个标签，支持保存草稿或直接发布；发布记录与结果人工核实。详见 [掘金发布说明](docs/JUEJIN_PUBLISHING.md)。
 - **CSDN 发布**：微信扫码登录 CSDN，自动导入 Markdown、填写标题与标签，支持保存草稿或直接发布；发布记录与结果人工核实。详见 [CSDN 发布说明](docs/CSDN_PUBLISHING.md)。
 - **简书发布**：简书网页端无扫码登录，使用浏览器 Cookie 连接（不保存密码）；支持保存到默认文集草稿或公开发布，发布记录与结果人工核实。详见 [简书发布说明](docs/JIANSHU_PUBLISHING.md)。
+- **V2EX 发布**：生成 V2EX 主题 Markdown（标题 ≤120 字、正文 ≤20000 字符，不支持视频），连接浏览器 Cookie 后选择节点发布公开主题；V2EX 没有官方写 API，也支持复制 Markdown 和打开官方发帖页手动发布。详见 [V2EX 发布说明](docs/V2EX_PUBLISHING.md)。
 - **发布记录删除**：所有平台的发布记录都支持删除草稿和失败记录；微信公众号、公众号贴图、知乎、少数派、个人博客、掘金、CSDN、简书会同步删除平台后台草稿。微博、豆瓣的草稿只存在于本系统；抖音、今日头条、百家号（平台接口限制）和小红书（自动化已停用）只清理本地记录，平台草稿需到对应后台删除。已发布、处理中和结果待核实记录在所有平台都不允许删除，已发布内容不会被自动下架或删除。
 - **AI 创作**：AI 创作页可按账号配置 OpenAI 兼容大模型接口、模型与 API Key；对话中可读取知识库、内容、素材、渲染和发布记录，并通过工具写文章、生成多平台排版、保存草稿、正式发布及创建批量任务；支持通过工具操控视频内容的剪辑时间线（修剪、调序、增删片段、导出成片）；对话支持上传图片/视频（自动进素材库、可视觉识别、一键插入文章或建视频时间线）与文本文档（全文作为写作素材）。
 - **AI 高可用**：服务器可配置多个提供商，每个提供商多个 API Key；额度不足、失效或限流时自动轮换 Key；整个提供商不可用时按有序链回退，并通过模型等价映射保持模型能力；每个提供商可单独开关“多 Key 高可用”，每个 Key 可停用；Key/提供商冷却与定期探活、切换审计和每次请求的实际路由均可在设置页查看。详见 [AI 创作说明](docs/AI_CREATION.md#大模型配置与高可用)。
@@ -123,6 +124,8 @@ npm start
 | `JUEJIN_BROWSER_PATH` | 自动探测 | 掘金发布使用的 Chrome / Chromium 路径 |
 | `CSDN_BROWSER_PATH` | 自动探测 | CSDN 发布使用的 Chrome / Chromium 路径 |
 | `JIANSHU_BROWSER_PATH` | 自动探测 | 简书发布使用的 Chrome / Chromium 路径 |
+| `V2EX_BROWSER_PATH` | 自动探测 | V2EX 发布使用的 Chrome / Chromium 路径 |
+| `V2EX_PROXY_SERVER` | 空 | V2EX 浏览器代理，例如 `http://192.168.0.100:7890` |
 | `AI_PROVIDERS_JSON` | 未设置 | AI 提供商池完整 JSON；支持多提供商、多 Key、模型映射（优先级最高） |
 | `AI_PROVIDERS_FILE` | `DATA_DIR/ai-providers.json` | 受保护的提供商池 JSON 文件路径；建议 `chmod 600` |
 | `MULTIPUSH_ADMIN_USERNAMES` | 未设置 | 生产环境允许在设置页修改服务器提供商池的用户名，逗号分隔；开发/桌面版默认允许所有用户 |
@@ -180,6 +183,7 @@ npm run normalize:figures -- --db=.data/multipush.sqlite --report  # 历史图�
 npm run smoke:gallery   # 构建后跑图文工作台 E2E（上传/排序/保存/渲染）
 npm run smoke:assets    # 构建后跑素材库 E2E（上传/文件夹/移动/预览/删除）
 npm run smoke:media-picker # 构建后跑文章/图文/视频从素材库添加内容 E2E
+npm run smoke:v2ex     # 构建后跑 V2EX 渲染与发布页 UI E2E（不实际发帖）
 node scripts/smoke-figure-captions.mjs  # 构建后跑 21 组图文 E2E（编辑器/三平台渲染）
 node scripts/smoke-editor-cover.mjs     # 构建后验证封面上传与正文选图
 node scripts/smoke-sms-login-ui.mjs      # 构建后验证 7 个平台的手机验证码登录弹窗

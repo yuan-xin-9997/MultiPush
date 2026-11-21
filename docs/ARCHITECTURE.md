@@ -22,6 +22,7 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/juejin    掘金扫码登录、草稿/文章发布与核实
   ├─ routes/csdn      CSDN 扫码登录、Markdown 草稿/文章发布与核实
   ├─ routes/jianshu   简书 Cookie 连接、草稿/文章发布与核实
+  ├─ routes/v2ex      V2EX Cookie 连接、节点读取、主题发布与核实
   ├─ routes/ai        AI 个人配置、会话、消息、工具调用、提供商池编辑与高可用状态
   ├─ routes/video     视频内容剪辑时间线与导出任务
   ├─ routes/batch     批量渲染 / 批量发布任务
@@ -46,6 +47,7 @@ Express (single Node process, 0.0.0.0:34080)
 | `media_folders` | id, user_id, name, created_at, updated_at | 素材文件夹；同名（NOCASE）唯一；删除时素材移到未分组 |
 | `video_projects` | content_id, user_id, timeline_json | 视频内容剪辑时间线（有序片段，引用 media 资产） |
 | `video_exports` | id, user_id, content_id, status, progress, message, timeline_json, output_media_id | 视频导出异步任务（服务端 ffmpeg） |
+| `v2ex_*` | accounts / publications / resolutions | V2EX 浏览器会话、主题发布记录与人工核实 |
 | `renders` | id, user_id, content_id, platforms, options_json, result_json | 渲染历史；结果完整存储 |
 | `weibo_*` | accounts / publications / resolutions | 微博会话、发布记录与人工核实 |
 | `toutiao_*` | accounts / publications / resolutions | 今日头条会话、文章发布记录与人工核实 |
@@ -131,7 +133,7 @@ export interface ContentEnhancer {
 
 ## 前端结构
 
-- 路由：登录/注册、应用壳（AI 创作/内容库/渲染/发布）、全屏编辑器、素材库（`/assets`：素材上传/筛选/文件夹/预览）、全屏图文工作台（`/gallery/:id`：图片网格 + 图注 + 配文）、全屏视频工作台（`/video/:id`：预览播放器 + 片段时间线 + 导出）；内容库多选后可打开批量渲染/发布弹窗。
+- 路由：登录/注册、应用壳（AI 创作/内容库/素材库/渲染/发布）、全屏编辑器、素材库（`/assets`：素材上传/筛选/文件夹/预览）、全屏图文工作台（`/gallery/:id`：图片网格 + 图注 + 配文）、全屏视频工作台（`/video/:id`：预览播放器 + 片段时间线 + 导出）；内容库多选后可打开批量渲染/发布弹窗。
 - 状态：`AuthContext` + 页面局部状态；无全局状态库。
 - API：`web/src/lib/api.ts` 唯一入口，401 统一清理 token；`components/MediaPicker` 提供文章/图文/视频共用的素材选择器。
 - 导入导出：`web/src/lib/content-io.ts` 纯浏览器解析（marked / turndown / JSZip），不经过服务器。

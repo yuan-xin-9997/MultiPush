@@ -67,7 +67,7 @@ const MAX_DOCUMENT_INLINE_CHARS = 20_000
 /** Images above this size are referenced by metadata only, not sent as vision parts. */
 const MAX_VISION_IMAGE_BYTES = 6 * 1024 * 1024
 const VISION_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
-const PLATFORM_IDS = new Set<PlatformId>(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'])
+const PLATFORM_IDS = new Set<PlatformId>(['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'douyin', 'sspai', 'blog'])
 
 type JsonObject = Record<string, unknown>
 
@@ -355,7 +355,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           contentId: { type: 'string' },
-          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 14 },
+          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 15 },
           options: { type: 'object', description: '渲染选项，如 authorName、includeTags、includeToc、cardStyle、themeColor' },
         },
         required: ['contentId', 'platforms'],
@@ -370,7 +370,7 @@ export const AI_TOOLS: ToolDefinition[] = [
       description: '读取渲染记录中指定平台的标题、正文、Markdown、警告等信息。',
       parameters: {
         type: 'object',
-        properties: { renderId: { type: 'string' }, platform: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] } },
+        properties: { renderId: { type: 'string' }, platform: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'douyin', 'sspai', 'blog'] } },
         required: ['renderId'],
         additionalProperties: false,
       },
@@ -437,7 +437,7 @@ export const AI_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           contentIds: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 30 },
-          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 14 },
+          platforms: { type: 'array', items: { type: 'string', enum: ['wechat', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'douyin', 'sspai', 'blog'] }, minItems: 1, maxItems: 15 },
           options: { type: 'object' },
         },
         required: ['contentIds', 'platforms'],
