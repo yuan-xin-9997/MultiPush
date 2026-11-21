@@ -24,6 +24,8 @@
 - 桌面环境（macOS/Windows/带桌面的 Linux）直接可用；
 - 无桌面的 Linux 服务器需要安装 Xvfb，并提供 `DISPLAY`，推荐用 `xvfb-run` 启动服务（仓库的 `JenkinsConfig/run-multipush.sh` 会在检测不到 `DISPLAY` 时自动用 `xvfb-run`）；
 - 未安装 Xvfb 时其他平台不受影响，只有头条的草稿/发布会失败。
+- 部署后用 `node /opt/MultiPush/JenkinsConfig/check-browser-display.mjs` 自检：输出 `OK` 才说明有头环境可用；若报「Missing X server」就是 xvfb/xauth 没装好。
+- 如果 Chrome 因沙箱无法启动（systemd 下常见），在 `.env` 里加 `WECHAT_BROWSER_NO_SANDBOX=1`。
 
 状态：渲染、扫码登录、草稿与发布已用真实头条号完成端到端验证（2026-11-21，草稿 `pgc_id` 与已发布文章均验证，测试内容已删除）。
 

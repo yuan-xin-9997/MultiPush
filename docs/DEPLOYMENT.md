@@ -93,7 +93,17 @@ sudo -u jenkins test -w /opt/MultiPush/.data && echo "data dir writable"
 注意：
 
 - 不要在 `/opt/MultiPush` 下执行 `npm install`，部署脚本会复制唯一外置依赖 `playwright-core`。启用公众号、微博、今日头条、百家号、豆瓣、掘金、CSDN、V2EX、抖音的扫码/手机验证码登录与浏览器发布前，按 [公众号接入说明](WECHAT_PUBLISHING.md) 安装服务器浏览器并配置 `WECHAT_BROWSER_PATH`（微博可配置 `WEIBO_BROWSER_PATH`，今日头条可配置 `TOUTIAO_BROWSER_PATH`，百家号可配置 `BAIJIAHAO_BROWSER_PATH`，CSDN 可配置 `CSDN_BROWSER_PATH`，V2EX 可配置 `V2EX_BROWSER_PATH`；V2EX 在中国大陆服务器通常还需配置 `V2EX_PROXY_SERVER`）。
-- **今日头条需要「有头」浏览器**：无头 Chrome 的保存/发布请求会被平台拒绝（`code 7050「保存失败」`）。无桌面 Linux 服务器请先 `sudo apt-get install -y xvfb xauth`；服务用 `JenkinsConfig/run-multipush.sh` 启动，检测不到 `DISPLAY` 时会自动 `xvfb-run -a` 起虚拟显示。未装 Xvfb 不影响其他平台。
+- **今日头条需要「有头」浏览器**：无头 Chrome 的保存/发布请求会被平台拒绝（`code 7050「保存失败」`）。无桌面 Linux 服务器按下面步骤启用虚拟显示：
+
+  ```bash
+  sudo apt-get install -y xvfb xauth
+  sudo install -m 644 jenkins-workspace/JenkinsConfig/multipush.service /etc/systemd/system/multipush.service
+  sudo systemctl daemon-reload && sudo systemctl restart multipush
+  # 自检（应有 screen/outer 非 0、webdriver=false 并输出 OK）
+  node /opt/MultiPush/JenkinsConfig/check-browser-display.mjs
+  ```
+
+  服务通过 `JenkinsConfig/run-multipush.sh` 启动，检测不到 `DISPLAY` 时自动 `xvfb-run -a --server-args="-screen 0 1600x1000x24"`。未装 Xvfb 不影响其他平台，只有头条的草稿/发布会失败。
 - 不要对 `.data` 执行 `chmod -R 755` 或 `chown -R` 作为日常部署步骤；数据目录只允许服务用户访问。
 - 如果 `/opt/MultiPush` 已存在且属主不对，先确认没有其他应用在使用，再修正属主：
 

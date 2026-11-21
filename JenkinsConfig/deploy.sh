@@ -169,6 +169,7 @@ rsync -a --delete --chmod=D755,F644 --itemize-changes -- \
 
 install -m 644 -- "$SOURCE_REAL/JenkinsConfig/health.mjs" "$DEPLOY_REAL/JenkinsConfig/health.mjs"
 install -m 755 -- "$SOURCE_REAL/JenkinsConfig/run-multipush.sh" "$DEPLOY_REAL/JenkinsConfig/run-multipush.sh"
+install -m 755 -- "$SOURCE_REAL/scripts/check-browser-display.mjs" "$DEPLOY_REAL/JenkinsConfig/check-browser-display.mjs"
 install -m 644 -- "$SOURCE_REAL/package.json" "$DEPLOY_REAL/package.json"
 
 # Normalize permissions only for files managed by this script. In particular,

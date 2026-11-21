@@ -133,7 +133,11 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
         executablePath,
         headless: false,
         chromiumSandbox: process.env.WECHAT_BROWSER_NO_SANDBOX !== '1',
-        args: ['--disable-dev-shm-usage', '--disable-gpu', '--disable-blink-features=AutomationControlled'],
+        args: [
+          '--disable-dev-shm-usage', '--disable-gpu', '--disable-blink-features=AutomationControlled',
+          // Xvfb 上给足窗口尺寸，避免平台按 window/screen 尺寸判定为自动化环境。
+          '--window-size=1440,1000', '--window-position=0,0', '--no-first-run', '--no-default-browser-check',
+        ],
       }).then(browser => {
         browser.on('disconnected', () => { this.browser = null })
         return browser
