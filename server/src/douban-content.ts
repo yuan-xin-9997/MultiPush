@@ -44,7 +44,8 @@ export function prepareDoubanContent(html: string): string {
 }
 
 export function doubanNoteUrl(remoteId: string): string {
-  return `https://www.douban.com/note/${encodeURIComponent(remoteId)}/`
+  // The diary editor moved to the topic service in 2026: /note/<id>/ now redirects to /topic/<id>/.
+  return `https://www.douban.com/topic/${encodeURIComponent(remoteId)}/`
 }
 
 export function parseDoubanNoteId(value: unknown): string | null {
@@ -54,7 +55,7 @@ export function parseDoubanNoteId(value: unknown): string | null {
   try {
     const url = new URL(text, 'https://www.douban.com')
     if (url.hostname !== 'www.douban.com' && url.hostname !== 'douban.com') return null
-    const match = url.pathname.match(/^\/note\/(\d{6,30})\/?$/)
+    const match = url.pathname.match(/^\/(?:note|topic)\/(\d{6,30})\/?$/)
     return match?.[1] ?? null
   } catch { return null }
 }

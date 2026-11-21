@@ -4,12 +4,12 @@
 
 ## 草稿
 
-豆瓣网页端没有草稿箱，发布页的「保存草稿」只把完整日记快照保存在 MultiPush 本地，状态为 `draft`；需要发布时在渲染页复制正文或打开豆瓣编辑器手动完成。系统不会把草稿提交成一篇私密日记。
+豆瓣新版编辑器有「草稿箱」，但 MultiPush 的「保存草稿」仍然只把完整日记快照保存在本地，状态为 `draft`；需要发布时在渲染页复制正文或打开豆瓣编辑器手动完成（自动草稿需要模拟编辑器交互，暂未实现）。
 
 
 ## 1. 能力范围
 
-- 平台：**豆瓣日记**（`https://www.douban.com/note/create`），不是豆瓣广播、书评或小组话题。
+- 平台：**豆瓣日记**（编辑器为 `https://www.douban.com/topic/create?subtype=note`；旧的 `/note/create` 会跳转到这里），不是豆瓣广播、书评或小组话题。
 - 渲染：生成豆瓣日记风格的长文 HTML 与 Markdown，支持标题层级、引用、代码、表格、图片和 `figure/figcaption`。
 - 发布：连接豆瓣账号后，可把渲染记录发布为日记；支持：
   - 可见范围：公开 / 仅自己可见；
@@ -23,8 +23,15 @@
 豆瓣没有面向第三方的公开写接口，历史上也没有开放 OAuth 写权限。系统采用：
 
 1. 通过豆瓣官方扫码页登录，保存浏览器 `storage_state`（加密存储）；
-2. 使用已登录浏览器会话，调用豆瓣网页端日记保存接口；
-3. 正文图片先上传到豆瓣图床，再保存日记。
+2. 使用已登录浏览器会话，调用豆瓣网页端当前使用的「话题」接口保存日记（2026-11 实测）：
+
+   | 环节 | 接口 |
+   | --- | --- |
+   | 图片上传 | `POST https://upload.douban.com/j/group/topic/add_photo`，multipart 字段 `image_file` / `ck` / `primary_color` / `upload_auth_token`（token 从编辑器页面 `__INIT_STATE__` 读取） |
+   | 发布日记 | `POST https://m.douban.com/rexxar/api/v2/topic/post`，JSON body 含 `title`、`content`（Draft.js raw state）、`image_ids`、`subtype: "note"`、`accessible: public/private`，请求头 `x-csrf-token` 取 `ck` Cookie |
+   | 日记地址 | `https://www.douban.com/topic/<id>/`（旧地址 `/note/<id>/` 会跳转） |
+
+3. 正文图片先上传到豆瓣图床，再把返回的图片 id/URL 写进 Draft.js 正文和 `image_ids`。
 
 这意味着：
 

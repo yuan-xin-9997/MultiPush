@@ -13,16 +13,16 @@ import {
   parseDoubanIdentity,
   parseDoubanNoteResult,
   parseDoubanUidFromSession,
-  parseDoubanUploadUrl,
   type DoubanDriver,
   type DoubanLoginAttempt,
 } from '../src/douban-browser'
+import { buildDoubanTopicContent, parseDoubanTopicResult, parseDoubanUploadPhoto } from '../src/douban-topic'
 import type { ContentDetail } from '../../shared/types'
 
 const cleanups: Array<() => Promise<void> | void> = []
 const state = { cookies: [{ name: 'dbcl2', value: '123456789:abc', domain: '.douban.com', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'Lax' as const }], origins: [] }
 const identity = { accountId: '123456789', name: '豆瓣用户' }
-const noteUrl = 'https://www.douban.com/note/987654321/'
+const noteUrl = 'https://www.douban.com/topic/987654321/'
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7XkAAAAASUVORK5CYII='
 
 function setup() {
@@ -161,9 +161,33 @@ describe('Douban parsing', () => {
     expect(parseDoubanNoteResult({ data: { note_id: '987654321' } })).toEqual({ remoteId: '987654321', url: noteUrl })
     expect(parseDoubanNoteResult('https://www.douban.com/note/987654321/')).toEqual({ remoteId: '987654321', url: noteUrl })
     expect(parseDoubanNoteResult({ r: 1 })).toBeNull()
-    expect(parseDoubanUploadUrl({ url: 'https://img1.doubanio.com/view/note/large/public/p1.jpg' })).toBe('https://img1.doubanio.com/view/note/large/public/p1.jpg')
-    expect(parseDoubanUploadUrl({ data: { src: '/view/note/large/public/p1.jpg' } })).toBeNull()
+    expect(parseDoubanNoteId('https://www.douban.com/topic/987654321/')).toBe('987654321')
     expect(parseDoubanNoteId('https://www.douban.com/note/987654321/')).toBe('987654321')
     expect(parseDoubanNoteId('https://evil.example/note/987654321/')).toBeNull()
+  })
+
+  it('parses the topic upload envelope and create response', () => {
+    expect(parseDoubanUploadPhoto({ r: 0, photo: { id: '754481196', url: 'https://img9.doubanio.com/view/group_topic/l/public/p1.jpg', thumb: 'https://img9.doubanio.com/view/group_topic/small/public/p1.jpg', width: 12, height: 34, file_name: 'a.png', file_size: 68 } }))
+      .toMatchObject({ id: '754481196', url: 'https://img9.doubanio.com/view/group_topic/l/public/p1.jpg', width: 12, height: 34 })
+    expect(parseDoubanUploadPhoto({ r: 1, err: '上传失败' })).toBeNull()
+    expect(parseDoubanUploadPhoto({ r: 0, photo: { id: '1' } })).toBeNull()
+    expect(parseDoubanTopicResult({ id: '506379765', url: 'https://www.douban.com/topic/506379765/?_spm_id=1' }))
+      .toEqual({ remoteId: '506379765', url: 'https://www.douban.com/topic/506379765/' })
+    expect(parseDoubanTopicResult({ id: 'x' })).toBeNull()
+  })
+
+  it('builds a Draft.js body for paragraphs, styles, lists and images', () => {
+    const photo = { id: '754481196', url: 'https://img9.doubanio.com/view/group_topic/l/public/p1.jpg', thumb: '', width: 1, height: 1, fileName: 'a.png', fileSize: 68, isAnimated: false, primaryColor: '' }
+    const { content, imageIds } = buildDoubanTopicContent('<h2>标题</h2><p>正文<strong>加粗</strong>和<a href="https://example.com">链接</a></p><ul><li>条目一</li></ul><figure><img src="https://publish.example/uploads/a.png"><figcaption>图注</figcaption></figure>', [photo])
+    const draft = JSON.parse(content) as { blocks: Array<{ type: string; text: string; inlineStyleRanges: Array<{ style: string }>; entityRanges: Array<{ key: number }> }>; entityMap: Record<string, { type: string; data: Record<string, unknown> }> }
+    expect(draft.blocks.map(block => block.type)).toEqual(['header-two', 'unstyled', 'unordered-list-item', 'atomic', 'unstyled'])
+    expect(draft.blocks[1].text).toBe('正文加粗和链接')
+    expect(draft.blocks[1].inlineStyleRanges[0]).toMatchObject({ style: 'BOLD' })
+    expect(draft.blocks[1].entityRanges).toHaveLength(1)
+    expect(draft.entityMap['0']).toMatchObject({ type: 'LINK', data: { href: 'https://example.com' } })
+    expect(draft.entityMap['1']).toMatchObject({ type: 'IMAGE', data: { id: '754481196', src: photo.url } })
+    expect(draft.blocks[3].entityRanges[0].key).toBe(1)
+    expect(imageIds).toBe('1_754481196')
+    expect(buildDoubanTopicContent('<p>没有图片</p>', []).imageIds).toBe('')
   })
 })

@@ -7,6 +7,8 @@ import { publisherExecutablePath } from './wechat-browser'
 import { ApiError } from './errors'
 import { qrReady } from './qr-capture'
 import { doubanNoteUrl, verifyDoubanContent } from './douban-content'
+import { buildDoubanTopicContent, doubanTopicUrl, parseDoubanTopicResult, parseDoubanUploadPhoto, type DoubanPhoto } from './douban-topic'
+import { capturePageFailure, describePageFailure } from './publisher-diagnostics'
 
 export interface DoubanIdentity { accountId: string; name: string }
 export interface DoubanArticle {
@@ -32,7 +34,10 @@ export interface DoubanDriver {
 const HOME = 'https://www.douban.com/'
 const LOGIN = 'https://accounts.douban.com/passport/login?prefer_login_way=qrcode'
 const MINE = 'https://www.douban.com/mine/'
-const NOTE_CREATE = 'https://www.douban.com/note/create'
+const NOTE_CREATE = 'https://www.douban.com/topic/create?subtype=note'
+const UPLOAD_PHOTO = 'https://upload.douban.com/j/group/topic/add_photo'
+const TOPIC_POST = 'https://m.douban.com/rexxar/api/v2/topic/post'
+const UPLOAD_TOKEN = /upload_auth_token:\s*'([^']+)'/
 const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 const QR_SELECTORS = [
   '.account-qr-scan img',
@@ -134,40 +139,10 @@ export function parseDoubanNoteResult(value: unknown, location?: string | null):
   return null
 }
 
-/** Find an uploaded Douban image URL in the upload endpoint response. */
-export function parseDoubanUploadUrl(value: unknown): string | null {
-  const visit = (raw: unknown, depth: number): string | null => {
-    if (depth > 4 || raw === null || raw === undefined) return null
-    if (typeof raw === 'string') {
-      const text = raw.trim()
-      if (text.startsWith('//') && /(?:doubanio\.com|douban\.com)\//i.test(text)) return `https:${text}`
-      if (/^https?:\/\/[^\s"'<>]+$/i.test(text) && /(?:doubanio\.com|douban\.com)\//i.test(text)) return text
-      try { return visit(JSON.parse(text), depth + 1) } catch { return null }
-    }
-    if (typeof raw !== 'object') return null
-    if (Array.isArray(raw)) {
-      for (const item of raw) {
-        const found = visit(item, depth + 1)
-        if (found) return found
-      }
-      return null
-    }
-    const record = raw as Data
-    for (const key of ['url', 'src', 'image', 'image_url', 'imageUrl', 'photo', 'path']) {
-      const found = visit(record[key], depth + 1)
-      if (found) return found
-    }
-    for (const key of ['data', 'result', 'photo']) {
-      const found = visit(record[key], depth + 1)
-      if (found) return found
-    }
-    return null
-  }
-  return visit(value, 0)
-}
-
 export class PlaywrightDoubanDriver implements DoubanDriver {
   private browser: Promise<Browser> | null = null
+
+  constructor(private readonly dataDir: string | null = null) {}
 
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
     if (!this.browser) {
@@ -351,51 +326,70 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
     } finally { await context.close().catch(() => {}) }
   }
 
-  private async uploadImage(context: BrowserContext, image: PublisherImage, ck: string): Promise<string> {
-    const endpoints = ['https://www.douban.com/j/upload', 'https://www.douban.com/j/note/upload']
-    let lastStatus = 0
-    for (const endpoint of endpoints) {
-      const response = await context.request.post(endpoint, {
-        multipart: { file: image, ck, csrfmiddlewaretoken: ck },
-        headers: { Referer: NOTE_CREATE, 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': ck },
-        timeout: 30_000,
-      }).catch(() => null)
-      if (!response) continue
-      lastStatus = response.status()
-      const body = await response.text().catch(() => '')
-      if (response.status() === 401 || response.status() === 403 || SECURITY_TEXT.test(body)) throw new ApiError(409, 'douban_security_check', '豆瓣要求安全验证，已停止发布；请在官方页面完成验证后重新连接')
-      if (response.ok()) {
-        const url = parseDoubanUploadUrl(body)
-        if (url) return url
-        throw new ApiError(502, 'douban_image_upload_failed', '豆瓣图片上传成功但未返回图片地址，已停止发布，请稍后重试')
-      }
-      if ([404, 405].includes(response.status())) continue
-    }
-    throw new ApiError(502, 'douban_image_upload_failed', `豆瓣图片上传未返回有效地址（HTTP ${lastStatus || '未知'}），已停止发布，请稍后重试`)
+  /** `add_photo` needs the editor's one-shot upload token plus the `ck` cookie. */
+  private async uploadToken(context: BrowserContext): Promise<string> {
+    const response = await context.request.get(NOTE_CREATE, { timeout: 30_000, headers: { Accept: 'text/html' } }).catch(() => null)
+    if (!response?.ok()) throw new ApiError(502, 'douban_publish_unavailable', `无法打开豆瓣日记编辑器（HTTP ${response?.status() ?? '无响应'}），登录状态可能已失效；请断开后重新扫码连接`)
+    const html = await response.text().catch(() => '')
+    const token = UPLOAD_TOKEN.exec(html)?.[1] ?? ''
+    if (!token) throw new ApiError(502, 'douban_publish_unavailable', '豆瓣编辑器没有返回上传凭证，页面可能已改版；请使用“复制富文本/打开豆瓣编辑器”手动发布')
+    return token
   }
 
-  private async saveNote(context: BrowserContext, uid: string, ck: string, form: Record<string, string>): Promise<{ remoteId: string; url: string } | null> {
-    const endpoints = [`https://www.douban.com/j/note/${encodeURIComponent(uid)}/_save`, `https://www.douban.com/j/note/${encodeURIComponent(uid)}/new_rich`]
-    for (const endpoint of endpoints) {
-      let response
-      try {
-        response = await context.request.post(endpoint, {
-          form,
-          headers: { Referer: NOTE_CREATE, Origin: 'https://www.douban.com', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': ck },
-          timeout: 30_000,
-        })
-      } catch {
-        throw uncertain('豆瓣保存请求已发出但未收到响应，结果未确认；请先到豆瓣日记列表核实，避免重复发布')
-      }
-      const body = await response.text().catch(() => '')
-      if (response.status() === 401 || response.status() === 403 || SECURITY_TEXT.test(body)) {
-        throw new ApiError(409, 'douban_security_check', '豆瓣要求安全验证，已停止发布；请在官方页面完成验证后重新连接')
-      }
-      if ([404, 405].includes(response.status())) continue
-      if (!response.ok()) throw new ApiError(502, 'douban_publish_failed', `豆瓣保存日记失败（HTTP ${response.status()}），请稍后重试`)
-      return parseDoubanNoteResult(body, response.headers()['location'])
+  private async uploadImage(context: BrowserContext, image: PublisherImage, ck: string, token: string): Promise<DoubanPhoto> {
+    let response
+    try {
+      response = await context.request.post(UPLOAD_PHOTO, {
+        multipart: { ck, image_file: image, primary_color: '', upload_auth_token: token },
+        headers: { Referer: NOTE_CREATE },
+        timeout: 60_000,
+      })
+    } catch {
+      throw new ApiError(502, 'douban_image_upload_failed', '豆瓣图片上传请求失败，请检查服务器网络后重试')
     }
-    throw new ApiError(502, 'douban_publish_unavailable', '豆瓣日记保存接口不可用，可能已改版；请使用“复制富文本/打开豆瓣编辑器”手动发布')
+    const body = await response.text().catch(() => '')
+    if (response.status() === 401 || response.status() === 403 || SECURITY_TEXT.test(body)) {
+      throw new ApiError(409, 'douban_security_check', '豆瓣要求安全验证，已停止发布；请在官方页面完成验证后重新连接')
+    }
+    let payload: unknown = null
+    try { payload = JSON.parse(body) } catch { /* keep the raw body for the error below */ }
+    const photo = parseDoubanUploadPhoto(payload)
+    if (photo) return photo
+    const detail = body.replace(/\s+/g, ' ').slice(0, 160)
+    throw new ApiError(502, 'douban_image_upload_failed', `豆瓣图片上传未返回图片地址（HTTP ${response.status()}）：${detail || '响应为空'}`)
+  }
+
+  private async saveNote(context: BrowserContext, ck: string, payload: Record<string, unknown>): Promise<{ remoteId: string; url: string } | null> {
+    let response
+    try {
+      response = await context.request.post(TOPIC_POST, {
+        data: payload,
+        headers: { Referer: NOTE_CREATE, Origin: 'https://www.douban.com', 'Content-Type': 'application/json;charset=UTF-8', 'X-CSRF-Token': ck },
+        timeout: 45_000,
+      })
+    } catch {
+      throw uncertain('豆瓣保存请求已发出但未收到响应，结果未确认；请先到豆瓣日记列表核实，避免重复发布')
+    }
+    const body = await response.text().catch(() => '')
+    if (response.status() === 401 || response.status() === 403 || SECURITY_TEXT.test(body)) {
+      throw new ApiError(409, 'douban_security_check', '豆瓣要求安全验证，已停止发布；请在官方页面完成验证后重新连接')
+    }
+    let parsed: unknown = null
+    try { parsed = JSON.parse(body) } catch { /* fall through to the error below */ }
+    if (!response.ok()) {
+      const detail = typeof (parsed as Data | null)?.msg === 'string' ? String((parsed as Data).msg) : body.replace(/\s+/g, ' ').slice(0, 160)
+      throw new ApiError(502, 'douban_publish_failed', `豆瓣保存日记失败（HTTP ${response.status()}）${detail ? `：${detail}` : ''}`)
+    }
+    return parseDoubanTopicResult(parsed)
+  }
+
+  private async failure(context: BrowserContext): Promise<string> {
+    const page = await context.newPage().catch(() => null)
+    if (!page) return '页面快照不可用'
+    try {
+      await page.goto(NOTE_CREATE, { waitUntil: 'domcontentloaded', timeout: 20_000 }).catch(() => {})
+      return describePageFailure(await capturePageFailure(page, this.dataDir, 'douban'))
+    } finally { await page.close().catch(() => {}) }
   }
 
   async publish(state: PublisherStorageState, article: DoubanArticle, progress: (value: { message: string }) => void) {
@@ -404,48 +398,42 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
       const session = await this.session(context)
       if (!session) throw expired()
       if (!session.ck) throw new ApiError(409, 'douban_security_check', '豆瓣登录会话缺少写入校验 Cookie，请断开后重新扫码连接')
+      const token = await this.uploadToken(context)
+      const photos: DoubanPhoto[] = []
       let index = 0
-      const uploaded = new Map<string, string>()
-      for (const src of article.images.keys()) {
+      for (const image of article.images.values()) {
         progress({ message: `正在上传豆瓣图片 ${index + 1}/${article.images.size}` })
-        const image = article.images.get(src)!
-        uploaded.set(src, await this.uploadImage(context, image, session.ck))
+        photos.push(await this.uploadImage(context, image, session.ck, token))
         index += 1
       }
-      const $ = load(article.html, null, false)
-      $('img').each((_, node) => {
-        const image = $(node)
-        const src = image.attr('src') || ''
-        const next = uploaded.get(src)
-        if (next) image.attr('src', next)
-      })
-      const content = $.html()
+      if (photos.length !== article.images.size) {
+        throw new ApiError(502, 'douban_image_upload_failed', `豆瓣图片上传不完整（${photos.length}/${article.images.size}），已停止发布`)
+      }
+      const { content, imageIds } = buildDoubanTopicContent(article.html, photos)
       progress({ message: '正在保存豆瓣日记' })
-      const result = await this.saveNote(context, session.uid, session.ck, {
+      const result = await this.saveNote(context, session.ck, {
         title: article.title,
         content,
-        privacy: article.privacy,
-        can_reply: 'yes',
-        tags: article.tags.join(' '),
-        ck: session.ck,
-        csrfmiddlewaretoken: session.ck,
+        image_ids: imageIds,
+        image_layout: 'horizontal',
+        topic_tag_ids: '',
+        interest_tags: article.tags.join('#'),
+        is_event: false,
+        subtype: 'note',
+        accessible: article.privacy === 'private' ? 'private' : 'public',
+        explanation_types: '',
+        send_status: true,
+        original: false,
+        is_activity_rule: false,
+        enable_item_tag: false,
       })
-      if (!result) throw uncertain('豆瓣已接收保存请求，但未返回日记编号；请先到豆瓣日记列表核实，避免重复发布')
-      const readBackResponse = await context.request.get(result.url, { timeout: 20_000 }).catch(() => null)
-      if (!readBackResponse?.ok()) throw uncertain('豆瓣日记已创建，但暂时无法读取正文核对；请到豆瓣确认内容后再决定是否重试')
-      const storedHtml = await readBackResponse.text().catch(() => '')
+      if (!result) throw uncertain('豆瓣已接收保存请求，但未返回日记编号；请先到豆瓣核实，避免重复发布')
       const readBack = await this.noteTitle(context, result.url).catch(() => null)
-      if (readBack?.title && !readBack.title.includes(article.title.slice(0, 10))) {
-        throw uncertain('豆瓣日记已创建，但标题回读不一致；请到豆瓣核对后再决定是否重试')
+      if (!readBack || readBack.status !== 200) {
+        throw uncertain('豆瓣日记已创建，但暂时无法读取页面核对；请到豆瓣确认内容后再决定是否重试')
       }
-      const body = load(storedHtml)('#link-report, .note-content, .note-body, .article, #content').first().html()
-      if (body) {
-        try { verifyDoubanContent(content, body) }
-        catch (error) {
-          // Douban may rewrite the HTML; keep the created diary and let the
-          // user inspect it instead of reporting a false failure.
-          log('content readback differed', error instanceof Error ? error.message : error)
-        }
+      if (readBack.title && !readBack.title.includes(article.title.slice(0, 10))) {
+        throw uncertain('豆瓣日记已创建，但标题回读不一致；请到豆瓣核对后再决定是否重试')
       }
       return {
         state: await context.storageState(),
@@ -456,7 +444,7 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
       }
     } catch (error) {
       if (error instanceof ApiError) throw error
-      throw uncertain('豆瓣发布过程中网络或页面异常，结果未确认；请先到豆瓣日记列表核实，避免重复发布')
+      throw uncertain(`豆瓣发布过程中网络或页面异常，结果未确认；请先到豆瓣核实，避免重复发布；${await this.failure(context).catch(() => '')}`)
     } finally { await context.close().catch(() => {}) }
   }
 
