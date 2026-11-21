@@ -11,6 +11,7 @@ import { renderDouban } from './douban'
 import { renderJuejin } from './juejin'
 import { renderCsdn } from './csdn'
 import { renderJianshu } from './jianshu'
+import { renderV2ex } from './v2ex'
 import { renderDouyin } from './douyin'
 import { renderSspai } from './sspai'
 import { renderBlog } from './blog'
@@ -27,6 +28,7 @@ const RENDERERS: Record<PlatformId, PlatformRenderer> = {
   juejin: renderJuejin,
   csdn: renderCsdn,
   jianshu: renderJianshu,
+  v2ex: renderV2ex,
   douyin: renderDouyin,
   sspai: renderSspai,
   blog: renderBlog,

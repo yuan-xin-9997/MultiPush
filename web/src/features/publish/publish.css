@@ -131,6 +131,10 @@
 .juejin-publish-page .publish-mode-switch { display: flex; gap: 8px; margin-top: 14px; }
 .juejin-publish-page .publish-mode-switch .btn.is-active { border-color: #1e80ff; color: #1e80ff; }
 
+.v2ex-publish-page .publish-account-icon { font-size: 28px; font-weight: 700; color: #333; background: #f2f2f2; }
+.v2ex-publish-preview { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+.v2ex-publish-preview h3 { padding: 14px 16px 10px; font-size: 18px; line-height: 1.5; }
+.v2ex-publish-preview iframe { display: block; width: 100%; height: 590px; border: 0; border-top: 1px solid var(--line); background: #fff; }
 .jianshu-publish-page .publish-account-icon { font-size: 28px; font-weight: 700; color: #ea6f5a; background: #fff2ef; }
 .jianshu-publish-preview { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
 .jianshu-publish-preview h3 { padding: 14px 16px 0; font-size: 18px; line-height: 1.5; }

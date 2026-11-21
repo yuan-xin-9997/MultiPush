@@ -6,7 +6,7 @@
  * dependencies so it can be used in either environment.
  */
 
-export type PlatformId = 'wechat' | 'wechatpic' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'douyin' | 'sspai' | 'blog'
+export type PlatformId = 'wechat' | 'wechatpic' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'v2ex' | 'douyin' | 'sspai' | 'blog'
 
 export type ContentStatus = 'draft' | 'ready'
 
@@ -157,6 +157,17 @@ export const PLATFORMS: PlatformInfo[] = [
     contentTypes: ['image-text'],
     highlight: 'Markdown 长文 · 草稿 / 发布 · 文集',
     limits: { titleMax: 100, bodyMax: 50000, imageMax: 100 },
+  },
+  {
+    id: 'v2ex',
+    name: 'V2EX',
+    shortName: 'V2EX',
+    description: '生成 V2EX 主题 Markdown，选择节点后通过浏览器会话发布公开主题；也可复制 Markdown 到 V2EX 发帖页手动发布。',
+    color: '#333333',
+    softColor: '#f2f2f2',
+    contentTypes: ['image-text'],
+    highlight: '论坛主题 · Markdown · 节点 · 浏览器发布',
+    limits: { titleMax: 120, bodyMax: 20000, imageMax: 100 },
   },
   {
     id: 'douyin',
@@ -1018,6 +1029,78 @@ export interface JianshuResolveInput {
   articleUrl?: string
 }
 
+export interface V2exAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface V2exConnectInput {
+  /** Cookie header copied from a signed-in V2EX browser session. */
+  cookie: string
+}
+
+export interface V2exNode {
+  name: string
+  title: string
+}
+
+export interface V2exPublishInput {
+  renderId: string
+  nodeName: string
+}
+
+export interface V2exPublication {
+  id: string
+  renderId: string
+  title: string
+  nodeName: string
+  status: 'running' | 'published' | 'failed' | 'uncertain'
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+  resolutions?: V2exResolution[]
+}
+
+export interface V2exResolution {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
+}
+
+export interface V2exResolveInput {
+  action: V2exResolution['action']
+  topicUrl?: string
+}
+
+/** Common V2EX nodes shown before a session can enumerate the live list. */
+export const V2EX_COMMON_NODES: V2exNode[] = [
+  { name: 'programming', title: '程序员' },
+  { name: 'create', title: '分享创造' },
+  { name: 'share', title: '分享发现' },
+  { name: 'qna', title: '问与答' },
+  { name: 'ideas', title: '奇思妙想' },
+  { name: 'career', title: '职场话题' },
+  { name: 'life', title: '生活' },
+  { name: 'python', title: 'Python' },
+  { name: 'javascript', title: 'JavaScript' },
+  { name: 'nodejs', title: 'Node.js' },
+  { name: 'linux', title: 'Linux' },
+  { name: 'apple', title: 'Apple' },
+  { name: 'macos', title: 'macOS' },
+  { name: 'android', title: 'Android' },
+  { name: 'ios', title: 'iOS' },
+  { name: 'hardware', title: '硬件' },
+  { name: 'photography', title: '摄影' },
+  { name: 'movies', title: '电影' },
+  { name: 'reading', title: '阅读' },
+  { name: 'travel', title: '旅行' },
+]
+
 export interface DouyinAccount {
   status: 'disconnected' | 'connected' | 'expired'
   name: string | null
@@ -1503,4 +1586,4 @@ export interface ApiErrorBody {
   issues?: Array<{ path: string; message: string }>
 }
 
-export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'douyin', 'sspai', 'blog']
+export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'douyin', 'sspai', 'blog']
