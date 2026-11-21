@@ -8,6 +8,7 @@ const executablePath = process.env.CHROME_BIN || process.env.TOUTIAO_BROWSER_PAT
   '/usr/bin/google-chrome',
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
+  '/opt/google/chrome/chrome',
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
 ].find(existsSync)
