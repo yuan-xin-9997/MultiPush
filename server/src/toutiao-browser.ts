@@ -6,6 +6,7 @@ import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
 import { ApiError } from './errors'
 import { qrReady } from './qr-capture'
+import { capturePageFailure, describePageFailure } from './publisher-diagnostics'
 
 export interface ToutiaoIdentity { accountId: string; name: string }
 export interface ToutiaoArticle { title: string; html: string; text: string; mode: 'draft' | 'publish'; images: PublisherImage[] }
@@ -18,19 +19,55 @@ export interface ToutiaoDriver {
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: ToutiaoIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'missing' | 'unknown'; url: string | null; message: string }>
   publish(state: PublisherStorageState, article: ToutiaoArticle, progress: (value: Partial<Pick<ToutiaoPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
+  deleteDraft(state: PublisherStorageState, remoteId: string): Promise<{ state: PublisherStorageState }>
   close(): Promise<void>
 }
 
 const HOME = 'https://mp.toutiao.com/'
 const LOGIN = 'https://mp.toutiao.com/auth/page/login'
 const PUBLISH = 'https://mp.toutiao.com/profile_v4/graphic/publish'
+const DRAFT_BOX = 'https://mp.toutiao.com/profile_v4/manage/draft'
 const QR = 'img[class*="web-login-scan-code"][class*="qrcode"], img[class*="qrcode"], img[src^="data:image"][class*="login"]'
-const TITLE = 'input[placeholder*="请输入文章标题"], input[placeholder*="标题"], textarea[placeholder*="标题"], .article-title input, [class*="title"] input'
+const TITLE = 'input[placeholder*="请输入文章标题"], textarea[placeholder*="请输入文章标题"], input[placeholder*="标题"]'
 const EDITOR = 'div.ProseMirror[contenteditable="true"], div[contenteditable="true"][data-placeholder*="正文"], div[contenteditable="true"]'
 type Data = Record<string, unknown>
 function object(value: unknown): Data { return value && typeof value === 'object' && !Array.isArray(value) ? value as Data : {} }
 const expired = () => new ApiError(409, 'toutiao_session_expired', '今日头条登录状态已失效，请重新扫码连接')
 function log(...parts: unknown[]): void { console.log('[toutiao]', ...parts) }
+
+/** Every `/mp/agw/article/publish` call: `save=0` saves the cloud draft, `save=1` publishes. */
+interface ToutiaoSave { save: string; code: number; message: string; pgcId: string }
+
+function watchSaves(page: Page): ToutiaoSave[] {
+  const saves: ToutiaoSave[] = []
+  page.on('response', response => {
+    if (!response.url().includes('/mp/agw/article/publish')) return
+    void (async () => {
+      try {
+        const form = new URLSearchParams(response.request().postData() || '')
+        const payload = object(JSON.parse(await response.text()))
+        const data = object(payload.data)
+        saves.push({
+          save: form.get('save') ?? '',
+          code: Number(payload.code ?? 0),
+          message: typeof payload.message === 'string' ? payload.message : '',
+          pgcId: String(data.pgc_id ?? ''),
+        })
+      } catch { /* ignore malformed responses; the caller reports the timeout */ }
+    })()
+  })
+  return saves
+}
+
+async function waitForSave(saves: ToutiaoSave[], save: '0' | '1', timeout: number): Promise<ToutiaoSave | null> {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const hit = saves.find(item => item.save === save)
+    if (hit) return hit
+    await new Promise(resolve => setTimeout(resolve, 300))
+  }
+  return null
+}
 
 
 export function parseToutiaoLogin(value: unknown): ToutiaoIdentity | null {
@@ -84,14 +121,30 @@ export function parseToutiaoPublished(value: unknown): { remoteId: string; url: 
 export class PlaywrightToutiaoDriver implements ToutiaoDriver {
   private browser: Promise<Browser> | null = null
 
+  constructor(private readonly dataDir: string | null = null) {}
+
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
     if (!this.browser) {
       const executablePath = publisherExecutablePath('toutiao')
       if (!executablePath) throw new ApiError(503, 'toutiao_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
-      this.browser = chromium.launch({ executablePath, headless: true, chromiumSandbox: process.env.WECHAT_BROWSER_NO_SANDBOX !== '1', args: ['--disable-dev-shm-usage'] }).then(browser => {
+      // 头条会拒绝无头浏览器的保存/发布请求（返回 code 7050「保存失败」），必须用有头浏览器。
+      // Linux 服务器需要 Xvfb 提供虚拟显示，否则 Chrome 启动会失败。
+      this.browser = chromium.launch({
+        executablePath,
+        headless: false,
+        chromiumSandbox: process.env.WECHAT_BROWSER_NO_SANDBOX !== '1',
+        args: ['--disable-dev-shm-usage', '--disable-gpu', '--disable-blink-features=AutomationControlled'],
+      }).then(browser => {
         browser.on('disconnected', () => { this.browser = null })
         return browser
-      }).catch(() => { this.browser = null; throw new ApiError(503, 'toutiao_browser_unavailable', '无法启动今日头条浏览器，请检查服务器浏览器配置') })
+      }).catch(error => {
+        this.browser = null
+        const message = String(error)
+        if (/Missing X server|DISPLAY|Xvfb|no display/i.test(message)) {
+          throw new ApiError(503, 'toutiao_browser_unavailable', '今日头条必须使用有头浏览器：服务器缺少图形环境，请安装 Xvfb 并用 xvfb-run 启动服务（或设置 DISPLAY）')
+        }
+        throw new ApiError(503, 'toutiao_browser_unavailable', '无法启动今日头条浏览器，请检查服务器浏览器配置')
+      })
     }
     const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1440, height: 1000 } })
     context.setDefaultTimeout(20_000)
@@ -236,7 +289,8 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
         const items: Record<string, Blob> = { 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) }
         await clipboard.write([new ClipboardItemImpl(items)])
       }, { html: article.html, text: article.text })
-      await page.keyboard.press('Control+V')
+      // macOS 用 Command+V，其他平台用 Control+V；否则粘贴不生效，图片会丢失。
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V')
       await page.waitForTimeout(1_500)
     } catch {
       await editor.fill(article.text)
@@ -247,13 +301,50 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
       await editor.fill(article.text)
       await page.waitForTimeout(500)
     }
+    // 头条会把粘贴进来的站外图片转存到自己的图床，需要等它上传完成再保存。
+    if (article.images.length) {
+      await page.waitForFunction(
+        `(count) => document.querySelectorAll('div.ProseMirror img').length >= count`,
+        article.images.length,
+        { timeout: 30_000 },
+      ).catch(() => {})
+    }
+  }
+
+  /** The preview footer needs a cover image; fall back to「无封面」when the picker allows it. */
+  private async preferNoCover(page: Page): Promise<void> {
+    const noCover = page.getByText('无封面', { exact: true }).first()
+    if (await noCover.count() && await noCover.isVisible().catch(() => false)) {
+      await noCover.click().catch(() => {})
+      await page.waitForTimeout(600)
+    }
+  }
+
+  /** 头条先进入预览页，需要再点一次「确认发布」才真正提交。 */
+  private async startPublish(page: Page): Promise<boolean> {
+    const preview = page.getByRole('button', { name: '预览并发布', exact: true }).first()
+    const direct = page.getByRole('button', { name: /^(?:发布|立即发布|发表)$/ }).first()
+    const button = await preview.count() ? preview : direct
+    if (!await button.count() || !await button.isEnabled().catch(() => false)) return false
+    await button.click().catch(() => {})
+    const confirm = page.getByRole('button', { name: '确认发布', exact: true }).first()
+    const appeared = await confirm.waitFor({ state: 'visible', timeout: 8_000 }).then(() => true).catch(() => false)
+    if (!appeared) return false
+    await confirm.click().catch(() => {})
+    return true
+  }
+
+  private async failure(page: Page): Promise<string> {
+    return describePageFailure(await capturePageFailure(page, this.dataDir, 'toutiao'))
   }
 
   async publish(state: PublisherStorageState, article: ToutiaoArticle, progress: Parameters<ToutiaoDriver['publish']>[2]) {
     const context = await this.context(state)
     let submitted = false
+    let page: Page | null = null
     try {
-      const page = await context.newPage()
+      page = await context.newPage()
+      const saves = watchSaves(page)
       await page.goto(PUBLISH, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await this.security(page)
       if (/auth\/page\/login|passport/.test(page.url())) throw expired()
@@ -270,58 +361,61 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
 
       if (article.mode === 'draft') {
         progress({ message: '正在保存今日头条草稿' })
-        const draft = page.getByRole('button', { name: /存草稿|保存草稿/ }).first()
-        if (!await draft.count()) throw new ApiError(502, 'toutiao_draft_unavailable', '今日头条编辑器没有找到存草稿按钮，平台页面可能已改版；请使用复制正文手动保存')
-        const draftResponse = page.waitForResponse(response => {
-          const url = new URL(response.url())
-          return url.hostname === 'mp.toutiao.com' && /draft/i.test(url.pathname) && response.request().method() === 'POST'
-        }, { timeout: 20_000 }).catch(() => null)
-        await draft.click()
-        const saved = await draftResponse
-        await page.waitForTimeout(1_000)
-        const body = await page.locator('body').innerText().catch(() => '')
-        if (!(saved?.ok() || /草稿保存成功|已保存草稿|保存成功/.test(body))) {
-          throw new ApiError(409, 'toutiao_draft_unconfirmed', '今日头条草稿保存请求已发出，但未确认成功；请到创作中心草稿箱核对')
-        }
-        return { state: await context.storageState(), status: 'draft' as const, remoteId: '', url: PUBLISH, message: '已保存到今日头条草稿箱' }
+        // 新版编辑器没有「存草稿」按钮：草稿由编辑器自动保存到云端（save=0）。
+        await page.locator('body').click({ position: { x: 4, y: 4 } }).catch(() => {})
+        const marker = saves.length
+        let saved = await waitForSave(saves.slice(marker), '0', 20_000)
+        saved ??= await waitForSave(saves, '0', 10_000)
+        if (!saved) throw new ApiError(502, 'toutiao_draft_unavailable', `今日头条没有返回草稿保存结果，编辑器可能已改版；${await this.failure(page)}`)
+        if (saved.code !== 0) throw new ApiError(502, 'toutiao_draft_failed', `今日头条草稿保存失败${saved.message ? `：${saved.message}` : ''}（code ${saved.code}）；${await this.failure(page)}`)
+        if (!/^\d{6,30}$/.test(saved.pgcId)) throw new ApiError(409, 'toutiao_draft_unconfirmed', `今日头条草稿已保存，但没有返回草稿编号；请到创作中心草稿箱核对；${await this.failure(page)}`)
+        return { state: await context.storageState(), status: 'draft' as const, remoteId: saved.pgcId, url: DRAFT_BOX, message: '已保存到今日头条草稿箱' }
       }
 
       progress({ message: '正在提交今日头条发布' })
-      const responsePromise = page.waitForResponse(response => {
-        const url = new URL(response.url())
-        return url.hostname === 'mp.toutiao.com' && /\/mp\/agw\/article\/publish\/?$/.test(url.pathname) && response.request().method() === 'POST'
-      }, { timeout: 60_000 }).catch(() => null)
-      const publishButton = page.getByRole('button', { name: /^(?:预览并发布|发布|发表)$/ }).first()
-      await publishButton.waitFor({ state: 'visible', timeout: 15_000 })
-      if (!await publishButton.isEnabled()) throw new ApiError(409, 'toutiao_publish_disabled', '今日头条发布按钮不可用，请检查标题、正文和账号状态')
-      submitted = true
-      await publishButton.click()
-      await page.waitForTimeout(1_000)
-      for (const label of ['确认发布', '确认', '发布']) {
-        const confirm = page.getByRole('button', { name: label, exact: true }).last()
-        if (await confirm.isVisible().catch(() => false)) { await confirm.click().catch(() => {}); break }
+      await this.dismiss(page)
+      let confirmed = await this.startPublish(page)
+      if (!confirmed) {
+        await this.preferNoCover(page)
+        confirmed = await this.startPublish(page)
       }
-      const response = await responsePromise
-      if (!response) {
+      if (!confirmed) throw new ApiError(502, 'toutiao_publish_unavailable', `今日头条没有进入发布确认流程，页面可能已改版；${await this.failure(page)}`)
+      submitted = true
+      const published = await waitForSave(saves, '1', 45_000)
+      if (!published) {
         const body = await page.locator('body').innerText().catch(() => '')
-        if (/发布成功|发表成功/.test(body)) throw new ApiError(409, 'toutiao_result_uncertain', '页面提示发布成功，但未取得文章编号；请到今日头条创作中心核对')
+        if (/发布成功|发表成功|提交成功/.test(body)) throw new ApiError(409, 'toutiao_result_uncertain', '页面提示已提交，但没有取到文章编号；请到创作中心核对')
         throw new ApiError(409, 'toutiao_result_uncertain', '已提交今日头条，但未确认发布结果；请到创作中心核对，避免重复发布')
       }
-      const data = object(await response.json().catch(() => null))
-      if (Number(data.code) === -100 || Number(data.code) === 401) throw expired()
-      if (Number(data.code ?? 0) !== 0) {
-        const message = typeof data.message === 'string' ? data.message : ''
-        throw new ApiError(502, 'toutiao_rejected', `今日头条未确认发布成功${message ? `：${message}` : ''}`)
-      }
-      const result = parseToutiaoPublished(data)
+      if (published.code === -100 || published.code === 401) throw expired()
+      if (published.code !== 0) throw new ApiError(502, 'toutiao_rejected', `今日头条未确认发布成功${published.message ? `：${published.message}` : ''}；${await this.failure(page)}`)
+      const result = parseToutiaoPublished({ code: 0, data: { pgc_id: published.pgcId } })
       if (!result) throw new ApiError(409, 'toutiao_result_uncertain', '今日头条已受理，但未返回有效文章编号；请到创作中心核对')
-      return { state: await context.storageState(), status: 'published' as const, remoteId: result.remoteId, url: result.url, message: '今日头条文章已发布' }
+      return { state: await context.storageState(), status: 'published' as const, remoteId: result.remoteId, url: result.url, message: '今日头条文章已提交发布' }
     } catch (error) {
       if (submitted && !(error instanceof ApiError && ['toutiao_session_expired', 'toutiao_security_check'].includes(error.code))) {
         throw new ApiError(409, 'toutiao_result_uncertain', error instanceof ApiError ? error.message : '今日头条提交后结果未确认；请到创作中心核对，避免重复发布')
       }
       if (error instanceof ApiError) throw error
-      throw new ApiError(502, 'toutiao_preparation_failed', '今日头条发布准备失败，尚未提交；请检查网络后重试')
+      throw new ApiError(502, 'toutiao_preparation_failed', `今日头条发布准备失败，尚未提交；请检查网络后重试${page ? `；${await this.failure(page)}` : ''}`)
+    } finally { await context.close().catch(() => {}) }
+  }
+
+  /** Remove the cloud draft created by the editor (draft_type 2 = 图文). */
+  async deleteDraft(state: PublisherStorageState, remoteId: string) {
+    if (!/^\d{6,30}$/.test(remoteId)) throw new ApiError(400, 'toutiao_draft_invalid', '今日头条草稿编号无效')
+    const context = await this.context(state)
+    try {
+      const response = await context.request.post(`${HOME}mp/agw/creator_center/delete_draft`, {
+        data: { drafts: [{ draft_type: 2, gid: remoteId }] },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', Referer: `${HOME}profile_v4/manage/draft` },
+        timeout: 30_000,
+      })
+      const payload = object(JSON.parse(await response.text().catch(() => '{}')))
+      if (Number(payload.code ?? -1) !== 0) {
+        throw new ApiError(502, 'toutiao_draft_delete_failed', `今日头条草稿删除失败${payload.message ? `：${String(payload.message)}` : ''}（code ${String(payload.code ?? '未知')}）`)
+      }
+      return { state: await context.storageState() }
     } finally { await context.close().catch(() => {}) }
   }
 

@@ -181,8 +181,18 @@ export class ToutiaoService {
     if (current.status === 'running') throw new ApiError(409, 'toutiao_delete_busy', '今日头条任务正在处理，请等待完成后再删除')
     if (current.status === 'uncertain') throw new ApiError(409, 'toutiao_delete_uncertain', '请先核实这条今日头条任务的结果，再删除发布记录')
     if (current.status === 'published') throw new ApiError(409, 'toutiao_delete_published', '已发布的今日头条文章不能通过这里删除；如需下架请到创作中心操作')
+    let remoteDeleted = false
+    if (current.status === 'draft' && current.remoteId) {
+      this.active.add(userId)
+      try {
+        const checked = await this.driver.deleteDraft(this.state(userId), current.remoteId)
+        const account = this.database.getToutiaoAccount(userId)
+        if (account) this.database.saveToutiaoAccount(userId, { ...account, encryptedSession: encryptPublisherSession(checked.state, this.key, userId), status: 'connected', checkedAt: now() })
+        remoteDeleted = true
+      } finally { this.active.delete(userId) }
+    }
     if (!this.database.deleteToutiaoPublication(userId, id)) throw notFound('今日头条发布记录不存在')
-    return { ok: true, remoteDeleted: false }
+    return { ok: true, remoteDeleted }
   }
 
   async resolve(userId: string, id: string, input: ToutiaoResolveInput): Promise<ToutiaoPublication> {

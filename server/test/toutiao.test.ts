@@ -29,6 +29,7 @@ function setup() {
     publish: vi.fn<ToutiaoDriver['publish']>().mockImplementation(async (_state, article) => article.mode === 'draft'
       ? { state, status: 'draft' as const, remoteId: '', url: 'https://mp.toutiao.com/profile_v4/graphic/publish', message: '草稿已保存' }
       : { state, status: 'published' as const, remoteId: '5000000000000001', url: 'https://www.toutiao.com/article/5000000000000001/', message: '今日头条文章已发布' }),
+    deleteDraft: vi.fn<ToutiaoDriver['deleteDraft']>().mockResolvedValue({ state }),
     close: vi.fn(async () => {}),
   }
   const service = new ToutiaoService(database, config, driver)

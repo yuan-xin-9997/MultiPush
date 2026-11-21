@@ -158,11 +158,11 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.zhihu = zhihu
   const weibo = new WeiboService(database, config, weiboDriver ?? new PlaywrightWeiboDriver())
   app.locals.weibo = weibo
-  const toutiao = new ToutiaoService(database, config, toutiaoDriver ?? new PlaywrightToutiaoDriver())
+  const toutiao = new ToutiaoService(database, config, toutiaoDriver ?? new PlaywrightToutiaoDriver(config.dataDir))
   app.locals.toutiao = toutiao
   const baijiahao = new BaijiahaoService(database, config, baijiahaoDriver ?? new PlaywrightBaijiahaoDriver())
   app.locals.baijiahao = baijiahao
-  const douban = new DoubanService(database, config, doubanDriver ?? new PlaywrightDoubanDriver())
+  const douban = new DoubanService(database, config, doubanDriver ?? new PlaywrightDoubanDriver(config.dataDir))
   app.locals.douban = douban
   const juejin = new JuejinService(database, config, juejinDriver ?? new PlaywrightJuejinDriver())
   app.locals.juejin = juejin

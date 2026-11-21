@@ -17,7 +17,8 @@ Environment=DATA_DIR=/opt/MultiPush/.data
 Environment=WEB_DIST=/opt/MultiPush/web/dist
 EnvironmentFile=-/opt/MultiPush/.env
 
-ExecStart=/usr/bin/node /opt/MultiPush/server/dist/index.js
+# 通过启动脚本运行：无 DISPLAY 时用 xvfb-run 提供虚拟显示（今日头条发布必需）。
+ExecStart=/opt/MultiPush/JenkinsConfig/run-multipush.sh
 
 Restart=on-failure
 RestartSec=3
