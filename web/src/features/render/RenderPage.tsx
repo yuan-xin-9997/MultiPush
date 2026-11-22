@@ -88,7 +88,7 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
 
-const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'douyin', 'sspai', 'blog']
+const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'bilibili', 'douyin', 'sspai', 'blog']
 
 const PICKER_UNFILED_ID = 'unfiled'
 
@@ -321,6 +321,93 @@ function DouyinScene({ render, author, exporting, onCopy }: DouyinSceneProps) {
         <button type="button" className="btn btn-sm btn-primary" onClick={onCopy} disabled={exporting}>
           <Copy size={14} />
           复制抖音文案
+        </button>
+      </div>
+    </div>
+  )
+}
+
+interface BilibiliSceneProps {
+  render: PlatformRender
+  author: string
+  exporting: boolean
+  onCopy: () => void
+}
+
+/** Bilibili video page / column article mockup. */
+function BilibiliScene({ render, author, exporting, onCopy }: BilibiliSceneProps) {
+  const isVideo = render.previewMode === 'video'
+  const video = render.videos[0]
+  const cover = render.assets.find((asset) => asset.kind === 'image')?.url
+  const body = (render.text ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && line !== render.title.trim() && !hasOnlyTags(line))
+    .join('\n')
+
+  return (
+    <div className="bilibili-scene">
+      <div className="bilibili-shell">
+        <div className="bilibili-nav">
+          <span className="bilibili-logo">bilibili</span>
+          <span className="bilibili-search">搜索视频、专栏、UP主</span>
+          <span className="bilibili-nav-actions">⌕　▤　{author.slice(0, 1)}</span>
+        </div>
+        <div className="bilibili-page">
+          {isVideo ? (
+            <div className="bilibili-player">
+              {video ? (
+                <video controls playsInline poster={cover ? absoluteUrl(cover) : undefined} src={absoluteUrl(video)} />
+              ) : (
+                <div className="bilibili-player-placeholder">
+                  <Play size={28} />
+                  <span>尚未导出成片</span>
+                  <small>导出 MP4 后即可在 B 站视频页预览</small>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bilibili-cover">
+              {cover ? <img src={absoluteUrl(cover)} alt="" /> : <span>B 站专栏封面</span>}
+            </div>
+          )}
+
+          <div className={`bilibili-content${isVideo ? ' is-video' : ''}`}>
+            <h1>{render.title || '无标题视频'}</h1>
+            <div className="bilibili-meta">
+              <span className="bilibili-avatar">{author.slice(0, 1)}</span>
+              <span className="bilibili-author">{author}</span>
+              <span>{isVideo ? '视频投稿 · 刚刚' : '专栏图文 · 刚刚'}</span>
+              <span className="bilibili-stat">播放 1.2万 · 弹幕 88</span>
+            </div>
+            {isVideo ? (
+              <p className="bilibili-desc">{body || '视频简介会显示在这里；标题、简介和标签会随投稿一起提交。'}</p>
+            ) : (
+              <div className="bilibili-article-body" dangerouslySetInnerHTML={{ __html: render.html }} />
+            )}
+            {render.meta.tags.length > 0 ? (
+              <div className="bilibili-tags">
+                {render.meta.tags.slice(0, 10).map((tag) => (
+                  <span key={tag}>{tag}</span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+      <div className="bilibili-side-note">
+        <span className="bilibili-side-icon">
+          <PlatformGlyph platform="bilibili" size={18} />
+        </span>
+        <h3>{isVideo ? 'B 站视频投稿' : 'B 站专栏 / 图文'}</h3>
+        <p>
+          {isVideo
+            ? '16:9 视频页预览。投稿需要 MP4 成片、16:9 封面、标题（≤80 字）、简介和最多 10 个标签。'
+            : '专栏/opus 图文预览。标题建议不超过 40 字，正文图片会转存到 B 站图床。'}
+        </p>
+        <button type="button" className="btn btn-sm btn-primary" onClick={onCopy} disabled={exporting}>
+          <Copy size={14} />
+          {isVideo ? '复制投稿文案' : '复制图文 Markdown'}
         </button>
       </div>
     </div>
@@ -949,6 +1036,11 @@ export default function RenderPage() {
         toast.success('知乎 Markdown 已复制')
         return
       }
+      if (activeRender.platform === 'bilibili') {
+        await copyText(activeRender.markdown || activeRender.text || activeRender.html)
+        toast.success(activeRender.previewMode === 'video' ? 'B 站投稿文案已复制' : 'B 站图文 Markdown 已复制')
+        return
+      }
       if (activeRender.platform === 'douyin') {
         await copyText(activeRender.text || activeRender.html)
         toast.success('抖音文案已复制')
@@ -1389,6 +1481,10 @@ export default function RenderPage() {
                             ? '微博图文'
                             : activeRender.platform === 'toutiao'
                               ? '今日头条图文'
+                            : activeRender.platform === 'bilibili'
+                              ? activeRender.previewMode === 'video'
+                                ? 'B站视频'
+                                : 'B站专栏图文'
                             : activeRender.platform === 'douyin'
                               ? activeRender.videos.length > 0
                                 ? '抖音视频'
@@ -1428,6 +1524,13 @@ export default function RenderPage() {
 
                 {activeRender.platform === 'weibo' ? (
                   <WeiboScene
+                    render={activeRender}
+                    author={authorLabel}
+                    exporting={Boolean(exporting)}
+                    onCopy={() => void copyCurrent()}
+                  />
+                ) : activeRender.platform === 'bilibili' ? (
+                  <BilibiliScene
                     render={activeRender}
                     author={authorLabel}
                     exporting={Boolean(exporting)}
@@ -2092,6 +2195,7 @@ export default function RenderPage() {
                   {activeRender.platform === 'weibo' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=weibo&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到微博</button> : null}
                   {activeRender.platform === 'toutiao' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=toutiao&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到今日头条</button> : null}
                   {activeRender.platform === 'baijiahao' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=baijiahao&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到百家号</button> : null}
+                  {activeRender.platform === 'bilibili' && renderId ? <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate(`/publish?platform=bilibili&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到 B 站</button> : null}
                   {activeRender.platform === 'douyin' && renderId ? <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate(`/publish?platform=douyin&renderId=${encodeURIComponent(renderId)}`)}>发布到抖音</button> : null}
                   {activeRender.platform === 'zhihu' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=zhihu&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到知乎</button> : null}
                   {activeRender.platform === 'sspai' && renderId ? <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/publish?platform=sspai&renderId=${encodeURIComponent(renderId)}`)}><Share2 size={14} />发布到少数派</button> : null}

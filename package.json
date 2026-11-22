@@ -15,7 +15,7 @@
     "start": "npm run start -w server",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "test": "npm run test -w server && npm run test -w web",
-    "test:publish-ui": "node scripts/smoke-douyin-publish.mjs && node scripts/smoke-wechat-publish.mjs && node scripts/smoke-wechatpic-publish.mjs && node scripts/smoke-zhihu-publish.mjs && node scripts/smoke-sspai-publish.mjs && node scripts/smoke-blog-publish.mjs && node scripts/smoke-xiaohongshu-publish.mjs && node scripts/smoke-weibo-publish.mjs && node scripts/smoke-toutiao-publish.mjs && node scripts/smoke-baijiahao-publish.mjs && node scripts/smoke-figure-captions.mjs && node scripts/smoke-douban-ui.mjs && node scripts/smoke-juejin-jianshu-ui.mjs && node scripts/smoke-draft-modes-ui.mjs",
+    "test:publish-ui": "node scripts/smoke-douyin-publish.mjs && node scripts/smoke-wechat-publish.mjs && node scripts/smoke-wechatpic-publish.mjs && node scripts/smoke-zhihu-publish.mjs && node scripts/smoke-sspai-publish.mjs && node scripts/smoke-blog-publish.mjs && node scripts/smoke-xiaohongshu-publish.mjs && node scripts/smoke-weibo-publish.mjs && node scripts/smoke-toutiao-publish.mjs && node scripts/smoke-baijiahao-publish.mjs && node scripts/smoke-figure-captions.mjs && node scripts/smoke-douban-ui.mjs && node scripts/smoke-juejin-jianshu-ui.mjs && node scripts/smoke-draft-modes-ui.mjs && node scripts/smoke-bilibili-ui.mjs",
     "smoke:ai-attachments": "npm run build && node scripts/smoke-ai-attachments.mjs",
     "smoke:ai-mobile": "npm run build && node scripts/smoke-ai-mobile-ui.mjs",
     "smoke:ai-gateway": "npm run build && node scripts/smoke-ai-gateway-ui.mjs",
@@ -37,13 +37,14 @@
     "smoke:sms-login-selectors": "npx tsx scripts/smoke-sms-login-selectors.mts",
     "smoke:douban": "npm run build && node scripts/smoke-douban-ui.mjs",
     "smoke:juejin-jianshu": "npm run build && node scripts/smoke-juejin-jianshu-ui.mjs",
-    "smoke:draft-modes": "npm run build && node scripts/smoke-draft-modes-ui.mjs",
+    "smoke:draft-modes": "npm run build && node scripts/smoke-draft-modes-ui.mjs && node scripts/smoke-bilibili-ui.mjs",
     "smoke:video": "node scripts/smoke-video.mjs",
     "smoke:video-ui": "npm run build && node scripts/smoke-video-ui.mjs",
     "smoke:gallery": "npm run build && node scripts/smoke-gallery-ui.mjs",
     "smoke:assets": "npm run build && node scripts/smoke-assets-ui.mjs",
     "smoke:media-picker": "npm run build && node scripts/smoke-media-picker-ui.mjs",
-    "smoke:v2ex": "npm run build && node scripts/smoke-v2ex-ui.mjs"
+    "smoke:v2ex": "npm run build && node scripts/smoke-v2ex-ui.mjs",
+    "smoke:bilibili": "npm run build && node scripts/smoke-bilibili-ui.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

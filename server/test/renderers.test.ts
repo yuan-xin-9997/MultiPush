@@ -39,7 +39,7 @@ function content(overrides: Partial<ContentDetail> = {}): ContentDetail {
 
 const options: RenderOptions = { cardStyle: 'clean', includeTags: true }
 
-function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
+function input(platforms: ('wechat' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'bilibili' | 'douyin' | 'sspai' | 'blog')[], overrides: Partial<ContentDetail> = {}) {
   return {
     content: content(overrides),
     platforms,
@@ -349,6 +349,32 @@ describe('renderPlatforms', () => {
     )
     expect(result.videos[0]).toBe('http://192.168.0.111:34080/uploads/demo.mp4')
     expect(result.warnings.some((warning) => warning.includes('视频版本'))).toBe(true)
+  })
+
+  it('renders Bilibili column/opus article with title limit, Markdown and downloads', async () => {
+    const [result] = await renderPlatforms(input(['bilibili'], { title: '这是一篇超过四十个字的 B 站专栏标题，用来验证标题会被截断而不影响正文内容' }))
+    expect(result.platform).toBe('bilibili')
+    expect(result.previewMode).toBe('article')
+    expect(Array.from(result.title).length).toBeLessThanOrEqual(40)
+    expect(result.markdown).toContain('# ')
+    expect(result.markdown).toContain('核心流程')
+    expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'markdown', 'text', 'json'])
+    expect(result.html).toContain('00aeec')
+  })
+
+  it('renders Bilibili video page with the exported cut and publish metadata', async () => {
+    const base = input(['bilibili'], {
+      kind: 'video',
+      contentHtml: '<p>这条视频记录了一次完整的创作流程。</p>',
+      videoCount: 2,
+    })
+    const [result] = await renderPlatforms({ ...base, videoUrl: '/uploads/export-cut.mp4' })
+    expect(result.platform).toBe('bilibili')
+    expect(result.previewMode).toBe('video')
+    expect(result.videos[0]).toBe('http://192.168.0.111:34080/uploads/export-cut.mp4')
+    expect(result.html).toContain('export-cut.mp4')
+    expect(result.text).toContain('完整的创作流程')
+    expect(result.downloads.map((download) => download.kind)).toEqual(['html', 'text', 'json'])
   })
 
   it('sanitizes scripts and javascript URLs', async () => {

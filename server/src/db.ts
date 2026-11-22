@@ -66,6 +66,9 @@ import type {
   BatchJobItem,
   BatchJobKind,
   BatchJobStatus,
+  BilibiliPublication,
+  BilibiliPublicationType,
+  BilibiliPublicationStatus,
 } from '../../shared/types'
 import { PLATFORM_ORDER } from '../../shared/types'
 import { DEFAULT_BOOK_COLOR } from './config'
@@ -295,6 +298,30 @@ export interface CreateRenderValues {
   options: RenderOptions
   platformOptions?: PlatformOptionOverrides
   results: RenderRecord['results']
+}
+
+export interface CreateBilibiliPublicationValues {
+  renderId: string
+  title: string
+  type: BilibiliPublicationType
+  mode: 'draft' | 'publish'
+  idempotencyKey: string
+}
+
+export interface BilibiliAccountSession {
+  encryptedSession: string
+  accountId: string
+  name: string | null
+  status: 'connected' | 'expired'
+  checkedAt: string
+}
+
+export interface BilibiliResolutionRecord {
+  id: string
+  action: 'check' | 'not_published' | 'published'
+  message: string
+  articleUrl: string | null
+  createdAt: string
 }
 
 export interface WechatAccountSession {
@@ -1212,7 +1239,42 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_v2ex_resolutions_publication ON v2ex_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 21;
+      CREATE TABLE IF NOT EXISTS bilibili_accounts (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_session TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        name TEXT,
+        status TEXT NOT NULL CHECK (status IN ('connected', 'expired')),
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS bilibili_publications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        render_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('video', 'article')),
+        mode TEXT NOT NULL CHECK (mode IN ('draft', 'publish')),
+        status TEXT NOT NULL CHECK (status IN ('running', 'draft', 'reviewing', 'published', 'failed', 'uncertain')),
+        message TEXT NOT NULL,
+        url TEXT,
+        remote_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_bilibili_publications_user_created ON bilibili_publications(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS bilibili_publication_resolutions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        publication_id TEXT NOT NULL REFERENCES bilibili_publications(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN ('check', 'not_published', 'published')),
+        message TEXT NOT NULL,
+        article_url TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_bilibili_resolutions_publication ON bilibili_publication_resolutions(publication_id, created_at DESC);
+      PRAGMA user_version = 22;
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
@@ -1249,6 +1311,8 @@ export class Database {
       ['服务已重启，请先核对掘金草稿与文章发布结果，系统不会自动重复发布。', nowIso()])
     this.run(`UPDATE jianshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
       ['服务已重启，请先核对简书草稿与文章发布结果，系统不会自动重复发布。', nowIso()])
+    this.run(`UPDATE bilibili_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
+      ['服务已重启，请先核对 B 站投稿/专栏是否已提交，避免重复发布。', nowIso()])
     this.run(`UPDATE v2ex_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
       ['服务已重启，请先核实 V2EX 主题是否已发布，避免重复发布。', nowIso()])
     this.run(`UPDATE csdn_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`,
@@ -3286,6 +3350,84 @@ export class Database {
       if (!current || !['uncertain', 'running'].includes(current.status)) return null
       this.run('INSERT INTO v2ex_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
       return this.updateV2exPublication(userId, id, values)
+    })
+  }
+
+  getBilibiliAccount(userId: string): BilibiliAccountSession | null {
+    const row = this.get('SELECT * FROM bilibili_accounts WHERE user_id = ?', [userId])
+    return row ? { encryptedSession: text(row.encrypted_session), accountId: text(row.account_id), name: nullableText(row.name), status: row.status === 'expired' ? 'expired' : 'connected', checkedAt: text(row.checked_at) } : null
+  }
+
+  saveBilibiliAccount(userId: string, values: BilibiliAccountSession): void {
+    this.run(`INSERT INTO bilibili_accounts (user_id, encrypted_session, account_id, name, status, checked_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET encrypted_session = excluded.encrypted_session,
+      account_id = excluded.account_id, name = excluded.name, status = excluded.status, checked_at = excluded.checked_at`,
+      [userId, values.encryptedSession, values.accountId, values.name, values.status, values.checkedAt])
+  }
+
+  deleteBilibiliAccount(userId: string): void { this.run('DELETE FROM bilibili_accounts WHERE user_id = ?', [userId]) }
+
+  private mapBilibiliPublication(row: Row): BilibiliPublication {
+    return {
+      id: text(row.id),
+      renderId: text(row.render_id),
+      title: text(row.title),
+      type: row.type as BilibiliPublicationType,
+      status: row.status as BilibiliPublicationStatus,
+      message: text(row.message),
+      url: nullableText(row.url),
+      remoteId: nullableText(row.remote_id),
+      createdAt: text(row.created_at),
+      updatedAt: text(row.updated_at),
+    }
+  }
+
+  createBilibiliPublication(userId: string, values: CreateBilibiliPublicationValues): BilibiliPublication {
+    const createdAt = nowIso()
+    this.run(`INSERT INTO bilibili_publications (id, user_id, render_id, title, type, mode, status, message, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?) ON CONFLICT(user_id, idempotency_key) DO NOTHING`,
+      [randomUUID(), userId, values.renderId, values.title, values.type, values.mode, '正在准备 B 站发布', values.idempotencyKey, createdAt, createdAt])
+    const publication = this.findBilibiliPublication(userId, values.idempotencyKey)
+    if (!publication) throw new Error('Failed to create Bilibili publication')
+    return publication
+  }
+
+  getBilibiliPublication(userId: string, id: string): BilibiliPublication | null {
+    const row = this.get('SELECT * FROM bilibili_publications WHERE id = ? AND user_id = ?', [id, userId])
+    return row ? this.mapBilibiliPublication(row) : null
+  }
+
+  findBilibiliPublication(userId: string, key: string): BilibiliPublication | null {
+    const row = this.get('SELECT * FROM bilibili_publications WHERE user_id = ? AND idempotency_key = ?', [userId, key])
+    return row ? this.mapBilibiliPublication(row) : null
+  }
+
+  hasUncertainBilibiliPublication(userId: string): boolean {
+    return !!this.get("SELECT id FROM bilibili_publications WHERE user_id = ? AND status = 'uncertain' LIMIT 1", [userId])
+  }
+
+  listBilibiliPublications(userId: string): BilibiliPublication[] {
+    return this.all('SELECT * FROM bilibili_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapBilibiliPublication(row))
+  }
+
+  updateBilibiliPublication(userId: string, id: string, values: Partial<Pick<BilibiliPublication, 'status' | 'message' | 'url' | 'remoteId'>>): BilibiliPublication | null {
+    const current = this.getBilibiliPublication(userId, id)
+    if (!current) return null
+    this.run(`UPDATE bilibili_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    return this.getBilibiliPublication(userId, id)
+  }
+
+  deleteBilibiliPublication(userId: string, id: string): boolean {
+    return this.run('DELETE FROM bilibili_publications WHERE id = ? AND user_id = ?', [id, userId]) > 0
+  }
+
+  resolveBilibiliPublication(userId: string, id: string, action: 'check' | 'not_published' | 'published', values: Pick<BilibiliPublication, 'status' | 'message' | 'url' | 'remoteId'>): BilibiliPublication | null {
+    return this.transaction(() => {
+      const current = this.getBilibiliPublication(userId, id)
+      if (!current || !['uncertain', 'running'].includes(current.status)) return null
+      this.run('INSERT INTO bilibili_publication_resolutions (id,user_id,publication_id,action,message,article_url,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), userId, id, action, values.message, action === 'published' || values.status === 'published' ? values.url : null, nowIso()])
+      return this.updateBilibiliPublication(userId, id, values)
     })
   }
 

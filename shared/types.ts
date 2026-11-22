@@ -6,7 +6,7 @@
  * dependencies so it can be used in either environment.
  */
 
-export type PlatformId = 'wechat' | 'wechatpic' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'v2ex' | 'douyin' | 'sspai' | 'blog'
+export type PlatformId = 'wechat' | 'wechatpic' | 'xiaohongshu' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'juejin' | 'csdn' | 'jianshu' | 'v2ex' | 'bilibili' | 'douyin' | 'sspai' | 'blog'
 
 export type ContentStatus = 'draft' | 'ready'
 
@@ -168,6 +168,17 @@ export const PLATFORMS: PlatformInfo[] = [
     contentTypes: ['image-text'],
     highlight: '论坛主题 · Markdown · 节点 · 浏览器发布',
     limits: { titleMax: 120, bodyMax: 20000, imageMax: 100 },
+  },
+  {
+    id: 'bilibili',
+    name: '哔哩哔哩',
+    shortName: 'B站',
+    description: '生成 B 站视频投稿或专栏图文排版，支持视频/图文预览、下载与浏览器自动发布。',
+    color: '#00aeec',
+    softColor: '#e6f7fd',
+    contentTypes: ['image-text', 'video'],
+    highlight: '视频投稿 · 专栏图文 · 16:9',
+    limits: { titleMax: 80, bodyMax: 40000, imageMax: 100 },
   },
   {
     id: 'douyin',
@@ -1561,6 +1572,79 @@ export interface BatchJob {
   updatedAt: string
 }
 
+export type BilibiliPublicationType = 'video' | 'article'
+export type BilibiliPublicationStatus = 'running' | 'draft' | 'reviewing' | 'published' | 'failed' | 'uncertain'
+
+export interface BilibiliAccount {
+  status: 'disconnected' | 'connected' | 'expired'
+  name: string | null
+  checkedAt: string | null
+}
+
+export interface BilibiliLogin {
+  id: string
+  status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'
+  qrCode: string | null
+  message: string
+  expiresAt: string
+}
+
+export interface BilibiliPublishInput {
+  renderId: string
+  type: BilibiliPublicationType
+  mode: 'draft' | 'publish'
+  videoMediaId?: string
+  coverMediaId?: string
+  title?: string
+  desc?: string
+  tags?: string
+  partitionId?: number
+}
+
+export interface BilibiliPublication {
+  id: string
+  renderId: string
+  title: string
+  type: BilibiliPublicationType
+  status: BilibiliPublicationStatus
+  message: string
+  url: string | null
+  remoteId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BilibiliResolveInput {
+  action: 'check' | 'not_published' | 'published'
+  videoUrl?: string
+}
+
+export interface BilibiliPartition {
+  id: number
+  name: string
+}
+
+export const BILIBILI_PARTITIONS: BilibiliPartition[] = [
+  { id: 231, name: '科技 · 计算机技术' },
+  { id: 230, name: '科技 · 软件应用' },
+  { id: 229, name: '科技 · 野生技术协会' },
+  { id: 122, name: '知识 · 科学科普' },
+  { id: 201, name: '知识 · 社科法律心理' },
+  { id: 124, name: '知识 · 财经商业' },
+  { id: 228, name: '知识 · 校园学习' },
+  { id: 207, name: '知识 · 职业职场' },
+  { id: 208, name: '知识 · 设计创意' },
+  { id: 209, name: '知识 · 野生技能协会' },
+  { id: 21, name: '生活 · 日常' },
+  { id: 138, name: '搞笑' },
+  { id: 188, name: '数码 · 手机平板' },
+  { id: 95, name: '数码' },
+  { id: 182, name: '影视 · 影视杂谈' },
+  { id: 183, name: '影视 · 影视剪辑' },
+  { id: 85, name: '影视 · 短片' },
+  { id: 181, name: '影视 · 预告资讯' },
+]
+
 export interface BatchRenderInput {
   contentIds: string[]
   platforms: PlatformId[]
@@ -1593,4 +1677,4 @@ export interface ApiErrorBody {
   issues?: Array<{ path: string; message: string }>
 }
 
-export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'douyin', 'sspai', 'blog']
+export const PLATFORM_ORDER: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'bilibili', 'douyin', 'sspai', 'blog']

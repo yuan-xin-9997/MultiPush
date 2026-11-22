@@ -1,4 +1,4 @@
-import { AtSign, BookMarked, BookOpen, Code2, Feather, FileCode2, Globe2, Heart, Images, MessageCircle, MessageSquare, Music2, Newspaper, Rss, Search } from 'lucide-react'
+import { AtSign, BookMarked, BookOpen, Code2, Feather, FileCode2, Globe2, Heart, Images, MessageCircle, MessageSquare, Music2, Newspaper, Rss, Search, Tv } from 'lucide-react'
 import type { PlatformId } from '@shared/types'
 
 interface PlatformGlyphProps {
@@ -47,6 +47,9 @@ export default function PlatformGlyph({
   }
   if (platform === 'v2ex') {
     return <MessageSquare size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
+  }
+  if (platform === 'bilibili') {
+    return <Tv size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
   }
   if (platform === 'douyin') {
     return <Music2 size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />

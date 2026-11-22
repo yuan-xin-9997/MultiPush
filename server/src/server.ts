@@ -81,6 +81,7 @@ export async function startMultiPushServer(overrides: ConfigOverrides = {}): Pro
     try { await app.locals.csdn.close() } catch { /* ignore */ }
     try { await app.locals.jianshu.close() } catch { /* ignore */ }
     try { await app.locals.v2ex.close() } catch { /* ignore */ }
+    try { app.locals.bilibili?.close() } catch { /* ignore */ }
     try { await app.locals.sspai.close() } catch { /* ignore */ }
     try { await app.locals.blog.close() } catch { /* ignore */ }
     try { await app.locals.batch.close() } catch { /* ignore */ }
