@@ -16,6 +16,7 @@ import {
   Scissors,
   SkipBack,
   SkipForward,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react'
@@ -142,6 +143,7 @@ export default function VideoWorkspacePage() {
   const [exports, setExports] = useState<VideoExport[]>([])
   const [exporting, setExporting] = useState(false)
   const [exportsOpen, setExportsOpen] = useState(false)
+  const [studioOpening, setStudioOpening] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const materialVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -755,6 +757,19 @@ export default function VideoWorkspacePage() {
             ? `已保存 ${formatDateTime(lastSavedAt)}`
             : '已保存'
 
+  const openStudio = useCallback(async () => {
+    if (!id || studioOpening) return
+    setStudioOpening(true)
+    try {
+      const metaSaved = await saveMeta(true)
+      const timelineSaved = await saveTimeline(true)
+      if (!metaSaved || !timelineSaved) return
+      navigate(`/video/${id}/studio`)
+    } finally {
+      setStudioOpening(false)
+    }
+  }, [id, navigate, saveMeta, saveTimeline, studioOpening])
+
   // ------------------------------------------------------------- render
 
   if (loading) {
@@ -847,6 +862,10 @@ export default function VideoWorkspacePage() {
             {overallState === 'saving' ? <LoaderCircle size={13} className="spin" /> : null}
             {saveLabel}
           </span>
+          <button type="button" className="btn" onClick={() => void openStudio()} disabled={studioOpening}>
+            {studioOpening ? <LoaderCircle size={15} className="spin" /> : <Sparkles size={15} />}
+            新版剪辑（试验）
+          </button>
           <button type="button" className="btn" onClick={() => setExportsOpen(true)}>
             <Download size={15} />
             导出记录{exports.length > 0 ? ` (${exports.length})` : ''}

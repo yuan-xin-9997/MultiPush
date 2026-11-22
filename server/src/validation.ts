@@ -139,6 +139,14 @@ export const videoExportBodySchema = z.object({
   source: z.enum(['timeline', 'materials']).optional(),
 }).strict()
 
+export const videoStudioSchema = z.object({
+  project: z.object({
+    version: z.number().int().min(1),
+    tracks: z.array(z.unknown()).max(100, '剪辑轨道不能超过 100 条'),
+  }).catchall(z.unknown()),
+  clips: videoTimelineSchema.shape.clips,
+})
+
 export const videoExportParamsSchema = z.object({ id: z.string().max(100), exportId: z.string().max(100) })
 export const videoContentParamsSchema = z.object({ id: z.string().max(100) })
 export const videoExportListQuerySchema = z.object({}).partial()

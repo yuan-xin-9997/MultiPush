@@ -99,6 +99,7 @@ try {
   const url = page.url()
   assert.match(url, /\/video\//, 'new video content should open the workspace')
   await page.waitForSelector('.video-workspace, .video-page', { timeout: 20_000 })
+  await page.waitForSelector('.video-mode-switch', { timeout: 30_000 })
 
   // Upload two clips through the file input.
   const input = page.locator('input[type="file"][accept*="video"]')

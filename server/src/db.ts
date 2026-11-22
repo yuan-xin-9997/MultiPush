@@ -280,6 +280,12 @@ export interface SaveVideoProjectValues {
   materials?: string[] | null
 }
 
+export interface SaveVideoStudioValues {
+  clips: StoredVideoClip[]
+  /** Opaque Twick ProjectJSON; validated at the API boundary. */
+  project: Record<string, unknown>
+}
+
 export interface CreateVideoExportValues {
   contentId: string
   timeline: StoredVideoClip[]
@@ -596,6 +602,7 @@ export class Database {
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         timeline_json TEXT NOT NULL DEFAULT '[]',
         materials_json TEXT,
+        studio_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -1277,7 +1284,7 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_bilibili_resolutions_publication ON bilibili_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 23;
+      PRAGMA user_version = 24;
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
@@ -1287,6 +1294,7 @@ export class Database {
     this.ensureMediaFolders()
     this.ensureDoubanPublicationColumns()
     this.ensureAiColumns()
+    this.ensureVideoStudioColumn()
     this.ensureRenderPlatformOptions()
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     this.run(`UPDATE douyin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先核实抖音发布结果，避免重复发布。', nowIso()])
@@ -1332,6 +1340,14 @@ export class Database {
     if (!columns.has('mode')) this.database.exec("ALTER TABLE douban_publications ADD COLUMN mode TEXT NOT NULL DEFAULT 'publish'")
   }
 
+  /** Additive migration for the Twick-based studio project snapshot. */
+  private ensureVideoStudioColumn(): void {
+    const columns = new Set(this.all('PRAGMA table_info(video_projects)').map((row) => text(row.name)))
+    if (!columns.has('studio_json')) {
+      this.database.exec('ALTER TABLE video_projects ADD COLUMN studio_json TEXT')
+    }
+  }
+
   /** Additive migration for per-platform render settings on older databases. */
   private ensureRenderPlatformOptions(): void {
     const columns = new Set(this.all('PRAGMA table_info(renders)').map((row) => text(row.name)))
@@ -1364,17 +1380,18 @@ export class Database {
     }
   }
 
+  /** Additive migration for raw video material order. */
+  private ensureVideoMaterialsColumn(): void {
+    const columns = new Set(this.all('PRAGMA table_info(video_projects)').map((row) => text(row.name)))
+    if (!columns.has('materials_json')) this.run('ALTER TABLE video_projects ADD COLUMN materials_json TEXT')
+  }
+
   /**
    * Older databases constrain `contents.kind` to article/video. SQLite cannot
    * alter a CHECK constraint in place, so rebuild the table once to allow the
    * image-first `gallery` kind. Foreign keys are disabled only for the rebuild
    * and checked again before returning.
    */
-  private ensureVideoMaterialsColumn(): void {
-    const columns = new Set(this.all('PRAGMA table_info(video_projects)').map((row) => text(row.name)))
-    if (!columns.has('materials_json')) this.run('ALTER TABLE video_projects ADD COLUMN materials_json TEXT')
-  }
-
   private ensureGalleryKind(): void {
     const row = this.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'contents'")
     const tableSql = text(row?.sql)
@@ -2187,6 +2204,18 @@ export class Database {
     }
   }
 
+  /** Full studio project snapshot (Twick ProjectJSON) plus compatibility clips. */
+  getVideoStudioProjectRow(userId: string, contentId: string): { clips: StoredVideoClip[]; project: Record<string, unknown> | null; updatedAt: string } {
+    const row = this.get('SELECT timeline_json, studio_json, updated_at FROM video_projects WHERE content_id = ? AND user_id = ?', [contentId, userId])
+    if (!row) return { clips: [], project: null, updatedAt: '' }
+    const parsed = parseJson(row.studio_json)
+    return {
+      clips: this.mapStoredClips(parseJson(row.timeline_json)),
+      project: parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null,
+      updatedAt: text(row.updated_at),
+    }
+  }
+
   saveVideoProject(userId: string, contentId: string, values: SaveVideoProjectValues): StoredVideoClip[] {
     const now = nowIso()
     this.transaction(() => {
@@ -2206,15 +2235,39 @@ export class Database {
     return values.clips
   }
 
+  /**
+   * Save a studio project and the compatibility clip list together. The clip
+   * list keeps the existing export, publish and AI tooling working while the
+   * studio project stores the full multi-track edit.
+   */
+  saveVideoStudioProject(userId: string, contentId: string, values: SaveVideoStudioValues): StoredVideoClip[] {
+    const now = nowIso()
+    this.transaction(() => {
+      this.run(
+        `INSERT INTO video_projects (content_id, user_id, timeline_json, studio_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(content_id) DO UPDATE SET
+           timeline_json = excluded.timeline_json,
+           studio_json = excluded.studio_json,
+           updated_at = excluded.updated_at`,
+        [contentId, userId, JSON.stringify(values.clips), JSON.stringify(values.project), now, now],
+      )
+      this.run('UPDATE contents SET video_count = ?, updated_at = ? WHERE id = ? AND user_id = ?', [
+        values.clips.length, now, contentId, userId,
+      ])
+    })
+    return values.clips
+  }
+
   /** Copy the timeline to a duplicated content (content duplicate feature). */
   copyVideoProject(userId: string, fromContentId: string, toContentId: string): void {
-    const source = this.get('SELECT timeline_json, materials_json FROM video_projects WHERE content_id = ? AND user_id = ?', [fromContentId, userId])
+    const source = this.get('SELECT timeline_json, materials_json, studio_json FROM video_projects WHERE content_id = ? AND user_id = ?', [fromContentId, userId])
     if (!source) return
     const now = nowIso()
     this.run(
-      `INSERT INTO video_projects (content_id, user_id, timeline_json, materials_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [toContentId, userId, text(source.timeline_json), source.materials_json == null ? null : text(source.materials_json), now, now],
+      `INSERT INTO video_projects (content_id, user_id, timeline_json, materials_json, studio_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [toContentId, userId, text(source.timeline_json), source.materials_json == null ? null : text(source.materials_json), source.studio_json == null ? null : text(source.studio_json), now, now],
     )
   }
 

@@ -1,0 +1,72 @@
+.video-studio-page {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  overflow: hidden;
+  background: #0a0a0f;
+}
+
+.video-studio-page .studio-container {
+  width: 100%;
+  height: 100%;
+}
+
+.video-studio-loading {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #0f1015;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.video-studio-loading p {
+  max-width: 520px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.video-studio-loading .btn {
+  margin-top: 6px;
+}
+
+.video-studio-floating {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 10002;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(20, 21, 28, 0.92);
+  color: #cbd5e1;
+  font-size: 11px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.video-studio-floating.is-saving {
+  color: #fbbf24;
+}
+
+.video-studio-floating.is-error {
+  color: #f87171;
+}
+
+.video-studio-floating .btn {
+  height: 26px;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  font-size: 10.5px;
+}
+
+.video-studio-floating .btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}

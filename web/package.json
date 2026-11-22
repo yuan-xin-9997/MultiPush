@@ -30,6 +30,7 @@
     "@tiptap/pm": "^2.27.3",
     "@tiptap/react": "^2.27.3",
     "@tiptap/starter-kit": "^2.27.3",
+    "@twick/studio": "0.15.31",
     "html-to-image": "^1.11.13",
     "jszip": "^3.10.1",
     "lucide-react": "^0.545.0",

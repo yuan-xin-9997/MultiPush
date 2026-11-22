@@ -35,6 +35,7 @@ import type {
   VideoClipInput,
   VideoExport,
   VideoProject,
+  VideoStudioProject,
   WechatAccount,
   WechatLogin,
   WechatPublication,
@@ -347,6 +348,13 @@ export const api = {
       request<{ project: VideoProject }>(`/api/contents/${encodeURIComponent(contentId)}/video/timeline`, {
         method: 'PUT',
         body: JSON.stringify({ clips }),
+      }),
+    getStudio: (contentId: string) =>
+      request<{ project: VideoStudioProject; capability: VideoCapability }>(`/api/contents/${encodeURIComponent(contentId)}/video/studio`, { cache: 'no-store' }),
+    saveStudio: (contentId: string, project: Record<string, unknown>, clips: VideoClipInput[]) =>
+      request<{ project: VideoStudioProject }>(`/api/contents/${encodeURIComponent(contentId)}/video/studio`, {
+        method: 'PUT',
+        body: JSON.stringify({ project, clips }),
       }),
     createExport: (contentId: string, source: 'timeline' | 'materials' = 'timeline') =>
       request<{ export: VideoExport }>(`/api/contents/${encodeURIComponent(contentId)}/video/export`, { method: 'POST', body: JSON.stringify({ source }) }),

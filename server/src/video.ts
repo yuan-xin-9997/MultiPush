@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } 
 import path from 'node:path'
 import type { AppConfig } from './config'
 import type { Database, MediaProbeMeta, StoredVideoClip } from './db'
-import type { VideoCapability, VideoClipDetail, VideoClipInput, VideoExport, VideoMaterial, VideoProject } from '../../shared/types'
+import type { VideoCapability, VideoClipDetail, VideoClipInput, VideoExport, VideoMaterial, VideoProject, VideoStudioProject } from '../../shared/types'
 import { ApiError, notFound } from './errors'
 
 const MAX_EXPORT_DURATION_SECONDS = 2 * 60 * 60
@@ -141,16 +141,8 @@ export class VideoService {
     }
   }
 
-  /**
-   * Replace the whole timeline. Clips reference media the user owns; trims are
-   * clamped to the known source duration so a stale client cannot create an
-   * invalid range.
-   */
-  async saveTimeline(userId: string, contentId: string, clips: VideoClipInput[]): Promise<VideoProject> {
-    const content = this.database.getContentSummary(userId, contentId)
-    if (!content) throw notFound('内容不存在')
-    if (content.kind !== 'video') throw new ApiError(400, 'not_video_content', '只有视频内容支持剪辑时间线')
-
+  /** Validate and clamp client clip ranges against the owned media assets. */
+  private buildStoredClips(userId: string, clips: VideoClipInput[]): StoredVideoClip[] {
     const stored: StoredVideoClip[] = []
     for (const clip of clips) {
       const media = this.database.getMedia(userId, clip.mediaId)
@@ -175,7 +167,20 @@ export class VideoService {
         duration: duration === null ? null : round2(duration),
       })
     }
+    return stored
+  }
 
+  /**
+   * Replace the whole timeline. Clips reference media the user owns; trims are
+   * clamped to the known source duration so a stale client cannot create an
+   * invalid range.
+   */
+  async saveTimeline(userId: string, contentId: string, clips: VideoClipInput[]): Promise<VideoProject> {
+    const content = this.database.getContentSummary(userId, contentId)
+    if (!content) throw notFound('内容不存在')
+    if (content.kind !== 'video') throw new ApiError(400, 'not_video_content', '只有视频内容支持剪辑时间线')
+
+    const stored = this.buildStoredClips(userId, clips)
     const current = this.database.getVideoProjectRow(userId, contentId)
     const materials = [...(current.materials ?? current.clips.map((clip) => clip.mediaId))]
     for (const clip of stored) {
@@ -183,6 +188,36 @@ export class VideoService {
     }
     this.database.saveVideoProject(userId, contentId, { clips: stored, materials })
     return this.getProject(userId, contentId)
+  }
+
+  async getStudioProject(userId: string, contentId: string): Promise<VideoStudioProject> {
+    const content = this.database.getContentSummary(userId, contentId)
+    if (!content) throw notFound('内容不存在')
+    if (content.kind !== 'video') throw new ApiError(400, 'not_video_content', '只有视频内容支持剪辑工作台')
+    const row = this.database.getVideoStudioProjectRow(userId, contentId)
+    return {
+      contentId,
+      clips: this.mapClips(row.clips, userId),
+      project: row.project,
+      updatedAt: row.updatedAt || content.updatedAt,
+    }
+  }
+
+  async saveStudioProject(
+    userId: string,
+    contentId: string,
+    project: Record<string, unknown>,
+    clips: VideoClipInput[],
+  ): Promise<VideoStudioProject> {
+    const content = this.database.getContentSummary(userId, contentId)
+    if (!content) throw notFound('内容不存在')
+    if (content.kind !== 'video') throw new ApiError(400, 'not_video_content', '只有视频内容支持剪辑工作台')
+    if (clips.length === 0) {
+      throw new ApiError(400, 'empty_timeline', '时间线中没有可识别的视频片段，未保存；请从素材库添加视频片段')
+    }
+    const stored = this.buildStoredClips(userId, clips)
+    this.database.saveVideoStudioProject(userId, contentId, { clips: stored, project })
+    return this.getStudioProject(userId, contentId)
   }
 
   listExports(userId: string, contentId?: string): VideoExport[] {

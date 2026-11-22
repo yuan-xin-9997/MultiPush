@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## 2026-11-22 · 合并所有功能分支
+
+**改了什么**
+
+- 将 B站视频/专栏图文发布、视频素材/剪辑模式、豆瓣发布修复、简书富文本/图片修复和 Twick 实验剪辑工作台合并到 `main`。
+- 数据库迁移合并为 `user_version = 24`：同时包含 `bilibili_*` 表、`video_projects.materials_json` 和 `video_projects.studio_json`；旧库启动时按列增量补齐。
+- 修复合并后视频工作台的 React Hook 顺序：`openStudio` 从早返回之后移到组件顶部，避免加载完成时出现 React error #310。
+- Twick 仍为「新版剪辑（试验）」入口，旧版工作台保持默认；Twick 章节保留素材桥接、成片导出、1080p 和依赖体积等限制。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 通过；Twick 页面为懒加载 chunk（约 4.9 MB），不进入首屏主包。
+- `npm test`：server 46 个文件 / 456 项、web 3 个文件 / 23 项全部通过。
+- 合并后回归：视频工作台 UI、未剪辑渲染门禁、B站发布页 UI、Twick Studio 嵌入冒烟均通过。
+
 ## 2026-11-22 · B站视频 / 专栏图文渲染与发布
 
 **改了什么**
@@ -9,7 +24,7 @@
 - 新增「发布管理 → B站」：扫码登录（会话加密保存）、视频投稿、专栏/opus 图文草稿/发布、发布记录、审核状态检查、结果待核实和手动兜底。
 - 视频投稿按 B 站 Web 链路实现：封面上传 → 申请 UPOS 凭据 → 分片上传 → 封口 → `add/v3` 创建稿件；得到 BV 号后记录为「审核中」，支持后续检查公开状态。
 - 图文使用 B 站新版编辑器：填标题、写入正文、通过剪贴板把正文图片交给 B 站图床、保存草稿；选择公开发布时点击「发布」并捕获 `create/opus` 成功信号，信号不明确时标记待核实，不自动重试。
-- 数据库新增 `bilibili_accounts`、`bilibili_publications`、`bilibili_publication_resolutions`，`user_version = 23`；服务重启时把处理中记录标记为待核实，避免重复投稿。
+- 数据库新增 `bilibili_accounts`、`bilibili_publications`、`bilibili_publication_resolutions`，`user_version = 24`；服务重启时把处理中记录标记为待核实，避免重复投稿。
 - 新增 `BILIBILI_BROWSER_PATH`、`BILIBILI_HEADLESS` 配置和 [B站发布说明](docs/BILIBILI_PUBLISHING.md)。
 
 **验证**
@@ -59,7 +74,7 @@
 - 视频工作台新增「素材模式 / 剪辑模式」切换，标题、正文、标签等元数据在两种模式下保持不变。
   - 素材模式展示新建视频内容后上传的原始素材，按上传顺序排列，保留文件名、完整时长和分辨率；可预览原片、加入剪辑时间线或进入剪辑模式。
   - 剪辑模式保留原有类剪映时间线：入点/出点、调序、删除、整条播放和自动保存。
-- 新增 `video_projects.materials_json` 保存原始素材 ID 顺序；保存时间线时保留素材列表并自动补齐新素材，删除片段不会删除素材库原片。数据库 `user_version = 23`，旧库自动增量迁移。
+- 新增 `video_projects.materials_json` 保存原始素材 ID 顺序；保存时间线时保留素材列表并自动补齐新素材，删除片段不会删除素材库原片。数据库 `user_version = 24`，旧库自动增量迁移。
 - `VideoProject` 新增 `materials` 与 `edited`：时间线与素材顺序一致、无裁剪时视为未剪辑。
 - 新增简单拼接导出：`POST /api/contents/:id/video/export` 支持 `{"source":"materials"}`，按素材上传顺序调用 ffmpeg 直接拼接，不裁剪。
 - 渲染工作台增加视频门禁：视频内容未剪辑时弹出「视频素材未剪辑，则简单拼接输出视频」确认框；选择「是」先简单拼接导出成片再继续渲染，选择「否」取消渲染并提示先剪辑。视频内容没有素材时直接提示先上传。
