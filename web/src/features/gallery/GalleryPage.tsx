@@ -27,6 +27,7 @@ import { api, absoluteUrl } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { exportContentFile, type ExportFormat } from '@/lib/content-io'
 import { cn, escapeHtml, formatBytes } from '@/lib/utils'
+import { imageSizeFromHeaders } from './image-meta'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import Dropdown, { type DropdownEntry } from '@/components/Dropdown'
 import EmptyState from '@/components/EmptyState'
@@ -46,6 +47,13 @@ interface GalleryImage {
 interface GalleryDraft {
   images: GalleryImage[]
   body: string
+}
+
+interface GalleryImageMeta {
+  width?: number
+  height?: number
+  size?: number | null
+  sizeLoaded?: boolean
 }
 
 const MAX_IMAGES = 35
@@ -257,6 +265,8 @@ export default function GalleryPage() {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [images, setImages] = useState<GalleryImage[]>([])
+  const [imageMeta, setImageMeta] = useState<Record<string, GalleryImageMeta>>({})
+  const imageSizeCache = useRef<Map<string, Promise<number | null>>>(new Map())
   const [coverImage, setCoverImage] = useState<string | null>(null)
   const [tagsInput, setTagsInput] = useState('')
   const [status, setStatus] = useState<ContentStatus>('draft')
@@ -358,6 +368,7 @@ export default function GalleryPage() {
         setTitle(detail.title)
         setBody(draft.body)
         setImages(draft.images)
+        setImageMeta({})
         setCoverImage(nextCover)
         setTagsInput(detail.tags.join(', '))
         setStatus(detail.status)
@@ -467,6 +478,29 @@ export default function GalleryPage() {
   }, [dirty])
 
   // --------------------------------------------------------------- images
+
+  const registerImageMeta = useCallback((image: GalleryImage, element: HTMLImageElement) => {
+    const width = element.naturalWidth || undefined
+    const height = element.naturalHeight || undefined
+    if (!width || !height) return
+    setImageMeta((current) => ({
+      ...current,
+      [image.id]: { ...current[image.id], width, height },
+    }))
+    let request = imageSizeCache.current.get(image.src)
+    if (!request) {
+      request = fetch(absoluteUrl(image.src), { method: 'HEAD', credentials: 'same-origin' })
+        .then((response) => response.ok ? imageSizeFromHeaders(response.headers) : null)
+        .catch(() => null)
+      imageSizeCache.current.set(image.src, request)
+    }
+    void request.then((size) => {
+      setImageMeta((current) => ({
+        ...current,
+        [image.id]: { ...current[image.id], width, height, size, sizeLoaded: true },
+      }))
+    })
+  }, [])
 
   const appendUploaded = useCallback(
     (entries: Array<{ src: string; alt: string }>) => {
@@ -978,7 +1012,16 @@ export default function GalleryPage() {
                     }}
                   >
                     <div className="gallery-image-frame">
-                      <img src={absoluteUrl(image.src)} alt={imageAlt(image, index)} loading="lazy" />
+                      <img
+                        src={absoluteUrl(image.src)}
+                        alt={imageAlt(image, index)}
+                        loading="lazy"
+                        onLoad={(event) => registerImageMeta(image, event.currentTarget)}
+                        onError={() => setImageMeta((current) => ({
+                          ...current,
+                          [image.id]: { ...current[image.id], sizeLoaded: true },
+                        }))}
+                      />
                       <span className="gallery-image-index">{index + 1}</span>
                       {selectedCover === image.src ? (
                         <span className="gallery-cover-flag">
@@ -1047,6 +1090,20 @@ export default function GalleryPage() {
                           </button>
                         </div>
                       </div>
+                    </div>
+                    <div className="gallery-image-meta" aria-label={`第 ${index + 1} 张图片信息`}>
+                      <span>
+                        {imageMeta[image.id]?.width && imageMeta[image.id]?.height
+                          ? `${imageMeta[image.id].width} × ${imageMeta[image.id].height}`
+                          : '尺寸读取中…'}
+                      </span>
+                      <span>
+                        {imageMeta[image.id]?.size != null
+                          ? formatBytes(imageMeta[image.id].size!)
+                          : imageMeta[image.id]?.sizeLoaded
+                            ? '大小未知'
+                            : '大小读取中…'}
+                      </span>
                     </div>
                     <input
                       className="gallery-caption-input"
