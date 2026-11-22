@@ -633,16 +633,17 @@
 
 /* ---------- Document grid ---------- */
 .document-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(246px, 1fr));
-  gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
   justify-content: flex-start;
+  gap: 16px;
 }
 
-/* 所有卡片按列等宽；最后一排从左侧开始排列，不再居中或拉伸。 */
+/* 卡片随行宽伸缩：满行等宽，最后一排从左侧开始并填满剩余宽度。 */
 .document-grid > * {
+  flex: 1 1 246px;
+  max-width: 430px;
   min-width: 0;
-  max-width: none;
 }
 
 .document-card {
@@ -1382,6 +1383,11 @@
     gap: 12px;
   }
 
+  .document-grid > * {
+    flex-basis: 210px;
+    max-width: 380px;
+  }
+
   .document-list-head {
     display: none;
   }
@@ -1420,8 +1426,9 @@
 }
 
 @media (max-width: 480px) {
-  .document-grid {
-    grid-template-columns: 1fr;
+  .document-grid > * {
+    flex-basis: 100%;
+    max-width: none;
   }
 }
 

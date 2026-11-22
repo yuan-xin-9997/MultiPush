@@ -4,7 +4,8 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { chromium } from 'playwright-core'
 
-// Verify library card rows stay left aligned and equal-width on wide/desktop/mobile.
+// Verify the first page fills the last row and stays left aligned at the viewport
+// used in production screenshots (2500 CSS px), plus desktop/mobile overflow checks.
 const root = path.resolve(import.meta.dirname, '..')
 const output = path.join(root, 'artifacts', 'library-alignment')
 mkdirSync(output, { recursive: true })
@@ -42,12 +43,12 @@ try {
   const registration = await (await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: account, email: `${account}@example.com`, password: 'GridQA!2026' }) })).json()
   assert.ok(registration.token, JSON.stringify(registration))
   const auth = { Authorization: `Bearer ${registration.token}`, 'Content-Type': 'application/json' }
-  for (let i = 1; i <= 12; i += 1) {
+  for (let i = 1; i <= 20; i += 1) {
     const response = await fetch(`${base}/api/contents`, { method: 'POST', headers: auth, body: JSON.stringify({ title: `网格对齐测试文章 ${i}`, kind: 'article', contentHtml: `<p>第 ${i} 篇测试文章正文。</p>`, tags: ['测试'] }) })
     assert.ok(response.ok, await response.text())
   }
   browser = await chromium.launch({ executablePath: chrome, headless: true })
-  const page = await browser.newPage({ viewport: { width: 3141, height: 1335 } })
+  const page = await browser.newPage({ viewport: { width: 2500, height: 1200 } })
   const errors = []
   page.on('pageerror', e => errors.push(String(e)))
   await page.goto(`${base}/login`)
@@ -55,15 +56,18 @@ try {
   await page.fill('input[type="password"]', 'GridQA!2026')
   await page.click('button[type="submit"]')
   await page.waitForURL(/library/, { timeout: 20_000 })
-  await until(async () => (await page.locator('.document-card').count()) === 12, 'twelve cards should render')
-  const boxes = await page.locator('.document-card').evaluateAll(els => els.map(e => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) } }))
+  await until(async () => (await page.locator('.document-card').count()) === 20, 'twenty cards should render')
+  const boxes = await page.locator('.document-card').evaluateAll(els => els.map(e => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), right: Math.round(r.right), w: Math.round(r.width) } }))
+  const gridRight = Math.round((await page.locator('.document-grid').boundingBox()).x + (await page.locator('.document-grid').boundingBox()).width)
   const rows = [...new Set(boxes.map(b => b.y))]
   assert.ok(rows.length >= 2, `expected at least two rows, got ${rows.length}`)
+  const lastRow = boxes.filter(b => b.y === rows[rows.length - 1])
   const firstRowX = boxes.find(b => b.y === rows[0]).x
-  const lastRowX = boxes.find(b => b.y === rows[rows.length - 1]).x
-  console.log('rows', rows, 'firstRowX', firstRowX, 'lastRowX', lastRowX)
+  const lastRowX = lastRow[0].x
+  console.log('rows', rows, 'firstRowX', firstRowX, 'lastRowX', lastRowX, 'lastRowRight', lastRow[lastRow.length - 1].right, 'gridRight', gridRight)
   assert.equal(lastRowX, firstRowX, 'last row should start at the same left edge as the first row')
-  await page.screenshot({ path: path.join(output, 'library-wide.png') })
+  assert.ok(Math.abs(lastRow[lastRow.length - 1].right - gridRight) <= 2, 'last row should fill the grid width')
+  await page.screenshot({ path: path.join(output, 'library-page.png') })
 
   await page.setViewportSize({ width: 1920, height: 1080 })
   await page.waitForTimeout(300)
