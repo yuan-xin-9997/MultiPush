@@ -4,12 +4,21 @@ import { copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } 
 import path from 'node:path'
 import type { AppConfig } from './config'
 import type { Database, MediaProbeMeta, StoredVideoClip } from './db'
-import type { VideoCapability, VideoClipInput, VideoExport, VideoProject } from '../../shared/types'
+import type { VideoCapability, VideoClipDetail, VideoClipInput, VideoExport, VideoMaterial, VideoProject } from '../../shared/types'
 import { ApiError, notFound } from './errors'
 
 const MAX_EXPORT_DURATION_SECONDS = 2 * 60 * 60
 const EXPORT_TIMEOUT_MS = 45 * 60 * 1000
 const MIN_CLIP_SECONDS = 0.05
+
+function simpleConcat(clips: VideoClipDetail[], materials: VideoMaterial[]): boolean {
+  if (clips.length !== materials.length) return false
+  return clips.every((clip, index) => {
+    const material = materials[index]
+    if (!material || clip.mediaId !== material.mediaId || Math.abs(clip.trimStart) > 0.001) return false
+    return clip.trimEnd === null || (clip.duration !== null && Math.abs(clip.trimEnd - clip.duration) < 0.01)
+  })
+}
 
 export interface VideoProbeResult extends MediaProbeMeta {
   hasAudio: boolean
@@ -117,9 +126,16 @@ export class VideoService {
     if (!content) throw notFound('内容不存在')
     const row = this.database.getVideoProjectRow(userId, contentId)
     const clips = this.mapClips(row.clips, userId)
+    const materialIds = [...new Set(row.materials ?? clips.map((clip) => clip.mediaId))]
+    const materials: VideoMaterial[] = materialIds.map((mediaId) => ({
+      mediaId,
+      media: this.database.getMedia(userId, mediaId),
+    }))
     return {
       contentId,
+      materials,
       clips,
+      edited: !simpleConcat(clips, materials),
       totalDuration: clips.reduce((sum, clip) => sum + clip.trimDuration, 0),
       updatedAt: row.updatedAt || content.updatedAt,
     }
@@ -160,7 +176,12 @@ export class VideoService {
       })
     }
 
-    this.database.saveVideoProject(userId, contentId, { clips: stored })
+    const current = this.database.getVideoProjectRow(userId, contentId)
+    const materials = [...(current.materials ?? current.clips.map((clip) => clip.mediaId))]
+    for (const clip of stored) {
+      if (!materials.includes(clip.mediaId)) materials.push(clip.mediaId)
+    }
+    this.database.saveVideoProject(userId, contentId, { clips: stored, materials })
     return this.getProject(userId, contentId)
   }
 
@@ -178,13 +199,25 @@ export class VideoService {
     if (!this.database.deleteVideoExport(userId, exportId)) throw notFound('导出任务不存在')
   }
 
-  /** Enqueue an export of the current timeline; runs one ffmpeg job at a time. */
-  async createExport(userId: string, contentId: string): Promise<VideoExport> {
+  /** Enqueue an export of the current timeline or a plain concatenation of raw materials. */
+  async createExport(userId: string, contentId: string, source: 'timeline' | 'materials' = 'timeline'): Promise<VideoExport> {
     const project = await this.getProject(userId, contentId)
-    if (project.clips.length === 0) throw new ApiError(400, 'empty_timeline', '时间线还没有片段，请先上传并添加视频')
-    const missing = project.clips.filter((clip) => !clip.media)
-    if (missing.length > 0) throw new ApiError(400, 'clip_media_missing', '时间线中存在已被删除的素材，请先移除对应片段')
-    if (project.totalDuration > MAX_EXPORT_DURATION_SECONDS) {
+    const clips: VideoClipDetail[] = source === 'materials'
+      ? project.materials.map((material) => ({
+        id: randomUUID(),
+        mediaId: material.mediaId,
+        trimStart: 0,
+        trimEnd: null,
+        duration: material.media?.duration ?? null,
+        trimDuration: material.media?.duration ?? 0,
+        media: material.media,
+      }))
+      : project.clips
+    if (clips.length === 0) throw new ApiError(400, 'empty_timeline', source === 'materials' ? '素材列表为空，请先上传视频素材' : '时间线还没有片段，请先上传并添加视频')
+    const missing = clips.filter((clip) => !clip.media)
+    if (missing.length > 0) throw new ApiError(400, 'clip_media_missing', '存在已被删除的素材，请先移除对应片段或重新上传素材')
+    const totalDuration = clips.reduce((sum, clip) => sum + clip.trimDuration, 0)
+    if (totalDuration > MAX_EXPORT_DURATION_SECONDS) {
       throw new ApiError(400, 'timeline_too_long', `导出总时长不能超过 ${MAX_EXPORT_DURATION_SECONDS / 3600} 小时`)
     }
     const capability = await this.capability()
@@ -194,14 +227,14 @@ export class VideoService {
 
     const record = this.database.createVideoExport(userId, {
       contentId,
-      timeline: project.clips.map((clip) => ({
+      timeline: clips.map((clip) => ({
         id: clip.id,
         mediaId: clip.mediaId,
         trimStart: clip.trimStart,
         trimEnd: clip.trimEnd,
         duration: clip.duration,
       })),
-      totalDuration: project.totalDuration,
+      totalDuration,
     })
     this.queue = this.queue.then(() => this.runExport(userId, record.id)).catch(() => {
       // runExport records its own failure; keep the queue alive.

@@ -276,6 +276,8 @@ export interface StoredVideoClip {
 
 export interface SaveVideoProjectValues {
   clips: StoredVideoClip[]
+  /** Raw material ids in upload order. Omit to preserve the existing list. */
+  materials?: string[] | null
 }
 
 export interface CreateVideoExportValues {
@@ -593,6 +595,7 @@ export class Database {
         content_id TEXT PRIMARY KEY REFERENCES contents(id) ON DELETE CASCADE,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         timeline_json TEXT NOT NULL DEFAULT '[]',
+        materials_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -1274,10 +1277,11 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_bilibili_resolutions_publication ON bilibili_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 22;
+      PRAGMA user_version = 23;
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
+    this.ensureVideoMaterialsColumn()
     this.ensureGalleryKind()
     this.ensureDocumentMediaKind()
     this.ensureMediaFolders()
@@ -1366,6 +1370,11 @@ export class Database {
    * image-first `gallery` kind. Foreign keys are disabled only for the rebuild
    * and checked again before returning.
    */
+  private ensureVideoMaterialsColumn(): void {
+    const columns = new Set(this.all('PRAGMA table_info(video_projects)').map((row) => text(row.name)))
+    if (!columns.has('materials_json')) this.run('ALTER TABLE video_projects ADD COLUMN materials_json TEXT')
+  }
+
   private ensureGalleryKind(): void {
     const row = this.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'contents'")
     const tableSql = text(row?.sql)
@@ -2167,20 +2176,28 @@ export class Database {
   }
 
   /** Timeline row for a content; an empty project is returned when never saved. */
-  getVideoProjectRow(userId: string, contentId: string): { clips: StoredVideoClip[]; updatedAt: string } {
-    const row = this.get('SELECT timeline_json, updated_at FROM video_projects WHERE content_id = ? AND user_id = ?', [contentId, userId])
-    if (!row) return { clips: [], updatedAt: '' }
-    return { clips: this.mapStoredClips(parseJson(row.timeline_json)), updatedAt: text(row.updated_at) }
+  getVideoProjectRow(userId: string, contentId: string): { clips: StoredVideoClip[]; materials: string[] | null; updatedAt: string } {
+    const row = this.get('SELECT timeline_json, materials_json, updated_at FROM video_projects WHERE content_id = ? AND user_id = ?', [contentId, userId])
+    if (!row) return { clips: [], materials: null, updatedAt: '' }
+    const rawMaterials = parseJson(row.materials_json)
+    return {
+      clips: this.mapStoredClips(parseJson(row.timeline_json)),
+      materials: Array.isArray(rawMaterials) ? rawMaterials.filter((value): value is string => typeof value === 'string') : null,
+      updatedAt: text(row.updated_at),
+    }
   }
 
   saveVideoProject(userId: string, contentId: string, values: SaveVideoProjectValues): StoredVideoClip[] {
     const now = nowIso()
     this.transaction(() => {
+      const materials = values.materials === undefined ? null : values.materials === null ? null : JSON.stringify(values.materials)
       this.run(
-        `INSERT INTO video_projects (content_id, user_id, timeline_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(content_id) DO UPDATE SET timeline_json = excluded.timeline_json, updated_at = excluded.updated_at`,
-        [contentId, userId, JSON.stringify(values.clips), now, now],
+        `INSERT INTO video_projects (content_id, user_id, timeline_json, materials_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(content_id) DO UPDATE SET timeline_json = excluded.timeline_json,
+           materials_json = COALESCE(excluded.materials_json, video_projects.materials_json),
+           updated_at = excluded.updated_at`,
+        [contentId, userId, JSON.stringify(values.clips), materials, now, now],
       )
       this.run('UPDATE contents SET video_count = ?, updated_at = ? WHERE id = ? AND user_id = ?', [
         values.clips.length, now, contentId, userId,
@@ -2191,13 +2208,13 @@ export class Database {
 
   /** Copy the timeline to a duplicated content (content duplicate feature). */
   copyVideoProject(userId: string, fromContentId: string, toContentId: string): void {
-    const source = this.get('SELECT timeline_json FROM video_projects WHERE content_id = ? AND user_id = ?', [fromContentId, userId])
+    const source = this.get('SELECT timeline_json, materials_json FROM video_projects WHERE content_id = ? AND user_id = ?', [fromContentId, userId])
     if (!source) return
     const now = nowIso()
     this.run(
-      `INSERT INTO video_projects (content_id, user_id, timeline_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [toContentId, userId, text(source.timeline_json), now, now],
+      `INSERT INTO video_projects (content_id, user_id, timeline_json, materials_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [toContentId, userId, text(source.timeline_json), source.materials_json == null ? null : text(source.materials_json), now, now],
     )
   }
 

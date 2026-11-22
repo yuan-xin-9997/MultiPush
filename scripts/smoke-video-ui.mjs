@@ -103,10 +103,12 @@ try {
   // Upload two clips through the file input.
   const input = page.locator('input[type="file"][accept*="video"]')
   await input.setInputFiles([fixtureA, fixtureB])
-  await until(async () => (await page.locator('.video-clip-item').count()) === 2, 'two clips should appear')
+  await until(async () => (await page.locator('.video-material-item').count()) === 2, 'two raw materials should appear')
+  assert.equal(await page.locator('.video-strip-segment').count(), 2, 'material strip segments')
 
-  // The timeline strip should show both segments.
-  assert.equal(await page.locator('.video-strip-segment').count(), 2, 'timeline strip segments')
+  // Materials start in material mode; enter edit mode to trim and reorder.
+  await page.getByRole('tab', { name: /剪辑模式/ }).click()
+  await until(async () => (await page.locator('.video-clip-item').count()) === 2, 'two clips should appear in edit mode')
 
   // Trim the second clip's out-point to 1s via the number input.
   const secondCard = page.locator('.video-clip-item').nth(1)
@@ -124,6 +126,8 @@ try {
   await titleInput.fill('工作台冒烟视频')
   await titleInput.blur()
   await until(async () => /已保存/.test(await page.locator('.video-save-state').innerText()), 'title autosaves')
+
+  await page.screenshot({ path: path.join(output, 'workspace-edit.png') })
 
   // Export the merged clip and wait for completion inside the export panel.
   await page.getByRole('button', { name: /导出成片/ }).click()

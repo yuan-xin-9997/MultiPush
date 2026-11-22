@@ -88,6 +88,8 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import './render.css'
 
+const waitForVideoExport = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
 const DEFAULT_PLATFORMS: PlatformId[] = ['wechat', 'wechatpic', 'xiaohongshu', 'zhihu', 'weibo', 'toutiao', 'baijiahao', 'douban', 'juejin', 'csdn', 'jianshu', 'v2ex', 'bilibili', 'douyin', 'sspai', 'blog']
 
 const PICKER_UNFILED_ID = 'unfiled'
@@ -488,6 +490,14 @@ export default function RenderPage() {
   const [activePlatform, setActivePlatform] = useState<PlatformId>('wechat')
   const [lastRequestKey, setLastRequestKey] = useState('')
   const [renderError, setRenderError] = useState<string | null>(null)
+  const [videoGate, setVideoGate] = useState<{
+    content: ContentSummary
+    platforms: PlatformId[]
+    options: RenderOptions
+    platformOptions: PlatformOptionOverrides
+  } | null>(null)
+  const [videoGateBusy, setVideoGateBusy] = useState(false)
+  const [videoPrep, setVideoPrep] = useState<string | null>(null)
   const [cardIndex, setCardIndex] = useState(0)
   const [xhsView, setXhsView] = useState<'cards' | 'video'>('cards')
   const [loadingPage, setLoadingPage] = useState(true)
@@ -628,12 +638,44 @@ export default function RenderPage() {
       targetOptions: RenderOptions,
       confirmed = false,
       targetPlatformOptions: PlatformOptionOverrides = platformOptions,
+      videoMode: 'check' | 'concat' = 'check',
     ) => {
       if (!content || targetPlatforms.length === 0 || rendering || exporting || adjusting || layoutBusy) return
       if (!confirmed && results?.some((result) => result.editedAt)) { setConfirmAction('regenerate'); return }
+      if (videoMode === 'check' && content.kind === 'video') {
+        try {
+          const { project } = await api.video.getProject(content.id)
+          if (!project.edited) {
+            if (project.materials.length === 0) {
+              setRenderError('视频内容还没有素材，请先到视频工作台添加素材并完成剪辑')
+              return
+            }
+            setVideoGate({ content, platforms: targetPlatforms, options: targetOptions, platformOptions: targetPlatformOptions })
+            return
+          }
+        } catch (error) {
+          setRenderError(getErrorMessage(error, '检查视频剪辑状态失败'))
+          return
+        }
+      }
       setRendering(true)
       setRenderError(null)
       try {
+        if (videoMode === 'concat') {
+          setVideoPrep('正在简单拼接视频素材…')
+          const { export: job } = await api.video.createExport(content.id, 'materials')
+          let current = job
+          const started = Date.now()
+          while (current.status === 'queued' || current.status === 'running') {
+            if (Date.now() - started > 45 * 60_000) throw new Error('简单拼接超时，请到视频工作台查看导出记录')
+            await waitForVideoExport(1500)
+            current = (await api.video.getExport(job.id)).export
+            setVideoPrep(`正在简单拼接视频… ${Math.round(current.progress)}%`)
+          }
+          if (current.status !== 'completed') throw new Error(current.message || '简单拼接导出失败')
+          toast.success('素材简单拼接完成，正在生成渲染')
+          setVideoPrep(null)
+        }
         const platformOptionsForRequest = Object.fromEntries(
           targetPlatforms.flatMap((platform) => {
             const override = targetPlatformOptions[platform]
@@ -675,6 +717,7 @@ export default function RenderPage() {
         toast.error(getErrorMessage(error, '渲染失败，请稍后重试'))
       } finally {
         setRendering(false)
+        setVideoPrep(null)
       }
     },
     [refreshHistory, rendering, exporting, adjusting, layoutBusy, results, platformOptions],
@@ -1211,7 +1254,7 @@ export default function RenderPage() {
             disabled={!selectedContent || platforms.length === 0 || rendering}
           >
             {rendering ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}
-            {rendering ? '正在渲染…' : results ? '重新生成' : '生成渲染'}
+            {videoPrep ?? (rendering ? '正在渲染…' : results ? '重新生成' : '生成渲染')}
           </button>
         </div>
       </header>
@@ -2476,6 +2519,35 @@ export default function RenderPage() {
         onSaveDefaults={saveDefaults}
         onClose={() => setSettingsOpen(false)}
       />
+      <ConfirmDialog
+        open={!!videoGate}
+        title="视频素材未剪辑"
+        tone="primary"
+        confirmLabel="是，简单拼接并渲染"
+        cancelLabel="否，取消渲染"
+        loading={videoGateBusy}
+        description={<>
+          <strong>{videoGate?.content.title}</strong>
+          <p>视频素材未剪辑，则简单拼接输出视频。</p>
+          <p>是否将所有素材按上传顺序简单拼接并导出，然后再继续渲染？</p>
+        </>}
+        onConfirm={async () => {
+          const gate = videoGate
+          if (!gate) return
+          setVideoGateBusy(true)
+          setVideoGate(null)
+          try {
+            await runRender(gate.content, gate.platforms, gate.options, false, gate.platformOptions, 'concat')
+          } finally {
+            setVideoGateBusy(false)
+          }
+        }}
+        onClose={() => {
+          setVideoGate(null)
+          toast.info('已取消渲染，可先到视频工作台完成剪辑')
+        }}
+      />
+
       <ConfirmDialog open={confirmAction !== null} title={confirmAction === 'reset' ? '恢复生成结果？' : '生成新的渲染版本？'} tone="primary"
         description={confirmAction === 'reset' ? '将移除当前平台的专属调整，恢复此记录最初生成的内容。原文和其他平台保持不变。' : '新结果会根据原文生成，不会带入平台专属调整；旧记录及其调整仍可从历史中打开。'}
         loading={adjusting || rendering} onClose={() => setConfirmAction(null)} onConfirm={async () => {

@@ -135,6 +135,10 @@ export const videoTimelineSchema = z.object({
   ).max(60, '时间线最多 60 个片段'),
 })
 
+export const videoExportBodySchema = z.object({
+  source: z.enum(['timeline', 'materials']).optional(),
+}).strict()
+
 export const videoExportParamsSchema = z.object({ id: z.string().max(100), exportId: z.string().max(100) })
 export const videoContentParamsSchema = z.object({ id: z.string().max(100) })
 export const videoExportListQuerySchema = z.object({}).partial()

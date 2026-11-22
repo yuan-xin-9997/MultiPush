@@ -348,8 +348,8 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ clips }),
       }),
-    createExport: (contentId: string) =>
-      request<{ export: VideoExport }>(`/api/contents/${encodeURIComponent(contentId)}/video/export`, { method: 'POST' }),
+    createExport: (contentId: string, source: 'timeline' | 'materials' = 'timeline') =>
+      request<{ export: VideoExport }>(`/api/contents/${encodeURIComponent(contentId)}/video/export`, { method: 'POST', body: JSON.stringify({ source }) }),
     listExports: (contentId: string) =>
       request<{ exports: VideoExport[] }>(`/api/contents/${encodeURIComponent(contentId)}/video/exports`, { cache: 'no-store' }),
     getExport: (exportId: string) =>
