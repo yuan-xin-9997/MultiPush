@@ -136,6 +136,18 @@ describe('renderPlatforms', () => {
     expect(result.captionBody.split('https://example.com/only-link').length - 1).toBe(1)
   })
 
+  it('splits a long Weibo caption into complete thread segments', async () => {
+    const paragraphs = Array.from({ length: 40 }, (_, index) => `<p>第 ${index + 1} 段：${'这是一段较长的微博正文内容。'.repeat(8)}</p>`).join('')
+    const [result] = await renderPlatforms(input(['weibo'], { contentHtml: paragraphs }))
+    expect(result.thread?.length).toBeGreaterThan(1)
+    expect(result.thread!.every((part) => Array.from(part).length <= 2000)).toBe(true)
+    expect(result.thread![0]).toContain(result.title)
+    expect(result.thread!.at(-1)).toContain('#内容创作#')
+    expect(result.thread!.join('\n')).toContain('第 40 段')
+    expect(result.warnings.some((warning) => warning.includes('微博串'))).toBe(true)
+    expect(result.warnings.some((warning) => warning.includes('截断'))).toBe(false)
+  })
+
   it('renders a Douban diary with Markdown/HTML downloads and figure captions', async () => {
     const [result] = await renderPlatforms(input(['douban'], {
       contentHtml: '<p>正文</p><p><img src="/uploads/cover.png" alt="图"></p><p><em>图：说明：）</em></p>',

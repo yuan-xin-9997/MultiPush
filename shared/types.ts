@@ -532,6 +532,8 @@ export interface PlatformRender {
   generatedAt: string
   sourceUpdatedAt?: string
   captionBody?: string
+  /** Weibo thread segments (each within the platform's per-post limit). */
+  thread?: string[]
   editedAt?: string
   authorName?: string
 }
@@ -756,6 +758,14 @@ export interface WeiboPublishInput {
   mode?: 'draft' | 'publish'
 }
 
+export interface WeiboThreadPart {
+  index: number
+  status: 'published' | 'failed'
+  remoteId: string | null
+  url: string | null
+  message?: string
+}
+
 export interface WeiboPublication {
   id: string
   renderId: string
@@ -765,6 +775,8 @@ export interface WeiboPublication {
   message: string
   url: string | null
   remoteId: string | null
+  /** Populated for multi-post threads; index 0 is the root post. */
+  thread?: WeiboThreadPart[]
   createdAt: string
   updatedAt: string
   resolutions?: WeiboResolution[]

@@ -171,6 +171,16 @@ describe('render workbench', () => {
     expect(result.downloads.some((file) => file.kind === 'markdown' && file.filename.endsWith('.md'))).toBe(true)
   })
 
+  it('recomputes the Weibo thread after a long body edit', async () => {
+    const [render] = await renderPlatforms({ ...input, platforms: ['weibo'] })
+    const result = await adjustPlatformRender(render, { title: '微博长文', body: '这是一段较长的正文。'.repeat(400), tags: ['长文'] }, {}, input.baseUrl)
+    expect(result.thread!.length).toBeGreaterThan(1)
+    expect(result.thread!.every((part) => Array.from(part).length <= 2000)).toBe(true)
+    expect(result.text).toContain('---')
+    expect(result.thread!.at(-1)).toContain('#长文#')
+    expect(result.warnings.some((warning) => warning.includes('微博串'))).toBe(true)
+  })
+
   it('checks the final caption including title and hashtags rather than source counts', async () => {
     const [render] = await renderPlatforms({ ...input, platforms: ['xiaohongshu'] })
     const result = await adjustPlatformRender(render, { title: '标题', body: '文'.repeat(997), tags: ['话题'] }, {}, input.baseUrl)

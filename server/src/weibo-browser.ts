@@ -1,5 +1,5 @@
 import { chromium, type APIResponse, type Browser, type BrowserContext, type Page } from 'playwright-core'
-import type { WeiboPublication } from '../../shared/types'
+import type { WeiboPublication, WeiboThreadPart } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
@@ -7,7 +7,7 @@ import { ApiError } from './errors'
 import { qrReady } from './qr-capture'
 
 export interface WeiboIdentity { accountId: string; name: string }
-export interface WeiboArticle { text: string; images: PublisherImage[] }
+export interface WeiboArticle { text: string; thread: string[]; images: PublisherImage[] }
 export interface WeiboLoginAttempt {
   poll(): Promise<{ status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'; qrCode: string | null; message: string; state?: PublisherStorageState; identity?: WeiboIdentity }>
   close(): Promise<void>
@@ -16,7 +16,7 @@ export interface WeiboDriver {
   beginLogin(): Promise<WeiboLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: WeiboIdentity }>
   checkPublication(state: PublisherStorageState, remoteId: string, text: string): Promise<{ state: PublisherStorageState; status: 'published' | 'missing' | 'unknown'; url: string | null; message: string }>
-  publish(state: PublisherStorageState, article: WeiboArticle, progress: (value: Partial<Pick<WeiboPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'published'; remoteId: string; url: string; message: string }>
+  publish(state: PublisherStorageState, article: WeiboArticle, progress: (value: Partial<Pick<WeiboPublication, 'message' | 'remoteId' | 'url' | 'thread'>>) => void): Promise<{ state: PublisherStorageState; status: 'published'; remoteId: string; url: string; message: string; thread?: WeiboPublication['thread'] }>
   close(): Promise<void>
 }
 
@@ -25,6 +25,7 @@ const LOGIN = 'https://passport.weibo.com/sso/signin?entry=miniblog&source=minib
 const CONFIG = 'https://m.weibo.cn/api/config'
 const QR = 'img[src*="qr.weibo.cn"], img[src*="qrcode"]'
 const COMPOSER = 'textarea[placeholder*="有什么新鲜事"], textarea[placeholder*="分享"], div[contenteditable="true"][data-placeholder*="新鲜事"], div[contenteditable="true"][aria-label*="微博"]'
+const COMMENT_BOX = 'textarea[placeholder*="评论"], div[contenteditable="true"][data-placeholder*="评论"], textarea[placeholder*="说点什么"], div[contenteditable="true"][aria-label*="评论"]'
 type Data = Record<string, unknown>
 function object(value: unknown): Data { return value && typeof value === 'object' && !Array.isArray(value) ? value as Data : {} }
 const expired = () => new ApiError(409, 'weibo_session_expired', '微博登录状态已失效，请重新扫码连接')
@@ -231,6 +232,35 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
     } finally { await context.close().catch(() => {}) }
   }
 
+  /** Add the next thread segment as a comment under the root Weibo post. */
+  private async postComment(page: Page, text: string, rootUrl: string): Promise<{ remoteId: string; url: string }> {
+    await page.goto(rootUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+    await this.security(page)
+    const box = page.locator(COMMENT_BOX).first()
+    await box.waitFor({ state: 'visible', timeout: 30_000 })
+    await box.fill(text)
+    const button = page.getByRole('button', { name: /^(评论|发送)$/ }).last()
+    await button.waitFor({ state: 'visible', timeout: 15_000 })
+    if (!await button.isEnabled()) throw new ApiError(409, 'weibo_comment_disabled', '微博评论入口不可用，微博串未能发完')
+    const responsePromise = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.hostname.endsWith('weibo.com') && /\/ajax\/comments\/create\/?$/.test(url.pathname) && response.request().method() === 'POST'
+    }, { timeout: 45_000 }).catch(() => null)
+    await button.click()
+    const response = await responsePromise
+    if (!response) throw new ApiError(409, 'weibo_result_uncertain', '微博串后续内容已提交，但未确认评论结果；请到微博主页核对')
+    const data = object(await response.json().catch(() => null))
+    if (Number(data.ok) === -100) throw new ApiError(409, 'weibo_session_expired', '微博登录状态已失效，微博串未能发完')
+    if (Number(data.ok) !== 1) {
+      const message = typeof data.message === 'string' ? data.message : typeof data.msg === 'string' ? data.msg : ''
+      throw new ApiError(502, 'weibo_comment_rejected', `微博串后续评论未发布成功${message ? `：${message}` : ''}`)
+    }
+    const payload = object(data.data)
+    const remoteId = String(payload.idstr ?? payload.id ?? '')
+    if (!/^\d{6,30}$/.test(remoteId)) throw new ApiError(409, 'weibo_result_uncertain', '微博串评论已受理，但未返回有效编号；请到微博主页核对')
+    return { remoteId, url: rootUrl }
+  }
+
   async publish(state: PublisherStorageState, article: WeiboArticle, progress: Parameters<WeiboDriver['publish']>[2]) {
     const context = await this.context(state)
     let submitted = false
@@ -245,8 +275,9 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
       progress({ message: '正在填写微博正文' })
       const composer = page.locator(COMPOSER).first()
       await composer.waitFor({ state: 'visible', timeout: 30_000 })
-      await composer.fill(article.text)
-      if (await composer.inputValue().catch(() => article.text) !== article.text) throw new ApiError(409, 'weibo_content_mismatch', '微博编辑器内容不一致，已停止发布')
+      const thread = article.thread.length ? article.thread : [article.text]
+      await composer.fill(thread[0])
+      if (await composer.inputValue().catch(() => thread[0]) !== thread[0]) throw new ApiError(409, 'weibo_content_mismatch', '微博编辑器内容不一致，已停止发布')
 
       if (article.images.length) {
         progress({ message: `正在上传 ${article.images.length} 张微博图片` })
@@ -284,15 +315,35 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
       }
       const result = parseWeiboPublished(data)
       if (!result) throw new ApiError(409, 'weibo_result_uncertain', '微博已受理，但未返回有效发布编号；请到微博主页核对')
+      const rootUrl = identity.accountId ? `https://weibo.com/${identity.accountId}/${result.remoteId}` : result.url
+      const parts: WeiboThreadPart[] = []
+      if (thread.length > 1) {
+        parts.push({ index: 0, status: 'published', remoteId: result.remoteId, url: rootUrl, message: '已发布' })
+        progress({ thread: parts, message: `已发布第 1/${thread.length} 条微博，正在接龙` })
+        for (let index = 1; index < thread.length; index += 1) {
+          try {
+            const comment = await this.postComment(page, thread[index], rootUrl)
+            parts.push({ index, status: 'published', remoteId: comment.remoteId, url: comment.url, message: '已发布' })
+            progress({ thread: parts, message: `已发布第 ${index + 1}/${thread.length} 条微博` })
+            await page.waitForTimeout(1_500)
+          } catch (error) {
+            parts.push({ index, status: 'failed', remoteId: null, url: null, message: error instanceof ApiError ? error.message : '微博串后续内容发布失败' })
+            progress({ thread: parts, message: `微博串第 ${index + 1}/${thread.length} 条未完成，请到微博主页核对` })
+            throw error
+          }
+        }
+      }
       return {
         state: await context.storageState(),
         status: 'published' as const,
         remoteId: result.remoteId,
-        url: identity.accountId ? `https://weibo.com/${identity.accountId}/${result.remoteId}` : result.url,
-        message: '微博已发布',
+        url: rootUrl,
+        message: thread.length > 1 ? `微博串已发布（${thread.length} 条）` : '微博已发布',
+        thread: thread.length > 1 ? parts : undefined,
       }
     } catch (error) {
-      if (submitted && !(error instanceof ApiError && ['weibo_session_expired', 'weibo_security_check'].includes(error.code))) {
+      if (submitted) {
+        if (error instanceof ApiError && error.code === 'weibo_result_uncertain') throw error
         throw new ApiError(409, 'weibo_result_uncertain', error instanceof ApiError ? error.message : '微博提交后结果未确认；请到微博主页核对，避免重复发布')
       }
       if (error instanceof ApiError) throw error
