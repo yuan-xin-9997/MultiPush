@@ -32,6 +32,16 @@ export const registerSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   displayName: displayNameSchema.optional(),
+  inviteCode: z.string().trim().max(32, '邀请码过长').optional(),
+})
+
+export const createInviteCodeSchema = z.object({
+  maxUses: z.number().int().min(1, '使用次数至少为 1').max(1000, '使用次数最多 1000 次'),
+  expiresAt: z.string().datetime({ offset: true, message: '失效时间格式无效' }).nullable().optional(),
+})
+
+export const updateInviteCodeSchema = z.object({
+  active: z.boolean(),
 })
 
 /** Local desktop accounts are not backed by SMTP, so no verification code is required. */

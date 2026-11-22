@@ -30,6 +30,8 @@ export interface AppConfig {
   aiProvidersWarning: string | null
   /** Usernames allowed to edit the server-wide provider pool in production. */
   settingsAdmins: string[]
+  /** Registration requires a valid invite code (production unless explicitly bypassed). */
+  inviteCodeRequired: boolean
   version: string
 }
 
@@ -45,6 +47,7 @@ export interface ConfigOverrides {
   aiDefaults?: AiDefaultConfig | null
   aiProviders?: AiProvidersConfig | null
   settingsAdmins?: string[]
+  inviteCodeBypass?: boolean
 }
 
 const DEFAULT_PORT = 34080
@@ -188,6 +191,11 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
         }
       : null
 
+  const inviteCodeBypass = overrides.inviteCodeBypass === true ||
+    trimmedEnv('INVITE_CODE_BYPASS') === '1' ||
+    nodeEnv === 'test' ||
+    nodeEnv === 'development'
+
   const loadedProviders = loadAiProviders(dataDir, {
     ...(overrides.aiProviders !== undefined ? { override: overrides.aiProviders } : {}),
     defaults: aiDefaults,
@@ -228,6 +236,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
       .split(/[\s,;]+/)
       .map(name => name.trim().toLowerCase())
       .filter(Boolean),
+    inviteCodeRequired: nodeEnv === 'production' && !inviteCodeBypass,
     version: typeof packageJson.version === 'string' ? packageJson.version : '1.0.0',
   }
 }

@@ -21,6 +21,7 @@ import type {
   RenderRecord,
   RichTextJson,
   User,
+  InviteCode,
   VideoClip,
   VideoClipDetail,
   VideoExport,
@@ -502,6 +503,11 @@ export type UpdateWechatPublicationValues = Partial<Pick<WechatPublication, 'sta
  * SQLite persistence. Every read/write on user-owned resources takes a userId
  * so cross-tenant access can only ever return null/0 (mapped to HTTP 404).
  */
+export type InviteCodeFailure = 'missing' | 'invalid' | 'expired' | 'exhausted' | 'inactive'
+export class InviteCodeError extends Error {
+  constructor(readonly reason: InviteCodeFailure) { super(reason) }
+}
+
 export class Database {
   private readonly database: DatabaseSync
   private closed = false
@@ -533,9 +539,22 @@ export class Database {
         password_hash TEXT NOT NULL,
         display_name TEXT NOT NULL,
         avatar_url TEXT,
+        is_admin INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS invite_codes (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL COLLATE NOCASE UNIQUE,
+        created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+        max_uses INTEGER NOT NULL,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        expires_at TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_invite_codes_created ON invite_codes(created_at DESC);
 
       CREATE TABLE IF NOT EXISTS books (
         id TEXT PRIMARY KEY,
@@ -1286,7 +1305,7 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_bilibili_resolutions_publication ON bilibili_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 25;
+      PRAGMA user_version = 26;
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
@@ -1299,6 +1318,7 @@ export class Database {
     this.ensureVideoStudioColumn()
     this.ensureRenderPlatformOptions()
     this.ensureWeiboThreadColumn()
+    this.ensureUserAdminColumn()
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     this.run(`UPDATE douyin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先核实抖音发布结果，避免重复发布。', nowIso()])
     // Never resend an operation that may already have reached WeChat before a restart.
@@ -1349,6 +1369,13 @@ export class Database {
     if (!columns.has('studio_json')) {
       this.database.exec('ALTER TABLE video_projects ADD COLUMN studio_json TEXT')
     }
+  }
+
+  /** Add the admin flag and promote the product owner account. */
+  private ensureUserAdminColumn(): void {
+    const columns = new Set(this.all('PRAGMA table_info(users)').map((row) => text(row.name)))
+    if (!columns.has('is_admin')) this.run('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0')
+    this.run("UPDATE users SET is_admin = 1 WHERE username = 'yuanxin' COLLATE NOCASE")
   }
 
   /** Additive migration for Weibo thread part tracking. */
@@ -1580,6 +1607,7 @@ export class Database {
       email: text(row.email),
       displayName: text(row.display_name),
       avatarUrl: nullableText(row.avatar_url),
+      isAdmin: numberValue(row.is_admin) === 1,
       createdAt: text(row.created_at),
     }
   }
@@ -1588,8 +1616,8 @@ export class Database {
     const id = randomUUID()
     const createdAt = nowIso()
     this.run(
-      `INSERT INTO users (id, username, email, password_hash, display_name, avatar_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+      `INSERT INTO users (id, username, email, password_hash, display_name, avatar_url, is_admin, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, NULL, 0, ?, ?)`,
       [id, values.username, values.email, values.passwordHash, values.displayName, createdAt, createdAt],
     )
     const user = this.findUserById(id)
@@ -1625,6 +1653,61 @@ export class Database {
   emailTaken(email: string): boolean {
     const row = this.get('SELECT 1 AS present FROM users WHERE email = ? COLLATE NOCASE LIMIT 1', [email])
     return Boolean(row)
+  }
+
+  // ---------------------------------------------------------------- invite codes
+
+  private mapInviteCode(row: Row): InviteCode {
+    return {
+      id: text(row.id),
+      code: text(row.code),
+      maxUses: numberValue(row.max_uses),
+      usedCount: numberValue(row.used_count),
+      expiresAt: nullableText(row.expires_at),
+      active: numberValue(row.active) === 1,
+      createdAt: text(row.created_at),
+      lastUsedAt: nullableText(row.last_used_at),
+      createdBy: nullableText(row.created_by),
+    }
+  }
+
+  listInviteCodes(): InviteCode[] {
+    return this.all('SELECT * FROM invite_codes ORDER BY created_at DESC, rowid DESC LIMIT 200').map((row) => this.mapInviteCode(row))
+  }
+
+  createInviteCode(values: { code: string; createdBy: string; maxUses: number; expiresAt: string | null }): InviteCode {
+    const id = randomUUID()
+    this.run(
+      `INSERT INTO invite_codes (id, code, created_by, max_uses, used_count, expires_at, active, created_at)
+       VALUES (?, ?, ?, ?, 0, ?, 1, ?)`,
+      [id, values.code, values.createdBy, values.maxUses, values.expiresAt, nowIso()],
+    )
+    const row = this.get('SELECT * FROM invite_codes WHERE id = ?', [id])
+    if (!row) throw new Error('Failed to create invite code')
+    return this.mapInviteCode(row)
+  }
+
+  setInviteCodeActive(id: string, active: boolean): InviteCode | null {
+    const changed = this.run('UPDATE invite_codes SET active = ? WHERE id = ?', [active ? 1 : 0, id])
+    if (changed === 0) return null
+    const row = this.get('SELECT * FROM invite_codes WHERE id = ?', [id])
+    return row ? this.mapInviteCode(row) : null
+  }
+
+  /** Consume an invite and create the user in one transaction. */
+  createUserWithInvite(values: CreateUserValues, inviteCode: string): User {
+    const code = inviteCode.trim()
+    if (!code) throw new InviteCodeError('missing')
+    return this.transaction(() => {
+      const row = this.get('SELECT * FROM invite_codes WHERE code = ? COLLATE NOCASE LIMIT 1', [code])
+      if (!row) throw new InviteCodeError('invalid')
+      if (numberValue(row.active) !== 1) throw new InviteCodeError('inactive')
+      const expiresAt = nullableText(row.expires_at)
+      if (expiresAt && (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now())) throw new InviteCodeError('expired')
+      if (numberValue(row.used_count) >= numberValue(row.max_uses)) throw new InviteCodeError('exhausted')
+      this.run('UPDATE invite_codes SET used_count = used_count + 1, last_used_at = ? WHERE id = ?', [nowIso(), text(row.id)])
+      return this.createUser(values)
+    })
   }
 
   updateUserProfile(userId: string, values: UpdateProfileValues): User | null {

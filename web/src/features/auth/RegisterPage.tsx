@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
@@ -10,11 +10,12 @@ import {
   Mail,
   UserRound,
   Smile,
+  Ticket,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useServerInfo } from '@/contexts/ServerContext'
 import EmailCodeField from './EmailCodeField'
-import { ApiError } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { safeRedirect } from '@/lib/navigation'
 import AuthLayout from './AuthLayout'
@@ -25,6 +26,7 @@ interface RegisterForm {
   password: string
   confirmPassword: string
   displayName: string
+  inviteCode: string
 }
 
 type RegisterErrors = Partial<Record<keyof RegisterForm, string>>
@@ -40,6 +42,7 @@ function fieldErrorFromApi(error: unknown): RegisterErrors {
     else if (issue.path.endsWith('email')) next.email = issue.message
     else if (issue.path.endsWith('password')) next.password = issue.message
     else if (issue.path.endsWith('displayName')) next.displayName = issue.message
+    else if (issue.path.endsWith('inviteCode')) next.inviteCode = issue.message
   }
   return next
 }
@@ -58,6 +61,7 @@ export default function RegisterPage() {
     password: '',
     confirmPassword: '',
     displayName: '',
+    inviteCode: '',
   })
   const [code, setCode] = useState('')
   const [errors, setErrors] = useState<RegisterErrors>({})
@@ -65,6 +69,15 @@ export default function RegisterPage() {
   const [submitting, setSubmitting] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [inviteRequired, setInviteRequired] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let active = true
+    api.auth.registrationConfig()
+      .then((config) => { if (active) setInviteRequired(config.inviteRequired) })
+      .catch(() => { if (active) setInviteRequired(true) })
+    return () => { active = false }
+  }, [])
 
   function updateField(key: keyof RegisterForm, value: string) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -94,6 +107,8 @@ export default function RegisterPage() {
     if (!form.confirmPassword) nextErrors.confirmPassword = '请再次输入密码'
     else if (form.password !== form.confirmPassword) nextErrors.confirmPassword = '两次输入的密码不一致'
 
+    if (inviteRequired && !form.inviteCode.trim()) nextErrors.inviteCode = '请输入邀请码'
+
     setErrors(nextErrors)
     setServerError(null)
     if (!desktopMode && !/^\d{6}$/.test(code)) { setServerError('请输入六位邮箱验证码'); return }
@@ -107,6 +122,7 @@ export default function RegisterPage() {
         email,
         password: form.password,
         displayName: displayName || undefined,
+        inviteCode: inviteRequired ? form.inviteCode.trim() : undefined,
       })
       navigate(safeRedirect(redirect), { replace: true })
     } catch (error) {
@@ -133,6 +149,38 @@ export default function RegisterPage() {
       ) : null}
 
       <form className="auth-form" onSubmit={handleSubmit} noValidate>
+        {inviteRequired ? (
+          <div className="field">
+            <label className="label" htmlFor="register-invite-code">
+              邀请码
+            </label>
+            <div className="auth-input-wrap">
+              <Ticket size={16} />
+              <input
+                id="register-invite-code"
+                className={`input${errors.inviteCode ? ' error' : ''}`}
+                type="text"
+                name="inviteCode"
+                autoComplete="off"
+                placeholder="请输入管理员提供的邀请码"
+                value={form.inviteCode}
+                onChange={(event) => updateField('inviteCode', event.target.value.toUpperCase())}
+                aria-invalid={Boolean(errors.inviteCode)}
+                aria-describedby={errors.inviteCode ? 'register-invite-error' : 'register-invite-hint'}
+              />
+            </div>
+            {errors.inviteCode ? (
+              <p className="auth-field-error" id="register-invite-error">
+                {errors.inviteCode}
+              </p>
+            ) : (
+              <p className="hint" id="register-invite-hint">
+                邀请码仅由管理员生成；没有邀请码请联系管理员
+              </p>
+            )}
+          </div>
+        ) : null}
+
         <div className="field">
           <label className="label" htmlFor="register-username">
             用户名

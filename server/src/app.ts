@@ -11,6 +11,7 @@ import type { AppConfig } from './config'
 import type { Database } from './db'
 import { createRequireAuth } from './auth'
 import { createAuthRouter } from './routes/auth'
+import { createAdminRouter } from './routes/admin'
 import { createBooksRouter } from './routes/books'
 import { createContentsRouter } from './routes/contents'
 import { createMediaRouter } from './routes/media'
@@ -214,6 +215,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
 
   app.use('/uploads', createUploadsRouter(config.uploadsDir))
   app.use('/api/auth', createAuthRouter(database, config, requireAuth))
+  app.use('/api/admin', createAdminRouter(database, requireAuth))
   app.use('/api/books', requireAuth, createBooksRouter(database))
   app.use('/api/contents', requireAuth, createContentsRouter(database))
   app.use('/api/media', requireAuth, createMediaRouter(database, config))

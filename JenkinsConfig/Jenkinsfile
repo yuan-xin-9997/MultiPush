@@ -19,6 +19,9 @@ pipeline {
         // Twick Studio 只在浏览器端使用；它的可选 renderer 依赖 puppeteer，
         // 但生产发布使用系统 Chrome，无需在每次 CI 安装时下载 Chromium。
         PUPPETEER_SKIP_DOWNLOAD = '1'
+        // CI 的 API/UI 冒烟会新建测试账号；生产 systemd 服务不继承 Jenkins 环境变量，
+        // 因此这里只放开构建期测试，不影响线上注册邀请码校验。
+        INVITE_CODE_BYPASS = '1'
     }
 
     stages {

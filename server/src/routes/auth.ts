@@ -4,7 +4,7 @@ import type { RequestHandler } from 'express'
 import type { AuthResponse, User } from '../../../shared/types'
 import type { AppConfig } from '../config'
 import { hashPassword, signToken, verifyPassword, currentUser } from '../auth'
-import type { Database } from '../db'
+import { InviteCodeError, type Database } from '../db'
 import { ApiError, asyncHandler, notFound, unauthorized } from '../errors'
 import {
   desktopRegisterSchema,
@@ -37,6 +37,9 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
   const router = Router()
   const verification = new EmailVerification(database, config.jwtSecret)
   const sendLimits = new Map<string, { count: number; start: number }>()
+  router.get('/registration-config', (_req, res) => {
+    res.json({ inviteRequired: config.inviteCodeRequired === true })
+  })
   router.post('/email-code', asyncHandler(async (req, res) => {
     if (config.desktopMode) throw new ApiError(400, 'desktop_local_account', '本地版无需邮箱验证码')
     const input = parseInput(emailCodeSchema, req.body)
@@ -91,17 +94,45 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
       }
 
       if (!config.desktopMode) verification.verify(input.email, 'register', input.code ?? '')
+      const inviteRequired = config.inviteCodeRequired === true
+      if (inviteRequired && !input.inviteCode?.trim()) {
+        throw new ApiError(400, 'invite_code_required', '请输入邀请码')
+      }
       const passwordHash = await hashPassword(input.password)
       const displayName = input.displayName?.trim() || input.username
       let user: User
       try {
-        user = database.createUser({
-          username: input.username,
-          email: input.email,
-          passwordHash,
-          displayName,
-        })
+        user = inviteRequired
+          ? database.createUserWithInvite({
+              username: input.username,
+              email: input.email,
+              passwordHash,
+              displayName,
+            }, input.inviteCode!.trim())
+          : database.createUser({
+              username: input.username,
+              email: input.email,
+              passwordHash,
+              displayName,
+            })
       } catch (error) {
+        if (error instanceof InviteCodeError) {
+          const messages = {
+            missing: '请输入邀请码',
+            invalid: '邀请码不存在',
+            inactive: '邀请码已停用',
+            expired: '邀请码已过期',
+            exhausted: '邀请码使用次数已用完',
+          } as const
+          const codes = {
+            missing: 'invite_code_required',
+            invalid: 'invite_code_invalid',
+            inactive: 'invite_code_inactive',
+            expired: 'invite_code_expired',
+            exhausted: 'invite_code_exhausted',
+          } as const
+          throw new ApiError(400, codes[error.reason], messages[error.reason])
+        }
         const duplicate = uniqueConstraintMessage(error)
         if (duplicate) throw duplicate
         throw error

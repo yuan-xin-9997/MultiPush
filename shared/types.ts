@@ -230,6 +230,7 @@ export interface User {
   email: string
   displayName: string
   avatarUrl: string | null
+  isAdmin: boolean
   createdAt: string
 }
 
@@ -244,6 +245,28 @@ export interface RegisterInput {
   email: string
   password: string
   displayName?: string
+  inviteCode?: string
+}
+
+export interface RegistrationConfig {
+  inviteRequired: boolean
+}
+
+export interface InviteCode {
+  id: string
+  code: string
+  maxUses: number
+  usedCount: number
+  expiresAt: string | null
+  active: boolean
+  createdAt: string
+  lastUsedAt: string | null
+  createdBy: string | null
+}
+
+export interface InviteCodeInput {
+  maxUses: number
+  expiresAt?: string | null
 }
 
 export interface LoginInput {
