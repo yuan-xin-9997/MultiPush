@@ -16,6 +16,9 @@ pipeline {
     environment {
         DEPLOY_ROOT  = '/opt/MultiPush'
         SERVICE_NAME = 'multipush.service'
+        // Twick Studio 只在浏览器端使用；它的可选 renderer 依赖 puppeteer，
+        // 但生产发布使用系统 Chrome，无需在每次 CI 安装时下载 Chromium。
+        PUPPETEER_SKIP_DOWNLOAD = '1'
     }
 
     stages {
