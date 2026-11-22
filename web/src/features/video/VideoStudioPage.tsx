@@ -15,7 +15,7 @@ import type { ContentDetail, VideoClipDetail, VideoClipInput, VideoStudioProject
 import { absoluteUrl, api } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import './video-studio.css'
-import '@twick/studio/dist/studio.css'
+import twickStudioCssUrl from '@twick/studio/dist/studio.css?url'
 
 type SaveState = 'saved' | 'saving' | 'error'
 
@@ -264,12 +264,39 @@ function StudioBridge({ contentId, clips, onStatusChange, onSavedProject }: Stud
   return null
 }
 
+/**
+ * Twick ships a global stylesheet (body, :root, .card, ...). Loading it only
+ * while the studio route is mounted prevents its dark theme from leaking into
+ * the library/editor after the user leaves the studio.
+ */
+function useTwickStudioStyles(): boolean {
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    setReady(false)
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = twickStudioCssUrl
+    link.dataset.twickStudioStyles = 'true'
+    let active = true
+    const finish = () => { if (active) setReady(true) }
+    link.addEventListener('load', finish, { once: true })
+    link.addEventListener('error', finish, { once: true })
+    document.head.appendChild(link)
+    return () => {
+      active = false
+      link.remove()
+    }
+  }, [])
+  return ready
+}
+
 export default function VideoStudioPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [content, setContent] = useState<ContentDetail | null>(null)
   const [studio, setStudio] = useState<VideoStudioProject | null>(null)
   const [loading, setLoading] = useState(true)
+  const twickStylesReady = useTwickStudioStyles()
   const [error, setError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const initialProjectRef = useRef<ProjectJSON | null>(null)
@@ -349,7 +376,7 @@ export default function VideoStudioPage() {
     }
   }, [id, navigate, studio?.clips])
 
-  if (loading) {
+  if (loading || !twickStylesReady) {
     return (
       <div className="video-studio-loading">
         <LoaderCircle size={22} className="spin" />
