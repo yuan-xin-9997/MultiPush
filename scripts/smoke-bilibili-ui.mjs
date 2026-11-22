@@ -14,7 +14,13 @@ const dataDir = path.join(output, 'data')
 rmSync(dataDir, { recursive: true, force: true })
 const port = Number(process.env.BILI_QA_PORT || 34262)
 const base = `http://127.0.0.1:${port}`
-const chrome = process.env.CHROME_BIN || [chromium.executablePath(), '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find(existsSync)
+const chrome = process.env.CHROME_BIN || [
+  chromium.executablePath(),
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium',
+].find(existsSync)
 assert.ok(chrome, 'Chrome missing')
 
 const server = spawn(process.execPath, ['server/dist/index.js'], {
