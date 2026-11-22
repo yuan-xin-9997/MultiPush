@@ -4,7 +4,7 @@ import { currentUser } from '../auth'
 import type { Database } from '../db'
 import type { VideoService } from '../video'
 import { asyncHandler } from '../errors'
-import { parseInput, videoTimelineSchema } from '../validation'
+import { parseInput, videoExportBodySchema, videoTimelineSchema } from '../validation'
 
 /**
  * Timeline editing + export endpoints for video contents. Auth is applied per
@@ -42,7 +42,8 @@ export function createVideoRouter(database: Database, video: VideoService, requi
     requireAuth,
     asyncHandler(async (req, res) => {
       const user = currentUser(req)
-      const record = await video.createExport(user.id, req.params.id)
+      const input = parseInput(videoExportBodySchema, req.body ?? {})
+      const record = await video.createExport(user.id, req.params.id, input.source)
       res.json({ export: record })
     }),
   )

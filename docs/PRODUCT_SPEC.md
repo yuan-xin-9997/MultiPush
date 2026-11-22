@@ -199,7 +199,7 @@ docs/                    文档
 - 素材卡片展示缩略图/类型角标/文件名/大小/时间；支持预览（图片、视频、PDF iframe、Markdown 渲染预览、其他文本源码）、下载、复制链接、在新标签打开、删除。
 - 图片和文本类文档在小于 1MB 时可在弹窗内预览；Office 文档提示下载后查看。删除素材会同时删除文件，引用该 URL 的内容将无法显示。
 - 所有上传入口（编辑器、图文工作台、视频工作台、AI 创作、发布页）共用素材表，新上传的文件会自动出现在素材库；当前所在文件夹中的上传会直接归入该文件夹。
-- 素材复用：文章编辑器可通过工具栏或 `/` 菜单「从素材库插入」图片、视频和文档；图文工作台「从素材库添加」图片；视频工作台「从素材库添加视频」把已有视频加入时间线。选择器支持类型切换、文件夹筛选、搜索和分页。
+- 素材复用：文章编辑器可通过工具栏或 `/` 菜单「从素材库插入」图片、视频和文档；图文工作台「从素材库添加」图片；视频工作台「从素材库添加视频」把已有视频加入素材列表和时间线。选择器支持类型切换、文件夹筛选、搜索和分页。
 - 移动端：文件夹卡片换行展示，素材卡片单列，无横向溢出。
 
 ## 4. 后端 API 契约
@@ -244,9 +244,10 @@ docs/                    文档
 
 ### 视频剪辑
 
-- `GET /api/contents/:id/video` → `{ project, capability }`：时间线片段（含素材信息、入/出点、时长）与服务器 ffmpeg/ffprobe 能力。
-- `PUT /api/contents/:id/video/timeline` `{ clips: [{mediaId, trimStart?, trimEnd?, duration?}] }` → `{ project }`：整体替换时间线，顺序即成片顺序；入/出点单位为秒，服务端按素材时长裁剪非法值。
-- `POST /api/contents/:id/video/export` → `{ export }`：按当前时间线创建异步导出任务（服务端 ffmpeg 逐段裁剪 + 统一规格 + concat 合并）。
+- `GET /api/contents/:id/video` → `{ project, capability }`：素材列表、时间线片段（含素材信息、入/出点、时长）、`edited` 状态与服务器 ffmpeg/ffprobe 能力。
+- `PUT /api/contents/:id/video/timeline` `{ clips: [{mediaId, trimStart?, trimEnd?, duration?}] }` → `{ project }`：整体替换时间线，顺序即成片顺序；服务端保留原始素材列表并自动补齐，按素材时长裁剪非法值。
+- `POST /api/contents/:id/video/export` body `{ source: 'timeline' | 'materials' }` → `{ export }`：按时间线或原始素材顺序创建异步导出任务（ffmpeg 逐段裁剪 / 简单拼接 + 统一规格 + concat 合并）。
+- 未剪辑视频的渲染门禁：`GET /api/contents/:id/video` 的 `edited=false` 时，渲染工作台提示「视频素材未剪辑，则简单拼接输出视频」，确认后调用 `source=materials` 导出简单拼接成片再渲染。
 - `GET /api/contents/:id/video/exports` → `{ exports }`；`GET /api/video-exports/:exportId` → `{ export }`（状态/进度/输出素材）；`DELETE /api/video-exports/:exportId` 删除记录。
 - `GET /api/media/:id/probe` → `{ probe }`：ffprobe 探测视频素材（时长/分辨率/音轨/编码）。
 - 仅 `kind=video` 的内容支持时间线；其他内容返回 400。详见 [视频内容说明](VIDEO_CONTENT.md)。

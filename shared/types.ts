@@ -389,9 +389,19 @@ export interface VideoClipInput {
   duration?: number | null
 }
 
+export interface VideoMaterial {
+  mediaId: string
+  /** The raw source asset, or null when it was deleted from the media library. */
+  media: MediaAsset | null
+}
+
 export interface VideoProject {
   contentId: string
+  /** Raw uploaded source materials, in upload order. */
+  materials: VideoMaterial[]
   clips: VideoClipDetail[]
+  /** True when the timeline differs from a plain concatenation of materials. */
+  edited: boolean
   /** Sum of trim durations in seconds. */
   totalDuration: number
   updatedAt: string

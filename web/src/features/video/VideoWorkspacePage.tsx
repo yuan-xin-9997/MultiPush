@@ -27,6 +27,7 @@ import type {
   VideoClipDetail,
   VideoClipInput,
   VideoExport,
+  VideoMaterial,
 } from '@shared/types'
 import { api, absoluteUrl } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
@@ -36,6 +37,7 @@ import MediaPicker from '@/components/MediaPicker'
 import './video.css'
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error'
+type WorkspaceMode = 'materials' | 'edit'
 
 interface UploadTask {
   id: string
@@ -121,6 +123,10 @@ export default function VideoWorkspacePage() {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [tags, setTags] = useState('')
+  const [mode, setMode] = useState<WorkspaceMode>('materials')
+  const [materials, setMaterials] = useState<VideoMaterial[]>([])
+  const [edited, setEdited] = useState(false)
+  const [activeMaterialIndex, setActiveMaterialIndex] = useState(0)
   const [clips, setClips] = useState<VideoClipDetail[]>([])
   const [activeIndex, setActiveIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -138,6 +144,7 @@ export default function VideoWorkspacePage() {
   const [exportsOpen, setExportsOpen] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const materialVideoRef = useRef<HTMLVideoElement | null>(null)
   const pendingSeekRef = useRef<number | null>(null)
   const pendingPlayRef = useRef(false)
   const clipsRef = useRef(clips)
@@ -184,6 +191,9 @@ export default function VideoWorkspacePage() {
         setBody(htmlToBodyLines(detail.contentHtml))
         setTags(detail.tags.join(', '))
         setClips(projectResult.project.clips)
+        setMaterials(projectResult.project.materials)
+        setEdited(projectResult.project.edited)
+        setMode(projectResult.project.clips.length > 0 ? 'edit' : 'materials')
         setCapability(projectResult.capability)
         clipsRef.current = projectResult.project.clips
         timelineDirtyRef.current = false
@@ -302,6 +312,8 @@ export default function VideoWorkspacePage() {
         setTimelineState('saved')
         setLastSavedAt(new Date())
         setClips(project.clips)
+        setMaterials(project.materials)
+        setEdited(project.edited)
         clipsRef.current = project.clips
         setActiveIndex((index) => Math.min(index, Math.max(0, project.clips.length - 1)))
       } else {
@@ -402,6 +414,76 @@ export default function VideoWorkspacePage() {
     markTimelineDirty()
   }, [markTimelineDirty])
 
+  // ------------------------------------------------------------- material mode
+
+  const toClip = useCallback((material: VideoMaterial, index: number): VideoClipDetail | null => {
+    if (!material.media) return null
+    return {
+      id: `local-${material.mediaId}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+      mediaId: material.mediaId,
+      trimStart: 0,
+      trimEnd: null,
+      duration: material.media.duration ?? null,
+      trimDuration: material.media.duration ?? 0,
+      media: material.media,
+    }
+  }, [])
+
+  const switchMode = useCallback((next: WorkspaceMode) => {
+    if (next === 'edit' && clipsRef.current.length === 0 && materials.length > 0) {
+      const nextClips = materials
+        .map((material, index) => toClip(material, index))
+        .filter((clip): clip is VideoClipDetail => clip !== null)
+      if (nextClips.length > 0) {
+        setClips(nextClips)
+        clipsRef.current = nextClips
+        setActiveIndex(0)
+        markTimelineDirty()
+      }
+    }
+    setMode(next)
+  }, [markTimelineDirty, materials, toClip])
+
+  const addMaterialToTimeline = useCallback((material: VideoMaterial) => {
+    if (!material.media) {
+      toast.error('素材文件已被删除，无法加入时间线')
+      return
+    }
+    if (clipsRef.current.some((clip) => clip.mediaId === material.mediaId)) {
+      setMode('edit')
+      setActiveIndex(clipsRef.current.findIndex((clip) => clip.mediaId === material.mediaId))
+      toast.info('这段素材已经在剪辑时间线中')
+      return
+    }
+    const clip = toClip(material, clipsRef.current.length)
+    if (!clip) return
+    const next = [...clipsRef.current, clip]
+    setClips(next)
+    clipsRef.current = next
+    setActiveIndex(next.length - 1)
+    markTimelineDirty()
+    setMode('edit')
+    toast.success('已加入剪辑时间线')
+  }, [markTimelineDirty, toClip])
+
+  const activeMaterial = materials[activeMaterialIndex] ?? materials[0] ?? null
+  const materialTotalDuration = materials.reduce((sum, material) => sum + (material.media?.duration ?? 0), 0)
+
+  useEffect(() => {
+    const video = materialVideoRef.current
+    const media = activeMaterial?.media
+    if (!video || !media) return
+    const url = absoluteUrl(media.url)
+    if (video.dataset.activeSrc !== url) {
+      video.dataset.activeSrc = url
+      video.src = url
+    }
+  }, [activeMaterial])
+
+  useEffect(() => {
+    setActiveMaterialIndex((index) => Math.min(index, Math.max(0, materials.length - 1)))
+  }, [materials.length])
+
   // ------------------------------------------------------------- uploading
 
   const appendUploadedClip = useCallback(async (media: MediaAsset, source?: File) => {
@@ -438,6 +520,9 @@ export default function VideoWorkspacePage() {
     }
     setClips((current) => [...current, clip])
     clipsRef.current = [...clipsRef.current, clip]
+    setMaterials((current) => current.some((material) => material.mediaId === media.id)
+      ? current
+      : [...current, { mediaId: media.id, media: clip.media }])
     markTimelineDirty()
     setActiveIndex(clipsRef.current.length - 1)
   }, [markTimelineDirty])
@@ -498,7 +583,7 @@ export default function VideoWorkspacePage() {
         pendingSeekRef.current = activeClip.trimStart
       }
     }
-  }, [activeClip, activeIndex])
+  }, [activeClip, activeIndex, mode])
 
   const handleLoadedMetadata = useCallback(() => {
     const video = videoRef.current
@@ -620,19 +705,19 @@ export default function VideoWorkspacePage() {
   const handleExport = useCallback(async () => {
     const contentId = contentIdRef.current
     if (!contentId || exporting) return
-    if (timelineDirtyRef.current) await saveTimeline(true)
+    if (mode === 'edit' && timelineDirtyRef.current) await saveTimeline(true)
     setExporting(true)
     try {
-      const { export: record } = await api.video.createExport(contentId)
+      const { export: record } = await api.video.createExport(contentId, mode === 'materials' ? 'materials' : 'timeline')
       setExports((current) => [record, ...current])
       setExportsOpen(true)
-      toast.success('导出任务已创建，正在后台剪辑合成')
+      toast.success(mode === 'materials' ? '素材拼接任务已创建，正在后台简单拼接' : '导出任务已创建，正在后台剪辑合成')
     } catch (error) {
       toast.error(getErrorMessage(error, '创建导出任务失败'))
     } finally {
       setExporting(false)
     }
-  }, [exporting, saveTimeline])
+  }, [exporting, mode, saveTimeline])
 
   const handleDeleteExport = useCallback(async (exportId: string) => {
     try {
@@ -734,6 +819,29 @@ export default function VideoWorkspacePage() {
             }}
           />
         </div>
+        <div className="video-mode-switch" role="tablist" aria-label="视频工作模式">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'materials'}
+            className={cn('video-mode-btn', mode === 'materials' && 'is-active')}
+            onClick={() => switchMode('materials')}
+          >
+            <Film size={14} />
+            素材模式
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'edit'}
+            className={cn('video-mode-btn', mode === 'edit' && 'is-active')}
+            onClick={() => switchMode('edit')}
+          >
+            <Scissors size={14} />
+            剪辑模式
+            <span className={cn('video-mode-state', edited ? 'is-edited' : 'is-raw')}>{edited ? '已剪辑' : '未剪辑'}</span>
+          </button>
+        </div>
         <div className="video-header-actions">
           <span className={cn('video-save-state', overallState === 'error' && 'is-error', overallState === 'saving' && 'is-saving')}>
             {overallState === 'saving' ? <LoaderCircle size={13} className="spin" /> : null}
@@ -743,9 +851,9 @@ export default function VideoWorkspacePage() {
             <Download size={15} />
             导出记录{exports.length > 0 ? ` (${exports.length})` : ''}
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => void handleExport()} disabled={exporting || clips.length === 0}>
+          <button type="button" className="btn btn-primary" onClick={() => void handleExport()} disabled={exporting || (mode === 'edit' ? clips.length === 0 : materials.length === 0)}>
             {exporting ? <LoaderCircle size={15} className="spin" /> : <Film size={15} />}
-            导出成片
+            {mode === 'materials' ? '导出素材拼接' : '导出成片'}
           </button>
         </div>
       </header>
@@ -759,94 +867,171 @@ export default function VideoWorkspacePage() {
 
       <div className="video-layout">
         <section className="video-player-col">
-          <div className="video-player-card">
-            {activeClip ? (
-              <video
-                ref={videoRef}
-                className="video-player"
-                controls
-                preload="auto"
-                playsInline
-                onLoadedMetadata={handleLoadedMetadata}
-                onTimeUpdate={handleTimeUpdate}
-                onEnded={handleEnded}
-                onPlay={() => setPlaying(true)}
-                onPause={() => setPlaying(false)}
-              />
-            ) : (
-              <div className="video-player-placeholder">
-                <Film size={34} />
-                <p>上传视频后即可预览与剪辑</p>
-              </div>
-            )}
-            {activeClip ? (
-              <div className="video-player-meta">
-                <span className="video-clip-name" title={activeClip.media?.originalName}>
-                  片段 {activeIndex + 1}/{clips.length} · {activeClip.media?.originalName ?? '未知素材'}
-                </span>
-                <span className="video-clip-range">
-                  {formatSeconds(activeClip.trimStart)} – {activeClip.trimEnd === null ? '结尾' : formatSeconds(activeClip.trimEnd)}
-                </span>
-              </div>
-            ) : null}
-            {activeClip ? (
-              <div className="video-player-controls">
-                <button type="button" className="btn btn-sm" onClick={() => setActiveIndex((value) => Math.max(0, value - 1))} disabled={activeIndex === 0}>
-                  <SkipBack size={14} />
-                  上一段
-                </button>
-                <button type="button" className="btn btn-sm btn-primary" onClick={togglePlay}>
-                  {playing ? <Pause size={14} /> : <Play size={14} />}
-                  {playing ? '暂停' : '播放本段'}
-                </button>
-                <button type="button" className="btn btn-sm" onClick={playTimeline} disabled={clips.length < 2}>
-                  <Play size={14} />
-                  播放整条
-                </button>
-                <button type="button" className="btn btn-sm" onClick={() => setActiveIndex((value) => Math.min(clips.length - 1, value + 1))} disabled={activeIndex >= clips.length - 1}>
-                  下一段
-                  <SkipForward size={14} />
-                </button>
-                <span className="video-player-divider" />
-                <button type="button" className="btn btn-sm" onClick={setInPoint} title="把当前播放位置设为片段起点">
-                  <Scissors size={14} />
-                  设入点
-                </button>
-                <button type="button" className="btn btn-sm" onClick={setOutPoint} title="把当前播放位置设为片段终点">
-                  <Scissors size={14} />
-                  设出点
-                </button>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="video-strip-card">
-            <div className="video-strip-head">
-              <span>时间线</span>
-              <span className="video-strip-total">
-                {clips.length} 段 · 总时长 {formatSeconds(totalDuration)}
-              </span>
-            </div>
-            {clips.length > 0 ? (
-              <div className="video-strip">
-                {clips.map((clip, index) => (
-                  <button
-                    key={clip.id}
-                    type="button"
-                    className={cn('video-strip-segment', index === activeIndex && 'is-active', !clip.media && 'is-missing')}
-                    style={{ flexGrow: Math.max(0.4, clip.trimDuration || 0.4) }}
-                    onClick={() => setActiveIndex(index)}
-                    title={`片段 ${index + 1} · ${formatSeconds(clip.trimDuration)}`}
-                  >
-                    <span>{index + 1}</span>
-                    <span className="video-strip-duration">{formatSeconds(clip.trimDuration)}</span>
+          {mode === 'materials' ? (
+            <div className="video-player-card">
+              {activeMaterial?.media ? (
+                <video
+                  key={activeMaterial.mediaId}
+                  ref={materialVideoRef}
+                  className="video-player"
+                  controls
+                  preload="metadata"
+                  playsInline
+                  src={absoluteUrl(activeMaterial.media.url)}
+                />
+              ) : (
+                <div className="video-player-placeholder">
+                  <Film size={34} />
+                  <p>{materials.length > 0 ? '素材文件已被删除' : '上传素材后在这里预览原始视频'}</p>
+                </div>
+              )}
+              {activeMaterial ? (
+                <div className="video-player-meta">
+                  <span className="video-clip-name" title={activeMaterial.media?.originalName}>
+                    素材 {activeMaterialIndex + 1}/{materials.length} · {activeMaterial.media?.originalName ?? '素材已删除'}
+                  </span>
+                  <span className="video-clip-range">
+                    原始时长 {formatSeconds(activeMaterial.media?.duration)}
+                  </span>
+                </div>
+              ) : null}
+              {activeMaterial ? (
+                <div className="video-player-controls">
+                  <button type="button" className="btn btn-sm" onClick={() => void addMaterialToTimeline(activeMaterial)} disabled={!activeMaterial.media}>
+                    <Scissors size={14} />
+                    加入剪辑时间线
                   </button>
-                ))}
+                  <button type="button" className="btn btn-sm btn-primary" onClick={() => switchMode('edit')}>
+                    <Clapperboard size={14} />
+                    进入剪辑模式
+                  </button>
+                  <span className="video-mode-hint">素材模式保持上传时的原始顺序和完整时长</span>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="video-player-card">
+              {activeClip ? (
+                <video
+                  ref={videoRef}
+                  className="video-player"
+                  controls
+                  preload="auto"
+                  playsInline
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onTimeUpdate={handleTimeUpdate}
+                  onEnded={handleEnded}
+                  onPlay={() => setPlaying(true)}
+                  onPause={() => setPlaying(false)}
+                />
+              ) : (
+                <div className="video-player-placeholder">
+                  <Film size={34} />
+                  <p>上传视频后即可预览与剪辑</p>
+                </div>
+              )}
+              {activeClip ? (
+                <div className="video-player-meta">
+                  <span className="video-clip-name" title={activeClip.media?.originalName}>
+                    片段 {activeIndex + 1}/{clips.length} · {activeClip.media?.originalName ?? '未知素材'}
+                  </span>
+                  <span className="video-clip-range">
+                    {formatSeconds(activeClip.trimStart)} – {activeClip.trimEnd === null ? '结尾' : formatSeconds(activeClip.trimEnd)}
+                  </span>
+                </div>
+              ) : null}
+              {activeClip ? (
+                <div className="video-player-controls">
+                  <button type="button" className="btn btn-sm" onClick={() => setActiveIndex((value) => Math.max(0, value - 1))} disabled={activeIndex === 0}>
+                    <SkipBack size={14} />
+                    上一段
+                  </button>
+                  <button type="button" className="btn btn-sm btn-primary" onClick={togglePlay}>
+                    {playing ? <Pause size={14} /> : <Play size={14} />}
+                    {playing ? '暂停' : '播放本段'}
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={playTimeline} disabled={clips.length < 2}>
+                    <Play size={14} />
+                    播放整条
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={() => setActiveIndex((value) => Math.min(clips.length - 1, value + 1))} disabled={activeIndex >= clips.length - 1}>
+                    下一段
+                    <SkipForward size={14} />
+                  </button>
+                  <span className="video-player-divider" />
+                  <button type="button" className="btn btn-sm" onClick={setInPoint} title="把当前播放位置设为片段起点">
+                    <Scissors size={14} />
+                    设入点
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={setOutPoint} title="把当前播放位置设为片段终点">
+                    <Scissors size={14} />
+                    设出点
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {mode === 'materials' ? (
+            <div className="video-strip-card">
+              <div className="video-strip-head">
+                <span>素材顺序</span>
+                <span className="video-strip-total">
+                  {materials.length} 段 · 原始总时长 {formatSeconds(materialTotalDuration)}
+                </span>
               </div>
-            ) : (
-              <p className="video-strip-empty">还没有片段，先上传一段或多段视频。</p>
-            )}
-          </div>
+              {materials.length > 0 ? (
+                <>
+                  <div className="video-strip">
+                    {materials.map((material, index) => (
+                      <button
+                        key={material.mediaId}
+                        type="button"
+                        className={cn('video-strip-segment', index === activeMaterialIndex && 'is-active', !material.media && 'is-missing')}
+                        style={{ flexGrow: Math.max(0.4, material.media?.duration ?? 0.4) }}
+                        onClick={() => setActiveMaterialIndex(index)}
+                        title={`素材 ${index + 1} · ${formatSeconds(material.media?.duration)}`}
+                      >
+                        <span>{index + 1}</span>
+                        <span className="video-strip-duration">{formatSeconds(material.media?.duration)}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="video-strip-note">素材模式保持上传时的原始顺序和完整时长；渲染前如果未剪辑，会提示是否简单拼接。</p>
+                </>
+              ) : (
+                <p className="video-strip-empty">还没有素材，先上传一段或多段视频。</p>
+              )}
+            </div>
+          ) : (
+            <div className="video-strip-card">
+              <div className="video-strip-head">
+                <span>时间线</span>
+                <span className="video-strip-total">
+                  {clips.length} 段 · 总时长 {formatSeconds(totalDuration)}
+                </span>
+              </div>
+              {clips.length > 0 ? (
+                <div className="video-strip">
+                  {clips.map((clip, index) => (
+                    <button
+                      key={clip.id}
+                      type="button"
+                      className={cn('video-strip-segment', index === activeIndex && 'is-active', !clip.media && 'is-missing')}
+                      style={{ flexGrow: Math.max(0.4, clip.trimDuration || 0.4) }}
+                      onClick={() => setActiveIndex(index)}
+                      title={`片段 ${index + 1} · ${formatSeconds(clip.trimDuration)}`}
+                    >
+                      <span>{index + 1}</span>
+                      <span className="video-strip-duration">{formatSeconds(clip.trimDuration)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="video-strip-empty">还没有片段，先上传一段或多段视频。</p>
+              )}
+            </div>
+          )}
 
           <div className="video-body-card">
             <label className="video-field-label" htmlFor="video-body">正文内容</label>
@@ -934,110 +1119,183 @@ export default function VideoWorkspacePage() {
             </div>
           ) : null}
 
-          <div className="video-clips-card">
-            <div className="video-clips-head">
-              <span>片段列表</span>
-              <span>{clips.length} 段</span>
-            </div>
-            {clips.length === 0 ? (
-              <p className="video-clips-empty">上传的视频会按顺序排列在这里，可修剪、调序和删除。</p>
-            ) : (
-              <ul className="video-clip-list">
-                {clips.map((clip, index) => (
-                  <li
-                    key={clip.id}
-                    className={cn('video-clip-item', index === activeIndex && 'is-active')}
-                    onClick={() => setActiveIndex(index)}
-                  >
-                    <div className="video-clip-thumb">
-                      {clip.media ? (
-                        <video
-                          src={`${absoluteUrl(clip.media.url)}#t=${Math.min(clip.trimStart + 0.2, Math.max(0, (clip.duration ?? 2) / 2))}`}
-                          preload="metadata"
-                          muted
-                          tabIndex={-1}
-                        />
-                      ) : (
-                        <CircleAlert size={18} />
-                      )}
-                      <span className="video-clip-index">{index + 1}</span>
-                    </div>
-                    <div className="video-clip-info">
-                      <p className="video-clip-title" title={clip.media?.originalName ?? '素材已删除'}>
-                        {clip.media?.originalName ?? '素材已删除'}
-                      </p>
-                      <div className="video-clip-trims">
-                        <label>
-                          入点
-                          <input
-                            type="number"
-                            min={0}
-                            step={0.1}
-                            value={clip.trimStart}
-                            disabled={!clip.media}
-                            onChange={(event) => {
-                              const next = Number(event.target.value)
-                              if (!Number.isFinite(next)) return
-                              const out = clipOutPoint(clip)
-                              const clamped = Math.max(0, Math.min(next, (out ?? next + 1) - 0.1))
-                              updateClip(clip.id, { trimStart: Math.round(clamped * 100) / 100 })
-                            }}
-                          />
-                        </label>
-                        <label>
-                          出点
-                          <input
-                            type="number"
-                            min={0}
-                            step={0.1}
-                            value={clip.trimEnd ?? ''}
-                            placeholder="结尾"
-                            disabled={!clip.media}
-                            onChange={(event) => {
-                              const raw = event.target.value
-                              if (raw === '') {
-                                updateClip(clip.id, { trimEnd: null })
-                                return
-                              }
-                              const next = Number(raw)
-                              if (!Number.isFinite(next)) return
-                              const start = clip.trimStart
-                              const sourceEnd = clip.duration ?? null
-                              let clamped = Math.max(start + 0.1, next)
-                              if (sourceEnd !== null) clamped = Math.min(clamped, sourceEnd)
-                              const reachedEnd = sourceEnd !== null && Math.abs(clamped - sourceEnd) < 0.05
-                              updateClip(clip.id, { trimEnd: reachedEnd ? null : Math.round(clamped * 100) / 100 })
-                            }}
-                          />
-                        </label>
-                        <span className="video-clip-duration">
-                          {formatSeconds(clip.trimDuration)}
-                          {clip.media ? ` / ${formatSeconds(clip.duration)}` : ''}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="video-clip-actions">
-                      <button type="button" className="icon-btn" onClick={(event) => { event.stopPropagation(); moveClip(index, -1) }} disabled={index === 0} aria-label="上移片段">
-                        <ChevronUp size={14} />
-                      </button>
-                      <button type="button" className="icon-btn" onClick={(event) => { event.stopPropagation(); moveClip(index, 1) }} disabled={index === clips.length - 1} aria-label="下移片段">
-                        <ChevronDown size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn is-danger"
-                        onClick={(event) => { event.stopPropagation(); removeClip(index) }}
-                        aria-label="删除片段"
-                        title="从时间线移除（不删除素材）"
+          {mode === 'materials' ? (
+            <div className="video-clips-card video-materials-card">
+              <div className="video-clips-head">
+                <span>素材列表</span>
+                <span>{materials.length} 段</span>
+              </div>
+              {materials.length === 0 ? (
+                <p className="video-clips-empty">上传的视频会以原始形式排列在这里；切换到剪辑模式后再裁剪、调序和删除。</p>
+              ) : (
+                <ul className="video-material-list">
+                  {materials.map((material, index) => {
+                    const inTimeline = clips.some((clip) => clip.mediaId === material.mediaId)
+                    return (
+                      <li
+                        key={material.mediaId}
+                        className={cn('video-material-item', index === activeMaterialIndex && 'is-active', !material.media && 'is-missing')}
+                        onClick={() => setActiveMaterialIndex(index)}
                       >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                        <div className="video-clip-thumb">
+                          {material.media ? (
+                            <video
+                              src={`${absoluteUrl(material.media.url)}#t=0.2`}
+                              preload="metadata"
+                              muted
+                              tabIndex={-1}
+                            />
+                          ) : (
+                            <CircleAlert size={18} />
+                          )}
+                          <span className="video-clip-index">{index + 1}</span>
+                        </div>
+                        <div className="video-clip-info">
+                          <p className="video-clip-title" title={material.media?.originalName ?? '素材已删除'}>
+                            {material.media?.originalName ?? '素材已删除'}
+                          </p>
+                          <div className="video-material-meta">
+                            <span>{formatSeconds(material.media?.duration)}</span>
+                            {material.media?.width && material.media?.height ? <span>{material.media.width}×{material.media.height}</span> : null}
+                            {inTimeline ? <span className="video-material-badge">已在时间线</span> : null}
+                          </div>
+                        </div>
+                        <div className="video-clip-actions">
+                          {!inTimeline ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              disabled={!material.media}
+                              onClick={(event) => { event.stopPropagation(); addMaterialToTimeline(material) }}
+                            >
+                              加入时间线
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              onClick={(event) => { event.stopPropagation(); switchMode('edit') }}
+                            >
+                              去剪辑
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+              {materials.length > 0 ? (
+                <p className="video-material-note">素材模式不改变原始文件；裁剪、入点/出点和顺序调整都在剪辑模式完成。</p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="video-clips-card">
+              <div className="video-clips-head">
+                <span>片段列表</span>
+                <span>{clips.length} 段</span>
+              </div>
+              {clips.length === 0 ? (
+                <p className="video-clips-empty">上传的视频会按顺序排列在这里，可修剪、调序和删除。</p>
+              ) : (
+                <ul className="video-clip-list">
+                  {clips.map((clip, index) => (
+                    <li
+                      key={clip.id}
+                      className={cn('video-clip-item', index === activeIndex && 'is-active')}
+                      onClick={() => setActiveIndex(index)}
+                    >
+                      <div className="video-clip-thumb">
+                        {clip.media ? (
+                          <video
+                            src={`${absoluteUrl(clip.media.url)}#t=${Math.min(clip.trimStart + 0.2, Math.max(0, (clip.duration ?? 2) / 2))}`}
+                            preload="metadata"
+                            muted
+                            tabIndex={-1}
+                          />
+                        ) : (
+                          <CircleAlert size={18} />
+                        )}
+                        <span className="video-clip-index">{index + 1}</span>
+                      </div>
+                      <div className="video-clip-info">
+                        <p className="video-clip-title" title={clip.media?.originalName ?? '素材已删除'}>
+                          {clip.media?.originalName ?? '素材已删除'}
+                        </p>
+                        <div className="video-clip-trims">
+                          <label>
+                            入点
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.1}
+                              value={clip.trimStart}
+                              disabled={!clip.media}
+                              onChange={(event) => {
+                                const next = Number(event.target.value)
+                                if (!Number.isFinite(next)) return
+                                const out = clipOutPoint(clip)
+                                const clamped = Math.max(0, Math.min(next, (out ?? next + 1) - 0.1))
+                                updateClip(clip.id, { trimStart: Math.round(clamped * 100) / 100 })
+                              }}
+                            />
+                          </label>
+                          <label>
+                            出点
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.1}
+                              value={clip.trimEnd ?? ''}
+                              placeholder="结尾"
+                              disabled={!clip.media}
+                              onChange={(event) => {
+                                const raw = event.target.value
+                                if (raw === '') {
+                                  updateClip(clip.id, { trimEnd: null })
+                                  return
+                                }
+                                const next = Number(raw)
+                                if (!Number.isFinite(next)) return
+                                const start = clip.trimStart
+                                const sourceEnd = clip.duration ?? null
+                                let clamped = Math.max(start + 0.1, next)
+                                if (sourceEnd !== null) clamped = Math.min(clamped, sourceEnd)
+                                const reachedEnd = sourceEnd !== null && Math.abs(clamped - sourceEnd) < 0.05
+                                updateClip(clip.id, { trimEnd: reachedEnd ? null : Math.round(clamped * 100) / 100 })
+                              }}
+                            />
+                          </label>
+                          <span className="video-clip-duration">
+                            {formatSeconds(clip.trimDuration)}
+                            {clip.media ? ` / ${formatSeconds(clip.duration)}` : ''}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="video-clip-actions">
+                        <button type="button" className="icon-btn" onClick={(event) => { event.stopPropagation(); moveClip(index, -1) }} disabled={index === 0} aria-label="上移片段">
+                          <ChevronUp size={14} />
+                        </button>
+                        <button type="button" className="icon-btn" onClick={(event) => { event.stopPropagation(); moveClip(index, 1) }} disabled={index === clips.length - 1} aria-label="下移片段">
+                          <ChevronDown size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn is-danger"
+                          onClick={(event) => { event.stopPropagation(); removeClip(index) }}
+                          aria-label="删除片段"
+                          title="从时间线移除（不删除素材）"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
         </aside>
       </div>
 

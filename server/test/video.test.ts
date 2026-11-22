@@ -206,6 +206,22 @@ describe('video service timeline validation', () => {
     await expect(video.saveTimeline(user.id, content.id, [{ mediaId: foreign.id }])).rejects.toMatchObject({ code: 'not_video' })
   })
 
+  it('tracks raw materials and marks only genuinely edited timelines', async () => {
+    const context = setup()
+    const { user, content } = createVideoUser(context, 'material_user')
+    const video = new VideoService(context.database, context.config)
+    const first = context.database.createMedia(user.id, { kind: 'video', filename: 'first.mp4', originalName: 'first.mp4', mimeType: 'video/mp4', size: 1024, meta: { duration: 8 } })
+    const second = context.database.createMedia(user.id, { kind: 'video', filename: 'second.mp4', originalName: 'second.mp4', mimeType: 'video/mp4', size: 1024, meta: { duration: 5 } })
+    const simple = await video.saveTimeline(user.id, content.id, [{ mediaId: first.id }, { mediaId: second.id }])
+    expect(simple.materials.map((material) => material.mediaId)).toEqual([first.id, second.id])
+    expect(simple.edited).toBe(false)
+    const trimmed = await video.saveTimeline(user.id, content.id, [{ mediaId: first.id, trimStart: 1 }, { mediaId: second.id }])
+    expect(trimmed.edited).toBe(true)
+    const removed = await video.saveTimeline(user.id, content.id, [{ mediaId: first.id }])
+    expect(removed.materials).toHaveLength(2)
+    expect(removed.edited).toBe(true)
+  })
+
   it('rejects timeline editing for article contents', async () => {
     const context = setup()
     const user = context.database.createUser({ username: 'article_only', email: 'article-only@example.com', passwordHash: 'hash', displayName: 'A' })
