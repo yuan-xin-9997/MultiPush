@@ -1,6 +1,6 @@
 # MultiPush · 多平台智能发布系统
 
-> 一次创作，智能渲染，适配微信公众号（图文/贴图）、小红书、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、V2EX、抖音、少数派与个人博客。支持微信公众号、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、V2EX、抖音、少数派和个人博客连接、保持会话与发布（微博、豆瓣为本地草稿；头条、百家号、抖音、掘金、CSDN、简书等保存到平台草稿箱）；公众号贴图通过官方 API 保存草稿、后台手动发表；小红书仅支持导出后手动发布。
+> 一次创作，智能渲染，适配微信公众号（图文/贴图）、小红书、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、V2EX、B站、抖音、少数派与个人博客。支持微信公众号、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、V2EX、B站、抖音、少数派和个人博客连接、保持会话与发布（微博、豆瓣为本地草稿；头条、百家号、抖音、掘金、CSDN、简书等保存到平台草稿箱）；公众号贴图通过官方 API 保存草稿、后台手动发表；小红书仅支持导出后手动发布。
 
 ![MultiPush](web/public/favicon.svg)
 
@@ -33,6 +33,7 @@
 - **公众号贴图发布**：输入公众号 AppID / AppSecret（按用户加密保存），通过官方 API 上传永久图片素材并创建图片消息（newspic）草稿，回读核对标题与图片数量；正式发表按个人号实际情况在公众号后台手动完成。支持 IP 白名单错误提示、发布记录与草稿删除。详见 [公众号贴图发布说明](docs/WECHATPIC_PUBLISHING.md)。
 - **小红书发布**：自动登录和自动发布已停用，已清除保存会话；保留卡片与文案导出、历史记录，请在官方 App 或创作中心手动发布。详见 [说明](docs/XIAOHONGSHU_PUBLISHING.md)。
 - **知乎发布**：系统内展示知乎官方二维码，按用户加密保存登录状态；选择知乎排版和可选封面，保存草稿或发布专栏文章。图片自动转存、使用原生图注/列表/代码结构，表格自动转换为等价列表，并回读核对内容，发现差异则保留草稿并停止发布。详见 [知乎发布说明](docs/ZHIHU_PUBLISHING.md)。
+- **B站发布**：支持 B 站视频投稿与专栏/opus 图文两条链路。视频使用已导出 MP4 + 16:9 封面，自动完成封面、UPOS 分片上传和 `add/v3` 投稿；图文写入 B 站新版图文编辑器，可存草稿或发布。扫码登录、会话加密保存、发布记录、审核状态检查和人工核实一应俱全；失败时保留打开发布页、复制文案等手动兜底。详见 [B站发布说明](docs/BILIBILI_PUBLISHING.md)。
 - **抖音发布**：系统内展示官方登录二维码，按用户加密保存会话；选择 MP4 视频或 1–35 张图片，可保存草稿或发布。包含发布记录、重复提交保护、重启恢复与结果人工核实；遇到安全验证停止操作。详见 [抖音发布说明](docs/DOUYIN_PUBLISHING.md)。
 - **微博发布**：系统内展示微博官方登录二维码，按用户加密保存会话；选择微博排版，可保存本地草稿或一键发布标题、正文、`#话题#` 和最多 9 张图片。包含发布记录、幂等保护、结果待核实人工核实；遇到安全验证停止操作。详见 [微博发布说明](docs/WEIBO_PUBLISHING.md)。
 - **今日头条发布**：系统内展示头条号官方登录二维码，按用户加密保存会话；选择头条图文排版，填写标题和正文，可保存草稿或发布。包含发布记录、幂等保护、结果待核实人工核实；遇到安全验证停止操作。详见 [今日头条发布说明](docs/TOUTIAO_PUBLISHING.md)。
@@ -90,7 +91,7 @@ npm run desktop:dist:win      # Windows NSIS + 便携版
 npm run desktop:dist:mac      # macOS universal DMG + ZIP（需在 macOS 构建）
 ```
 
-数据目录：Windows `%APPDATA%\MultiPush\data`，macOS `~/Library/Application Support/MultiPush/data`。公众号、知乎、抖音与少数派的自动发布需要本机安装 Chrome 或 Edge；个人博客使用 HTTP API，不依赖浏览器；不安装浏览器仍可编辑、渲染和导出。详见 [本地桌面版说明](docs/DESKTOP.md)。安装包目前未使用商业代码签名证书，Windows SmartScreen 与 macOS Gatekeeper 会要求手动确认。
+数据目录：Windows `%APPDATA%\MultiPush\data`，macOS `~/Library/Application Support/MultiPush/data`。公众号、知乎、抖音、少数派、V2EX、B站的自动发布需要本机安装 Chrome 或 Edge；个人博客使用 HTTP API，不依赖浏览器；不安装浏览器仍可编辑、渲染和导出。详见 [本地桌面版说明](docs/DESKTOP.md)。安装包目前未使用商业代码签名证书，Windows SmartScreen 与 macOS Gatekeeper 会要求手动确认。
 
 生产模式本地验证：
 
@@ -125,6 +126,8 @@ npm start
 | `CSDN_BROWSER_PATH` | 自动探测 | CSDN 发布使用的 Chrome / Chromium 路径 |
 | `JIANSHU_BROWSER_PATH` | 自动探测 | 简书发布使用的 Chrome / Chromium 路径 |
 | `V2EX_BROWSER_PATH` | 自动探测 | V2EX 发布使用的 Chrome / Chromium 路径 |
+| `BILIBILI_BROWSER_PATH` | 自动探测 | B站发布使用的 Chrome / Chromium 路径 |
+| `BILIBILI_HEADLESS` | `1` | 设为 `0` 时显示 B站登录/图文编辑器浏览器窗口，便于调试 |
 | `V2EX_PROXY_SERVER` | 空 | V2EX 浏览器代理，例如 `http://192.168.0.100:7890` |
 | `AI_PROVIDERS_JSON` | 未设置 | AI 提供商池完整 JSON；支持多提供商、多 Key、模型映射（优先级最高） |
 | `AI_PROVIDERS_FILE` | `DATA_DIR/ai-providers.json` | 受保护的提供商池 JSON 文件路径；建议 `chmod 600` |
@@ -184,6 +187,7 @@ npm run smoke:gallery   # 构建后跑图文工作台 E2E（上传/排序/保存
 npm run smoke:assets    # 构建后跑素材库 E2E（上传/文件夹/移动/预览/删除）
 npm run smoke:media-picker # 构建后跑文章/图文/视频从素材库添加内容 E2E
 npm run smoke:v2ex     # 构建后跑 V2EX 渲染与发布页 UI E2E（不实际发帖）
+npm run smoke:bilibili # 构建后跑 B站渲染与发布页 UI E2E（mock 发布接口，不实际投稿）
 node scripts/smoke-figure-captions.mjs  # 构建后跑 21 组图文 E2E（编辑器/三平台渲染）
 node scripts/smoke-editor-cover.mjs     # 构建后验证封面上传与正文选图
 node scripts/smoke-sms-login-ui.mjs      # 构建后验证 7 个平台的手机验证码登录弹窗

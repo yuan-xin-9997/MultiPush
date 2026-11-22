@@ -48,6 +48,9 @@ import { createJuejinRouter } from './routes/juejin'
 import { JianshuService } from './jianshu'
 import { PlaywrightJianshuDriver, type JianshuDriver } from './jianshu-browser'
 import { createJianshuRouter } from './routes/jianshu'
+import { BilibiliService } from './bilibili'
+import { PlaywrightBilibiliDriver, type BilibiliDriver } from './bilibili-browser'
+import { createBilibiliRouter } from './routes/bilibili'
 import { V2exService } from './v2ex'
 import { PlaywrightV2exDriver, type V2exDriver } from './v2ex-browser'
 import { createV2exRouter } from './routes/v2ex'
@@ -148,7 +151,7 @@ function mountWebApp(app: express.Express, webDist: string): void {
   })
 }
 
-export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver, doubanDriver?: DoubanDriver, juejinDriver?: JuejinDriver, jianshuDriver?: JianshuDriver, wechatpicDriver?: WechatStickerDriver, csdnDriver?: CsdnDriver, v2exDriver?: V2exDriver): express.Express {
+export function createApp(config: AppConfig, database: Database, wechatDriver?: WechatBrowserDriver, zhihuDriver?: ZhihuDriver, _xhsDriver?: XhsDriver, douyinDriver?: DouyinDriver, sspaiDriver?: SspaiDriver, blogDriver?: BlogDriver, weiboDriver?: WeiboDriver, toutiaoDriver?: ToutiaoDriver, baijiahaoDriver?: BaijiahaoDriver, doubanDriver?: DoubanDriver, juejinDriver?: JuejinDriver, jianshuDriver?: JianshuDriver, wechatpicDriver?: WechatStickerDriver, csdnDriver?: CsdnDriver, v2exDriver?: V2exDriver, bilibiliDriver?: BilibiliDriver): express.Express {
   const app = express()
   const wechat = new WechatService(database, config, wechatDriver ?? new PlaywrightWechatDriver(config))
   app.locals.wechat = wechat
@@ -172,6 +175,8 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.locals.csdn = csdn
   const v2ex = new V2exService(database, config, v2exDriver ?? new PlaywrightV2exDriver())
   app.locals.v2ex = v2ex
+  const bilibili = new BilibiliService(database, config, bilibiliDriver ?? new PlaywrightBilibiliDriver())
+  app.locals.bilibili = bilibili
   database.clearXhsAccounts()
   const douyin = new DouyinService(database, config, douyinDriver ?? new PlaywrightDouyinDriver())
   app.locals.douyin = douyin
@@ -227,6 +232,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   app.use('/api/csdn', requireAuth, createCsdnRouter(csdn))
   app.use('/api/jianshu', requireAuth, createJianshuRouter(jianshu))
   app.use('/api/v2ex', requireAuth, createV2exRouter(v2ex))
+  app.use('/api/bilibili', requireAuth, createBilibiliRouter(bilibili))
   app.use('/api/sspai', requireAuth, createSspaiRouter(sspai))
   app.use('/api/blog', requireAuth, createBlogRouter(blog))
   app.use('/api/ai', requireAuth, createAiRouter(ai))

@@ -23,6 +23,9 @@ Express (single Node process, 0.0.0.0:34080)
   ├─ routes/csdn      CSDN 扫码登录、Markdown 草稿/文章发布与核实
   ├─ routes/jianshu   简书 Cookie 连接、草稿/文章发布与核实
   ├─ routes/v2ex      V2EX Cookie 连接、节点读取、主题发布与核实
+  ├─ routes/bilibili  B站扫码登录、视频投稿、专栏/opus 图文发布与核实
+  ├─ bilibili-api     B站封面上传、UPOS 分片上传、WBI 签名与 add/v3
+  ├─ bilibili-browser B站登录二维码与新版图文编辑器自动化
   ├─ routes/ai        AI 个人配置、会话、消息、工具调用、提供商池编辑与高可用状态
   ├─ routes/video     视频内容剪辑时间线与导出任务
   ├─ routes/batch     批量渲染 / 批量发布任务
@@ -48,6 +51,7 @@ Express (single Node process, 0.0.0.0:34080)
 | `video_projects` | content_id, user_id, timeline_json | 视频内容剪辑时间线（有序片段，引用 media 资产） |
 | `video_exports` | id, user_id, content_id, status, progress, message, timeline_json, output_media_id | 视频导出异步任务（服务端 ffmpeg） |
 | `v2ex_*` | accounts / publications / resolutions | V2EX 浏览器会话、主题发布记录与人工核实 |
+| `bilibili_*` | accounts / publications / resolutions | B站扫码会话、视频/图文发布记录与人工核实 |
 | `renders` | id, user_id, content_id, platforms, options_json, platform_options_json, result_json | 渲染历史；结果完整存储；平台选项按 `PlatformId` 保存覆盖值 |
 | `weibo_*` | accounts / publications / resolutions | 微博会话、发布记录与人工核实 |
 | `toutiao_*` | accounts / publications / resolutions | 今日头条会话、文章发布记录与人工核实 |
@@ -77,7 +81,7 @@ Express (single Node process, 0.0.0.0:34080)
 | CSDN | `POST /blog/phoenix/console/v1/article/del`（`articleId`, `deep:true`），复用网页端 X-Ca 签名 |
 | 简书 | `POST /author/notes/:id/soft_destroy`（移入简书回收站） |
 | 微博、豆瓣 | 草稿只存在于本系统，仅清理本地记录 |
-| 抖音、今日头条、百家号、小红书 | 平台未返回可定位草稿编号或写接口受限/自动化停用，仅清理本地记录；界面会提示到平台后台删除 |
+| 抖音、今日头条、百家号、小红书、B站 | 平台未返回可定位草稿编号或写接口受限/自动化停用，仅清理本地记录；B站已提交/已发布内容需到创作中心处理 |
 
 失败记录优先清理本地记录；若记录带有远端草稿编号且模式为草稿，会尽量顺带删除远端草稿，远端失败不阻塞本地清理。关联接口：`DELETE /api/<platform>/publications/:id`，返回值统一为 `{ ok: true, remoteDeleted: boolean }`。
 
@@ -98,7 +102,7 @@ Express (single Node process, 0.0.0.0:34080)
 1. `POST /api/renders` 校验平台列表和内容归属，按平台合并默认选项与 `platformOptions` 覆盖。
 2. 读取 `ContentDetail`（Tiptap JSON + HTML）与用户显示名。
 3. 构造 `RenderInput`：`content`、`platforms`、`options`、`authorName`、`baseUrl`。
-4. `renderPlatforms()` 分派到 `wechat.ts` / `xiaohongshu.ts` / `zhihu.ts` / `weibo.ts` / `toutiao.ts` / `baijiahao.ts` / `douban.ts` / `juejin.ts` / `jianshu.ts` / `douyin.ts` / `sspai.ts` / `blog.ts`：
+4. `renderPlatforms()` 分派到 `wechat.ts` / `xiaohongshu.ts` / `zhihu.ts` / `weibo.ts` / `toutiao.ts` / `baijiahao.ts` / `douban.ts` / `juejin.ts` / `jianshu.ts` / `bilibili.ts` / `douyin.ts` / `sspai.ts` / `blog.ts`：
    - HTML 清洗（sanitize-html），相对媒体 URL 转绝对；
    - 提取图片/视频、纯文本、字数、标签；
    - 按平台规则排版，生成 `PlatformRender`（HTML、Markdown、文案、卡片数据、下载内容、警告）。

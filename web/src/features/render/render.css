@@ -4385,3 +4385,247 @@
 .weibo-side-note .btn { margin-top: 13px; }
 @media (max-width: 1100px) { .weibo-feed-shell { width: 100%; } }
 @media (max-width: 600px) { .weibo-feed-shell { height: auto; min-height: 420px; } .weibo-card { margin: 8px; padding: 13px; } }
+
+/* ---------- Bilibili video / column preview ---------- */
+.bilibili-scene {
+  display: flex;
+  width: 100%;
+  max-width: 1120px;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 18px;
+  margin: 0 auto;
+}
+
+.bilibili-shell {
+  width: min(860px, 100%);
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 34px rgba(31, 35, 41, 0.08);
+}
+
+.bilibili-nav {
+  display: flex;
+  height: 46px;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: #00aeec;
+  color: #fff;
+}
+
+.bilibili-logo {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.bilibili-search {
+  min-width: 0;
+  flex: 1;
+  padding: 6px 12px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #8a8f99;
+  font-size: 10px;
+}
+
+.bilibili-nav-actions {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.9;
+}
+
+.bilibili-page {
+  padding: 18px 20px 24px;
+}
+
+.bilibili-player,
+.bilibili-cover {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #000;
+  aspect-ratio: 16 / 9;
+}
+
+.bilibili-player video,
+.bilibili-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.bilibili-cover {
+  background: #eef7fb;
+}
+
+.bilibili-cover img {
+  object-fit: cover;
+}
+
+.bilibili-cover > span {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #7bb8ce;
+  font-size: 12px;
+}
+
+.bilibili-player-placeholder {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: #8a8f99;
+  background: #f2f4f7;
+}
+
+.bilibili-player-placeholder span {
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bilibili-player-placeholder small {
+  font-size: 10px;
+}
+
+.bilibili-content {
+  padding-top: 16px;
+}
+
+.bilibili-content h1 {
+  margin: 0 0 10px;
+  color: #18191c;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.bilibili-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #8a8f99;
+  font-size: 10px;
+}
+
+.bilibili-avatar {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: #d9f2fb;
+  color: #0087b8;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.bilibili-author {
+  color: #00aeec;
+  font-weight: 600;
+}
+
+.bilibili-stat {
+  margin-left: auto;
+}
+
+.bilibili-desc {
+  margin: 16px 0 0;
+  color: #4b5563;
+  font-size: 11.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.bilibili-article-body {
+  margin-top: 16px;
+  color: #18191c;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.bilibili-article-body h1,
+.bilibili-article-body h2,
+.bilibili-article-body h3 {
+  color: #18191c;
+  font-weight: 700;
+}
+
+.bilibili-article-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.bilibili-article-body video {
+  width: 100%;
+  border-radius: 8px;
+}
+
+.bilibili-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 16px;
+}
+
+.bilibili-tags span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #e6f7fd;
+  color: #0087b8;
+  font-size: 9px;
+}
+
+.bilibili-side-note {
+  width: 220px;
+  flex: 0 0 220px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fbfcfd;
+}
+
+.bilibili-side-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 9px;
+  background: #e6f7fd;
+  color: #00aeec;
+}
+
+.bilibili-side-note h3 {
+  margin: 10px 0 6px;
+  color: #18191c;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.bilibili-side-note p {
+  margin: 0 0 12px;
+  color: #646a73;
+  font-size: 10.5px;
+  line-height: 1.7;
+}
+
+@media (max-width: 1180px) {
+  .bilibili-scene {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bilibili-side-note {
+    width: auto;
+    flex: 0 0 auto;
+  }
+}
