@@ -45,6 +45,39 @@ export function parseDoubanUploadPhoto(value: unknown): DoubanPhoto | null {
   }
 }
 
+/**
+ * Build the exact payload used by Douban's topic editor for a note.
+ *
+ * `image_layout` must be omitted for text-only notes (the editor sends it only
+ * when images exist). Image ids must be a comma-separated `seq_id` list, and
+ * every Draft entity needs a `mutability` field; these were the two fields the
+ * old adapter got wrong and caused Douban to answer `invalid_parameter`.
+ */
+export function buildDoubanTopicPost(input: {
+  title: string
+  content: string
+  imageIds: string
+  privacy: 'public' | 'private'
+  interestTags?: string
+}): Record<string, unknown> {
+  return {
+    title: input.title,
+    content: input.content,
+    image_ids: input.imageIds,
+    ...(input.imageIds && input.imageIds.split(',').length <= 18 ? { image_layout: 'horizontal' } : {}),
+    topic_tag_ids: '',
+    interest_tags: input.interestTags ?? '',
+    is_event: false,
+    subtype: 'note',
+    accessible: input.privacy === 'private' ? 'private' : 'public',
+    explanation_types: '',
+    send_status: true,
+    original: false,
+    is_activity_rule: false,
+    enable_item_tag: false,
+  }
+}
+
 /** Accepts the topic/post response: `{id, url, title, create_time}`. */
 export function parseDoubanTopicResult(value: unknown): { remoteId: string; url: string } | null {
   const root = record(value)
@@ -83,8 +116,9 @@ const BLOCK_TAGS: Record<string, string> = {
 export function buildDoubanTopicContent(html: string, photos: DoubanPhoto[]): { content: string; imageIds: string } {
   const $ = load(html, null, false)
   const blocks: DraftBlock[] = []
-  const entityMap: Record<string, { type: string; data: Record<string, unknown> }> = {}
+  const entityMap: Record<string, { type: string; mutability?: 'MUTABLE' | 'IMMUTABLE'; data: Record<string, unknown> }> = {}
   let imageCursor = 0
+  let imagePosition = 0
   let serial = 0
   const blockKey = (): string => `b${(serial++).toString(36)}${Math.random().toString(36).slice(2, 5)}`
 
@@ -107,7 +141,7 @@ export function buildDoubanTopicContent(html: string, photos: DoubanPhoto[]): { 
         let key = linkKey
         if (href) {
           key = Object.keys(entityMap).length
-          entityMap[String(key)] = { type: 'LINK', data: { href, url: href } }
+          entityMap[String(key)] = { type: 'LINK', mutability: 'MUTABLE', data: { href, url: href } }
         }
         collect(child, styles, key, state)
         continue
@@ -126,7 +160,22 @@ export function buildDoubanTopicContent(html: string, photos: DoubanPhoto[]): { 
 
   const pushImage = (photo: DoubanPhoto): void => {
     const key = Object.keys(entityMap).length
-    entityMap[String(key)] = { type: 'IMAGE', data: { ...photo, src: photo.url, raw_src: photo.url, position: key } }
+    entityMap[String(key)] = {
+      type: 'IMAGE',
+      mutability: 'IMMUTABLE',
+      data: {
+        id: photo.id,
+        src: photo.url,
+        raw_src: photo.url,
+        thumb: photo.thumb,
+        url: photo.url,
+        width: photo.width,
+        height: photo.height,
+        file_name: photo.fileName,
+        file_size: photo.fileSize,
+        position: imagePosition++,
+      },
+    }
     blocks.push({ key: blockKey(), text: ' ', type: 'atomic', depth: 0, inlineStyleRanges: [], entityRanges: [{ offset: 0, length: 1, key }], data: {} })
   }
 
@@ -160,6 +209,6 @@ export function buildDoubanTopicContent(html: string, photos: DoubanPhoto[]): { 
   }
 
   walk($.root())
-  const imageIds = photos.length ? `${photos.length}_${photos.map(photo => photo.id).join(',')}` : ''
+  const imageIds = photos.map((photo, index) => `${index + 1}_${photo.id}`).join(',')
   return { content: JSON.stringify({ blocks, entityMap }), imageIds }
 }

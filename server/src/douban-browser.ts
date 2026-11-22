@@ -7,7 +7,7 @@ import { publisherExecutablePath } from './wechat-browser'
 import { ApiError } from './errors'
 import { qrReady } from './qr-capture'
 import { doubanNoteUrl, verifyDoubanContent } from './douban-content'
-import { buildDoubanTopicContent, doubanTopicUrl, parseDoubanTopicResult, parseDoubanUploadPhoto, type DoubanPhoto } from './douban-topic'
+import { buildDoubanTopicContent, buildDoubanTopicPost, doubanTopicUrl, parseDoubanTopicResult, parseDoubanUploadPhoto, type DoubanPhoto } from './douban-topic'
 import { capturePageFailure, describePageFailure } from './publisher-diagnostics'
 
 export interface DoubanIdentity { accountId: string; name: string }
@@ -331,6 +331,9 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
     const response = await context.request.get(NOTE_CREATE, { timeout: 30_000, headers: { Accept: 'text/html' } }).catch(() => null)
     if (!response?.ok()) throw new ApiError(502, 'douban_publish_unavailable', `无法打开豆瓣日记编辑器（HTTP ${response?.status() ?? '无响应'}），登录状态可能已失效；请断开后重新扫码连接`)
     const html = await response.text().catch(() => '')
+    if (/misc\/sorry|账号出现异常|user_is_readonly|你的账号.*异常|请稍后操作|安全验证/i.test(html)) {
+      throw new ApiError(409, 'douban_security_check', '豆瓣账号被临时限制或要求安全验证，已停止发布；请稍后在豆瓣完成验证后重试')
+    }
     const token = UPLOAD_TOKEN.exec(html)?.[1] ?? ''
     if (!token) throw new ApiError(502, 'douban_publish_unavailable', '豆瓣编辑器没有返回上传凭证，页面可能已改版；请使用“复制富文本/打开豆瓣编辑器”手动发布')
     return token
@@ -355,8 +358,12 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
     try { payload = JSON.parse(body) } catch { /* keep the raw body for the error below */ }
     const photo = parseDoubanUploadPhoto(payload)
     if (photo) return photo
+    const contentType = response.headers()['content-type'] ?? 'unknown'
+    const envelope = object(payload)
+    const photoKeys = Object.keys(object(envelope.photo)).slice(0, 10).join(',') || 'none'
     const detail = body.replace(/\s+/g, ' ').slice(0, 160)
-    throw new ApiError(502, 'douban_image_upload_failed', `豆瓣图片上传未返回图片地址（HTTP ${response.status()}）：${detail || '响应为空'}`)
+    const reason = typeof envelope.err === 'string' ? envelope.err : detail || '响应为空'
+    throw new ApiError(502, 'douban_image_upload_failed', `豆瓣图片上传未返回图片地址（HTTP ${response.status()}，content-type=${contentType}，photo keys=${photoKeys}）：${reason}`)
   }
 
   private async saveNote(context: BrowserContext, ck: string, payload: Record<string, unknown>): Promise<{ remoteId: string; url: string } | null> {
@@ -371,14 +378,38 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
       throw uncertain('豆瓣保存请求已发出但未收到响应，结果未确认；请先到豆瓣日记列表核实，避免重复发布')
     }
     const body = await response.text().catch(() => '')
+    const contentType = response.headers()['content-type'] ?? 'unknown'
     if (response.status() === 401 || response.status() === 403 || SECURITY_TEXT.test(body)) {
       throw new ApiError(409, 'douban_security_check', '豆瓣要求安全验证，已停止发布；请在官方页面完成验证后重新连接')
+    }
+    if (response.status() === 404) {
+      throw new ApiError(502, 'douban_publish_unavailable', '豆瓣保存接口不存在（HTTP 404），可能已改版；请使用“复制 Markdown/打开豆瓣编辑器”手动发布')
     }
     let parsed: unknown = null
     try { parsed = JSON.parse(body) } catch { /* fall through to the error below */ }
     if (!response.ok()) {
-      const detail = typeof (parsed as Data | null)?.msg === 'string' ? String((parsed as Data).msg) : body.replace(/\s+/g, ' ').slice(0, 160)
-      throw new ApiError(502, 'douban_publish_failed', `豆瓣保存日记失败（HTTP ${response.status()}）${detail ? `：${detail}` : ''}`)
+      const record = parsed as Data | null
+      const detail = typeof record?.localized_message === 'string'
+        ? String(record.localized_message)
+        : typeof record?.msg === 'string'
+          ? String(record.msg)
+          : body.replace(/\s+/g, ' ').slice(0, 160)
+      const code = typeof record?.code === 'number' ? ` code=${record.code}` : ''
+      const keys = record ? ` keys=${Object.keys(record).slice(0, 8).join(',')}` : ''
+      const restricted = (record?.code === 1021) || /readonly|只读|账号.*异常|稍后操作/i.test(`${detail} ${body.slice(0, 300)}`)
+      const category = restricted
+        ? '账号被临时限制（请稍后重试或到豆瓣完成安全验证）'
+        : response.status() === 400 && /invalid_parameter/i.test(`${detail} ${body}`)
+          ? '参数校验未通过（invalid_parameter）'
+          : response.status() === 400
+            ? '参数校验未通过'
+            : response.status() >= 500
+              ? '豆瓣服务异常'
+              : '请求被拒绝'
+      throw new ApiError(502, 'douban_publish_failed', `豆瓣保存日记失败（HTTP ${response.status()}，${category}，content-type=${contentType}${code}${keys}）${detail ? `：${detail}` : ''}`)
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      throw new ApiError(502, 'douban_publish_failed', `豆瓣保存接口返回了非 JSON 内容（HTTP ${response.status()}，content-type=${contentType}），登录可能已失效或页面已改版；请使用手动兜底`)
     }
     return parseDoubanTopicResult(parsed)
   }
@@ -411,22 +442,13 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
       }
       const { content, imageIds } = buildDoubanTopicContent(article.html, photos)
       progress({ message: '正在保存豆瓣日记' })
-      const result = await this.saveNote(context, session.ck, {
+      const result = await this.saveNote(context, session.ck, buildDoubanTopicPost({
         title: article.title,
         content,
-        image_ids: imageIds,
-        image_layout: 'horizontal',
-        topic_tag_ids: '',
-        interest_tags: article.tags.join('#'),
-        is_event: false,
-        subtype: 'note',
-        accessible: article.privacy === 'private' ? 'private' : 'public',
-        explanation_types: '',
-        send_status: true,
-        original: false,
-        is_activity_rule: false,
-        enable_item_tag: false,
-      })
+        imageIds,
+        privacy: article.privacy === 'private' ? 'private' : 'public',
+        interestTags: article.tags.map(tag => tag.replace(/#/g, '').trim()).filter(Boolean).join('#'),
+      }))
       if (!result) throw uncertain('豆瓣已接收保存请求，但未返回日记编号；请先到豆瓣核实，避免重复发布')
       const readBack = await this.noteTitle(context, result.url).catch(() => null)
       if (!readBack || readBack.status !== 200) {

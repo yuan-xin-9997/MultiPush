@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2026-11-22 · 修复豆瓣日记发布 `invalid_parameter`
+
+**改了什么**
+
+- 对齐豆瓣新版 topic 编辑器的真实保存请求，修复图片日记的 `image_ids` 格式：从错误的 `3_id1,id2,id3` 改为 `1_id1,2_id2,3_id3`。
+- Draft.js `entityMap` 补上 `mutability`：LINK 为 `MUTABLE`、IMAGE 为 `IMMUTABLE`；图片实体字段改为豆瓣使用的 `file_name`/`file_size` 等 snake_case，并保留 `src`/`raw_src`/`thumb`/`url`/`width`/`height`/`position`。
+- 无图日记不再发送 `image_layout`；有图且不超过 18 张时才发送 `horizontal`。标签继续作为 `interest_tags` 发送。
+- 保存失败时错误信息现在包含 HTTP 状态、响应 `code`、顶层字段和豆瓣业务提示，并区分参数错误、账号临时只读、接口 404、服务端错误和非 JSON/登录失效响应；图片上传失败时附带 content-type 与响应字段。
+- 新增回归测试：多图 `image_ids`、Draft 实体 `mutability`/snake_case、文字/图片 payload 中 `image_layout` 的有无。
+
+**验证**
+
+- `npm run typecheck`、`npm run build` 通过；`npm test`：server 45 个文件 / 447 项、web 3 个文件 / 23 项全部通过。
+- 对比豆瓣编辑器真实请求字段，并用真实账号创建了纯文字、带链接、带图片的**私密**日记，均返回 200；请求体格式验证通过。
+- 联调期间豆瓣短暂触发只读风控（`user_is_readonly`），已立即停止请求；冷却后通过日记页删除入口清理全部测试私密日记并确认 404，未发布公开日记。
+
 ## 2026-11-21 · 智能渲染：知识库内容树、平台独立设置与平台历史
 
 **改了什么**
