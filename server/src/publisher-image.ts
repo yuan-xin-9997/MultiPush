@@ -35,7 +35,7 @@ export function publisherImage(buffer: Buffer, webp = false): PublisherImage {
 }
 
 /** No cookies or credentials; pin validated DNS addresses and recheck every redirect. */
-export async function downloadPublisherImage(src: string, platform: 'wechat' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'sspai' | 'blog' = 'wechat'): Promise<PublisherImage> {
+export async function downloadPublisherImage(src: string, platform: 'wechat' | 'zhihu' | 'weibo' | 'toutiao' | 'baijiahao' | 'douban' | 'jianshu' | 'sspai' | 'blog' = 'wechat'): Promise<PublisherImage> {
   try {
     if (/^data:/i.test(src)) {
       if (src.length > MAX_BYTES * 1.4) throw new Error('图片超过 10 MB')

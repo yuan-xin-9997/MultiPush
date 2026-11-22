@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
+import { load } from 'cheerio'
 import type { JianshuAccount, JianshuConnectInput, JianshuPublication, JianshuPublishInput, JianshuResolveInput, PublicationDeletion } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
+import { downloadPublisherImage } from './publisher-image'
 import type { JianshuArticle, JianshuDriver, JianshuIdentity } from './jianshu-browser'
 
 const now = () => new Date().toISOString()
@@ -12,6 +14,21 @@ const TTL = 5 * 60_000
 function slugFromUrl(value: string | null): string | null {
   if (!value) return null
   try { return /\/p\/([^/?#]+)/.exec(new URL(value).pathname)?.[1] ?? null } catch { return null }
+}
+
+const MAX_IMAGES = 100
+
+function prepareJianshuHtml(html: string, title: string): { html: string; images: string[] } {
+  const $ = load(html, null, false)
+  const firstHeading = $('h1, h2, h3, h4, h5, h6').first()
+  if (firstHeading.length && firstHeading.text().trim() === title.trim()) firstHeading.remove()
+  $('script,noscript,style,meta,link,iframe,object,embed,form,input,button,video,audio,svg,nav').remove()
+  const images: string[] = []
+  $('img').each((_, node) => {
+    const src = $(node).attr('src') || ''
+    if (src && !images.includes(src)) images.push(src)
+  })
+  return { html: $.html(), images }
 }
 
 export class JianshuService {
@@ -95,17 +112,28 @@ export class JianshuService {
     if (render.sourceUpdatedAt && render.sourceUpdatedAt !== content.updatedAt) throw new ApiError(409, 'jianshu_render_stale', '原文已修改，请重新生成简书排版后发布')
     const title = render.title.trim()
     if (Array.from(title).length < 1 || Array.from(title).length > 100) throw new ApiError(400, 'jianshu_title_invalid', '简书标题需要 1–100 个字')
-    if (!render.markdown?.trim()) throw new ApiError(400, 'jianshu_body_empty', '请先填写文章正文')
-    if (Buffer.byteLength(render.markdown) > 1024 * 1024) throw new ApiError(400, 'jianshu_body_size', '文章 Markdown 不能超过 1 MB')
+    if (!render.html?.trim()) throw new ApiError(400, 'jianshu_body_empty', '请先填写文章正文')
+    if (Buffer.byteLength(render.html) > 1024 * 1024) throw new ApiError(400, 'jianshu_body_size', '文章 HTML 不能超过 1 MB')
     if (render.videos.length) throw new ApiError(400, 'jianshu_media_unsupported', '简书暂不支持视频，请先移除视频')
-    const lines = render.markdown.split('\n')
-    if (lines.length > 1 && /^#\s+/.test(lines[0]) && lines[0].replace(/^#\s+/, '').trim() === title) lines.shift()
-    const markdown = lines.join('\n').trim()
-    if (!markdown) throw new ApiError(400, 'jianshu_body_empty', '请先填写文章正文')
+    const prepared = prepareJianshuHtml(render.html, title)
+    if (!prepared.html.trim()) throw new ApiError(400, 'jianshu_body_empty', '请先填写文章正文')
+    if (prepared.images.length > MAX_IMAGES) throw new ApiError(400, 'jianshu_image_count', '简书日记最多支持 100 张图片')
+    const images = new Map<string, import('./publisher-image').PublisherImage>()
+    for (const src of prepared.images) {
+      try {
+        const image = await downloadPublisherImage(src, 'jianshu')
+        if (image.buffer.length > 5 * 1024 * 1024) throw new Error('图片超过简书 5 MB 上限')
+        images.set(src, image)
+      } catch (error) {
+        throw new ApiError(502, 'jianshu_image_download', `简书正文图片读取失败（${src.slice(0, 120)}）：${error instanceof Error ? error.message : '下载失败'}`)
+      }
+    }
     return {
       title,
-      markdown,
+      html: prepared.html,
+      markdown: render.markdown?.trim() ?? '',
       text: render.text ?? '',
+      images,
       mode: input.mode === 'draft' ? 'draft' : 'publish',
       notebookId: typeof input.notebookId === 'string' && /^\d{5,30}$/.test(input.notebookId) ? input.notebookId : undefined,
     }
@@ -194,7 +222,7 @@ export class JianshuService {
       const checked = await this.driver.checkSession(this.state(userId))
       this.save(userId, checked.state, checked.identity)
       const article = await this.article(userId, input)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, markdown: article.markdown, mode: article.mode, notebookId: article.notebookId }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: article.mode, notebookId: article.notebookId }))
       const idempotencyKey = hash.digest('hex'), previous = this.database.findJianshuPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
       const publication = previous ?? this.database.createJianshuPublication(userId, { renderId: input.renderId, title: article.title, mode: article.mode, idempotencyKey })

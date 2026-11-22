@@ -3,14 +3,18 @@ import { chromium, type Browser, type BrowserContext } from 'playwright-core'
 import { load } from 'cheerio'
 import type { JianshuPublication } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
+import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
 import { ApiError } from './errors'
 
 export interface JianshuIdentity { accountId: string; name: string }
 export interface JianshuArticle {
   title: string
+  /** Rich HTML saved into the JianShu editor; images are already rewritten to JianShu CDN URLs. */
+  html: string
   markdown: string
   text: string
+  images: Map<string, PublisherImage>
   mode: 'draft' | 'publish'
   notebookId?: string
 }
@@ -84,6 +88,26 @@ export function parseJianshuNotebooks(value: unknown): Array<{ id: string; name:
 export function parseJianshuCsrf(html: string): string {
   const $ = load(html)
   return $('meta[name="csrf-token"]').attr('content') || $('input[name="authenticity_token"]').attr('value') || ''
+}
+
+export function jianshuImageUrl(url: string, format?: string): string {
+  const base = url.startsWith('//') ? `https:${url}` : url
+  if (format === 'gif') return `${base}?imageMogr2/auto-orient/strip`
+  const suffix = '?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240'
+  return format === 'webp' ? `${base}${suffix}/format/jpg` : `${base}${suffix}`
+}
+
+/** Replace the renderer's absolute image URLs with the uploaded JianShu URLs. */
+export function replaceJianshuImages(html: string, replacements: Map<string, string>): string {
+  if (replacements.size === 0) return html
+  const $ = load(html, null, false)
+  $('img').each((_, node) => {
+    const image = $(node)
+    const src = image.attr('src') || ''
+    const replacement = replacements.get(src)
+    if (replacement) image.attr('src', replacement)
+  })
+  return $.html()
 }
 
 export class PlaywrightJianshuDriver implements JianshuDriver {
@@ -194,6 +218,65 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
     } finally { await context.close().catch(() => {}) }
   }
 
+  private async uploadToken(context: BrowserContext, image: PublisherImage): Promise<{ token: string; key: string }> {
+    const response = await context.request.get(`https://www.jianshu.com/upload_images/token.json?filename=${encodeURIComponent(image.name)}`, {
+      headers: { ...CSRF_HEADERS, Accept: 'application/json' },
+      timeout: 30_000,
+    }).catch(() => null)
+    if (!response) throw new ApiError(502, 'jianshu_image_upload_failed', '简书图片上传凭证请求失败，请检查网络后重试')
+    if (response.status() === 401 || response.status() === 403) throw expired()
+    if (!response.ok()) throw new ApiError(502, 'jianshu_image_upload_failed', `简书图片上传凭证请求失败（HTTP ${response.status()}）`)
+    const body = await response.json().catch(() => null)
+    const token = String(object(body).token || '')
+    const key = String(object(body).key || '')
+    if (!token || !key) throw new ApiError(502, 'jianshu_image_upload_failed', '简书没有返回图片上传 token/key，图片未上传')
+    return { token, key }
+  }
+
+  private async uploadImage(context: BrowserContext, image: PublisherImage): Promise<string> {
+    const { token, key } = await this.uploadToken(context, image)
+    const response = await context.request.post('https://upload.qiniup.com', {
+      multipart: {
+        token,
+        key,
+        file: { name: image.name, mimeType: image.mimeType, buffer: image.buffer },
+        'x:protocol': 'https',
+      },
+      headers: { Origin: 'https://www.jianshu.com', Referer: WRITER },
+      timeout: 60_000,
+    }).catch(() => null)
+    if (!response) throw new ApiError(502, 'jianshu_image_upload_failed', '简书图片上传请求失败，请检查网络后重试')
+    const text = await response.text().catch(() => '')
+    let body: Data = {}
+    try { body = object(JSON.parse(text)) } catch { /* keep the raw body for the message */ }
+    if (!response.ok() || typeof body.url !== 'string' || !body.url) {
+      const detail = text.replace(/\s+/g, ' ').slice(0, 180)
+      throw new ApiError(502, 'jianshu_image_upload_failed', `简书图片上传失败（HTTP ${response.status()}）${detail ? `：${detail}` : ''}`)
+    }
+    return jianshuImageUrl(body.url, typeof body.format === 'string' ? body.format : undefined)
+  }
+
+  /** Read the saved note back and refuse to publish raw Markdown or missing images. */
+  private async verifySavedContent(context: BrowserContext, noteId: string, expectedImages: number): Promise<void> {
+    const response = await context.request.get(`${NOTES}/${encodeURIComponent(noteId)}/content`, {
+      headers: { ...CSRF_HEADERS, Accept: 'application/json' },
+      timeout: 30_000,
+    }).catch(() => null)
+    if (!response?.ok()) throw uncertain(`简书草稿 ${noteId} 已保存，但无法回读正文（HTTP ${response?.status() ?? '无响应'}）；请到简书草稿箱核实，避免直接发布`)
+    const body = await response.json().catch(() => null)
+    const content = String(object(body).content || '')
+    const $ = load(content, null, false)
+    const blocks = $('p,h1,h2,h3,h4,h5,h6,ul,ol,blockquote,pre,img').length
+    const imageCount = $('img').length
+    const plain = load(content, null, false)
+    plain('pre,code').remove()
+    const plainText = plain.root().text()
+    const rawMarkdown = /(^|\n)\s*#{1,6}\s+\S/.test(plainText) || /!\[[^\]]*\]\([^)]*\)/.test(plainText)
+    if (!content.trim() || blocks === 0 || rawMarkdown || (expectedImages > 0 && imageCount < expectedImages)) {
+      throw uncertain(`简书草稿 ${noteId} 的正文没有按富文本保存（识别到 Markdown 原文或图片缺失）；已停止发布，请到草稿箱检查`)
+    }
+  }
+
   async publish(state: PublisherStorageState, article: JianshuArticle, progress: (value: Partial<Pick<JianshuPublication, 'message' | 'remoteId' | 'url'>>) => void) {
     const context = await this.context(state)
     try {
@@ -202,6 +285,14 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
       if (!notebookId) throw new ApiError(400, 'jianshu_notebook_missing', '简书账号下没有可用文集，请先在简书创建一个文集')
       const token = await this.csrf(context)
       const headers = { ...CSRF_HEADERS, 'Content-Type': 'application/json', ...(token ? { 'X-CSRF-Token': token } : {}) }
+      const replacements = new Map<string, string>()
+      let imageIndex = 0
+      for (const [src, image] of article.images) {
+        imageIndex += 1
+        progress({ message: `正在上传简书图片 ${imageIndex}/${article.images.size}` })
+        replacements.set(src, await this.uploadImage(context, image))
+      }
+      const html = replaceJianshuImages(article.html, replacements)
       progress({ message: '正在创建简书草稿' })
       const createdResponse = await context.request.post(NOTES, { data: { at_bottom: true, notebook_id: String(notebookId), title: article.title }, headers, timeout: 30_000 })
       if (createdResponse.status() === 401 || createdResponse.status() === 403) throw expired()
@@ -209,10 +300,11 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
       const created = parseJianshuNote(await createdResponse.json().catch(() => null))
       if (!created?.id) throw uncertain('简书已接收创建草稿请求，但未返回文章编号；请到简书草稿箱核实')
       progress({ message: '正在保存简书正文', remoteId: created.id })
-      const savedResponse = await context.request.put(`${NOTES}/${encodeURIComponent(created.id)}`, { data: { autosave_control: 3, content: article.markdown, id: String(created.id), title: article.title }, headers, timeout: 30_000 })
+      const savedResponse = await context.request.put(`${NOTES}/${encodeURIComponent(created.id)}`, { data: { autosave_control: 3, content: html, id: String(created.id), title: article.title }, headers, timeout: 30_000 })
       if (savedResponse.status() === 401 || savedResponse.status() === 403) throw expired()
       if (!savedResponse.ok()) throw uncertain(`简书草稿 ${created.id} 已创建，但正文保存未确认成功（HTTP ${savedResponse.status()}）；请到简书草稿箱核实`)
       const savedBody = await savedResponse.json().catch(() => null)
+      await this.verifySavedContent(context, created.id, article.images.size)
       const saved = parseJianshuNote(savedBody)
       let slug = saved?.slug || created.slug
       const savedRecord = object(savedBody)

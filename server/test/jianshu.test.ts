@@ -8,7 +8,7 @@ import { ApiError } from '../src/errors'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey } from '../src/publisher-session'
 import { renderPlatforms } from '../src/renderers'
 import { JianshuService } from '../src/jianshu'
-import { parseJianshuCookies, parseJianshuCsrf, parseJianshuNote, parseJianshuNotebooks, type JianshuDriver } from '../src/jianshu-browser'
+import { jianshuImageUrl, parseJianshuCookies, parseJianshuCsrf, parseJianshuNote, parseJianshuNotebooks, replaceJianshuImages, type JianshuDriver } from '../src/jianshu-browser'
 import type { ContentDetail } from '../../shared/types'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -67,6 +67,8 @@ describe('Jianshu publishing', () => {
     const published = await service.publish(alice.id, { renderId: render.id, mode: 'publish' })
     expect(await finish(service, alice.id, published.id)).toMatchObject({ status: 'published', mode: 'publish', url: `https://www.jianshu.com/p/${slug}` })
     expect(driver.publish.mock.calls[0][1]).toMatchObject({ title: '简书测试文章', mode: 'draft', notebookId: '51802858' })
+    expect(driver.publish.mock.calls[0][1].html).toContain('>小节</h2>')
+    expect(driver.publish.mock.calls[0][1].images.size).toBe(0)
     expect(driver.publish.mock.calls[1][1]).toMatchObject({ mode: 'publish' })
     expect((await service.publish(alice.id, { renderId: render.id, mode: 'draft', notebookId: '51802858' })).id).toBe(draft.id)
   })
@@ -114,5 +116,18 @@ describe('Jianshu parsing', () => {
     expect(parseJianshuNote({ data: { note: { note_id: '53149573', slug } } })).toEqual({ id: '53149573', slug })
     expect(parseJianshuNotebooks([{ id: 51802858, name: '技术' }])).toEqual([{ id: '51802858', name: '技术' }])
     expect(parseJianshuCsrf('<meta name="csrf-token" content="token-1">')).toBe('token-1')
+  })
+})
+
+
+describe('JianShu rich content helpers', () => {
+  it('builds JianShu image URLs and rewrites renderer image sources', () => {
+    expect(jianshuImageUrl('https://upload-images.jianshu.io/upload_images/a.png', 'png'))
+      .toBe('https://upload-images.jianshu.io/upload_images/a.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240')
+    expect(jianshuImageUrl('https://upload-images.jianshu.io/upload_images/a.gif', 'gif'))
+      .toBe('https://upload-images.jianshu.io/upload_images/a.gif?imageMogr2/auto-orient/strip')
+    const html = replaceJianshuImages('<p>正文</p><p><img src="https://publish.example/uploads/a.png" alt="图"></p>', new Map([['https://publish.example/uploads/a.png', 'https://upload-images.jianshu.io/upload_images/new.png']]))
+    expect(html).toContain('src="https://upload-images.jianshu.io/upload_images/new.png"')
+    expect(html).toContain('alt="图"')
   })
 })
