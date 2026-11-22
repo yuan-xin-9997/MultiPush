@@ -121,6 +121,21 @@ describe('renderPlatforms', () => {
     expect(result.downloads[0].filename).toContain('微博')
   })
 
+  it('keeps resolved link URLs in the Weibo caption', async () => {
+    const [result] = await renderPlatforms(input(['weibo'], {
+      contentHtml: '<p>影视资料：<a href="https://example.com/movies/1917">打开《1917》影视库条目</a></p>',
+    }))
+    expect(result.captionBody).toContain('打开《1917》影视库条目')
+    expect(result.captionBody).toContain('https://example.com/movies/1917')
+  })
+
+  it('does not duplicate a Weibo link whose label is its URL', async () => {
+    const [result] = await renderPlatforms(input(['weibo'], {
+      contentHtml: '<p><a href="https://example.com/only-link">https://example.com/only-link</a></p>',
+    }))
+    expect(result.captionBody.split('https://example.com/only-link').length - 1).toBe(1)
+  })
+
   it('renders a Douban diary with Markdown/HTML downloads and figure captions', async () => {
     const [result] = await renderPlatforms(input(['douban'], {
       contentHtml: '<p>正文</p><p><img src="/uploads/cover.png" alt="图"></p><p><em>图：说明：）</em></p>',
