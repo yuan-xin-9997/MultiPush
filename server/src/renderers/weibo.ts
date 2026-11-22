@@ -1,3 +1,4 @@
+import { load } from 'cheerio'
 import { getPlatformInfo } from '../../../shared/types'
 import type { PlatformRender } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
@@ -49,6 +50,50 @@ const WEIBO_STYLES: Record<string, string> = {
   hr: 'border:none;border-top:1px solid #ececec;margin:28px 0;',
 }
 
+/**
+ * Build the Weibo caption body from the prepared HTML. Weibo's composer only
+ * receives plain text, so an anchor's visible label alone would lose its URL;
+ * append the resolved href after the label so Weibo can link it on publish.
+ */
+export function buildWeiboBody(html: string, title = ''): string {
+  const $ = load(html, null, false)
+  $('a[href]').each((_, element) => {
+    const $link = $(element)
+    const href = ($link.attr('href') ?? '').trim()
+    if (!href || href.startsWith('#') || /^javascript:/i.test(href)) return
+    const label = $link.text().replace(/\s+/g, ' ').trim()
+    if (!label) {
+      $link.replaceWith(href)
+      return
+    }
+    if (label === href || label.includes(href)) return
+    $link.replaceWith(`${label}\n${href}`)
+  })
+
+  const blocks: string[] = []
+  const blockSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,figcaption,tr'
+  $(blockSelector).each((_, element) => {
+    const $element = $(element)
+    if ($element.parents(blockSelector).length > 0) return
+    const $clone = $element.clone()
+    if ($element.is('li')) $clone.find('ul, ol, table').remove()
+    const text = $clone
+      .text()
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+    if (!text || blocks[blocks.length - 1] === text) return
+    blocks.push(text)
+  })
+  if (blocks.length === 0) {
+    const text = $.root().text().replace(/\s+/g, ' ').trim()
+    if (text) blocks.push(text)
+  }
+  if (title && blocks[0]?.trim() === title.trim()) blocks.shift()
+  return blocks.join('\n\n')
+}
+
 export function buildWeiboTopics(tags: string[], limit = 5): string[] {
   const unique = Array.from(new Set(normalizeTags(tags).map(tag => tag.replace(/\s+/g, '').replace(/#/g, '')).filter(Boolean))).slice(0, limit)
   return unique.map(tag => `#${tag}#`)
@@ -76,7 +121,7 @@ export async function renderWeibo(input: RenderInput, context?: RendererContext)
   const reserved = topicText ? Array.from(topicText).length + 2 : 0
   const titleReserved = title ? Array.from(title).length + 2 : 0
   const budget = Math.max(1, WEIBO_BODY_MAX - reserved - titleReserved)
-  const rawBody = prepared.plainText || prepared.summary || '（正文为空，可先补充文案再发布）'
+  const rawBody = buildWeiboBody(prepared.html, title) || prepared.plainText || prepared.summary || '（正文为空，可先补充文案再发布）'
   const body = truncateToChars(rawBody, budget)
   const caption = [title, body, topicText].filter(Boolean).join('\n\n').trim()
   if (Array.from(rawBody).length > budget) warnings.push(`微博正文已截断到 ${WEIBO_BODY_MAX} 字以内，完整内容可在 HTML 文件中查看。`)
