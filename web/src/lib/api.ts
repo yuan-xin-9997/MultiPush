@@ -25,6 +25,9 @@ import type {
   PublicationDeletion,
   PlatformId,
   RegisterInput,
+  RegistrationConfig,
+  InviteCode,
+  InviteCodeInput,
   RenderListItem,
   RenderRecord,
   RenderRequest,
@@ -249,6 +252,7 @@ export const api = {
       request<{ ok: true }>('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, code, newPassword }) }),
     register: (input: RegisterInput) =>
       request<AuthResponse>('/api/auth/register', { method: 'POST', body: JSON.stringify(input) }),
+    registrationConfig: () => request<RegistrationConfig>('/api/auth/registration-config'),
     login: (input: LoginInput) =>
       request<AuthResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify(input) }),
     me: () => request<{ user: User }>('/api/auth/me'),
@@ -256,6 +260,19 @@ export const api = {
       request<{ user: User }>('/api/auth/me', { method: 'PATCH', body: JSON.stringify(input) }),
     changePassword: (input: { currentPassword: string; newPassword: string }) =>
       request<{ ok: true }>('/api/auth/password', { method: 'POST', body: JSON.stringify(input) }),
+  },
+
+  admin: {
+    inviteCodes: {
+      list: () => request<{ invites: InviteCode[] }>('/api/admin/invite-codes'),
+      create: (input: InviteCodeInput) =>
+        request<{ invite: InviteCode }>('/api/admin/invite-codes', { method: 'POST', body: JSON.stringify(input) }),
+      update: (id: string, active: boolean) =>
+        request<{ invite: InviteCode }>(`/api/admin/invite-codes/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ active }),
+        }),
+    },
   },
 
   books: {
