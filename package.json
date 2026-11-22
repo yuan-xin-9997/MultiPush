@@ -41,6 +41,7 @@
     "smoke:video": "node scripts/smoke-video.mjs",
     "smoke:video-ui": "npm run build && node scripts/smoke-video-ui.mjs",
     "smoke:video-gate": "npm run build && node scripts/smoke-video-render-gate.mjs",
+    "smoke:library-grid": "npm run build && node scripts/smoke-library-grid.mjs",
     "smoke:gallery": "npm run build && node scripts/smoke-gallery-ui.mjs",
     "smoke:assets": "npm run build && node scripts/smoke-assets-ui.mjs",
     "smoke:media-picker": "npm run build && node scripts/smoke-media-picker-ui.mjs",
