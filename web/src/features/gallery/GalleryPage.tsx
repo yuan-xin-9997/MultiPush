@@ -22,13 +22,14 @@ import {
   Upload,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { ContentDetail, ContentInput, ContentStatus, MediaAsset, RichTextJson } from '@shared/types'
+import { getPlatformInfo, type ContentDetail, type ContentInput, type ContentStatus, type MediaAsset, type PlatformId, type RichTextJson } from '@shared/types'
 import { api, absoluteUrl } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { exportContentFile, type ExportFormat } from '@/lib/content-io'
 import { cn, escapeHtml, formatBytes } from '@/lib/utils'
 import { imageSizeFromHeaders } from './image-meta'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import PlatformGlyph from '@/components/PlatformGlyph'
 import Dropdown, { type DropdownEntry } from '@/components/Dropdown'
 import EmptyState from '@/components/EmptyState'
 import MediaPicker from '@/components/MediaPicker'
@@ -61,10 +62,12 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const SAVE_DELAY = 800
 const DEFAULT_TITLE = '无标题图文'
 
-const TARGETS = [
-  { id: 'wechatpic', name: '公众号贴图', limit: 20, note: '图片消息 · 正文为纯文本' },
-  { id: 'xiaohongshu', name: '小红书', limit: 18, note: '3:4 图文卡片' },
-  { id: 'douyin', name: '抖音图文', limit: 35, note: '竖屏图文 · 标题 + 配文' },
+const targetLimit = (id: PlatformId): number => getPlatformInfo(id).limits.imageMax ?? MAX_IMAGES
+
+const TARGETS: { id: PlatformId; name: string; limit: number; note: string }[] = [
+  { id: 'wechatpic', name: '公众号贴图', limit: targetLimit('wechatpic'), note: '图片消息 · 正文为纯文本' },
+  { id: 'xiaohongshu', name: '小红书', limit: targetLimit('xiaohongshu'), note: '3:4 图文卡片' },
+  { id: 'douyin', name: '抖音图文', limit: targetLimit('douyin'), note: '竖屏图文 · 标题 + 配文' },
 ]
 
 let imageSequence = 0
@@ -844,8 +847,10 @@ export default function GalleryPage() {
   const bodyCharacters = Array.from(body.replace(/\s/g, '')).length
   const platformWarnings: string[] = []
   if (images.length === 0) platformWarnings.push('还没有图片：贴图、抖音图文和小红书都至少需要 1 张图片。')
-  if (images.length > 20) platformWarnings.push('公众号贴图最多 20 张，发布时会按顺序取前 20 张。')
-  if (images.length > 18) platformWarnings.push('小红书最多 18 张，建议精简图片。')
+  const wechatpicLimit = targetLimit('wechatpic')
+  const xiaohongshuLimit = targetLimit('xiaohongshu')
+  if (images.length > wechatpicLimit) platformWarnings.push(`公众号贴图最多 ${wechatpicLimit} 张，发布时会按顺序取前 ${wechatpicLimit} 张。`)
+  if (images.length > xiaohongshuLimit) platformWarnings.push(`小红书最多 ${xiaohongshuLimit} 张，建议精简图片。`)
   if (bodyCharacters > 1000) platformWarnings.push('小红书和抖音正文建议控制在 1000 字以内。')
 
   return (
@@ -1224,7 +1229,7 @@ export default function GalleryPage() {
             <ul className="gallery-targets">
               {TARGETS.map((target) => (
                 <li key={target.id}>
-                  <span className={cn('gallery-target-dot', `is-${target.id}`)} />
+                  <PlatformGlyph platform={target.id} size={14} className={cn('gallery-target-icon', `is-${target.id}`)} />
                   <div>
                     <strong>{target.name}</strong>
                     <small>{target.note}</small>

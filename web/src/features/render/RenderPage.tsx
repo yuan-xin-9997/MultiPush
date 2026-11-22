@@ -78,7 +78,7 @@ import {
 } from './downloads'
 import { resolveCardStyle, type CardStyle } from './types'
 import { useElementWidth } from './hooks'
-import PlatformGlyph from './platform-glyph'
+import PlatformGlyph from '@/components/PlatformGlyph'
 import XhsCardView from './XhsCardView'
 import PlatformEditor from './PlatformEditor'
 import PlatformSettings from './PlatformSettings'
