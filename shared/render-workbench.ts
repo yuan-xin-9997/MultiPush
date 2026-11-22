@@ -85,12 +85,15 @@ export function publishChecks(render: PlatformRender, stale = false): PublishChe
   const short = render.platform === 'xiaohongshu' || render.platform === 'douyin' || render.platform === 'weibo' || render.platform === 'wechatpic'
   // Caption text includes the title and hashtags that are copied together.
   // A sticker's body is the plain-text caption alone; the API requires it.
-  const bodyLength = render.platform === 'wechatpic' ? Array.from(getCaptionBody(render)).length : Array.from(render.text ?? '').length
+  const thread = render.platform === 'weibo' ? render.thread : undefined
+  const bodyLength = thread?.length
+    ? Math.max(...thread.map((part) => Array.from(part).length))
+    : render.platform === 'wechatpic' ? Array.from(getCaptionBody(render)).length : Array.from(render.text ?? '').length
   const titleLength = Array.from(render.title).length
   const images = render.platform === 'xiaohongshu' ? render.cards.length : render.assets.filter((asset) => asset.kind === 'image').length
   return [
     { label: '标题', detail: `${titleLength}${limits.titleMax ? ` / ${limits.titleMax}` : ''} 字`, ok: titleLength > 0 && (!limits.titleMax || titleLength <= limits.titleMax), action: 'edit' },
-    { label: short ? '完整发布文案（含标题与话题）' : '正文', detail: `${bodyLength}${limits.bodyMax ? ` / ${limits.bodyMax}` : ''} 字`, ok: bodyLength > 0 && (!limits.bodyMax || bodyLength <= limits.bodyMax), action: 'edit' },
+    { label: short ? '完整发布文案（含标题与话题）' : '正文', detail: `${thread && thread.length > 1 ? `${thread.length} 条 / 单条 ` : ''}${bodyLength}${limits.bodyMax ? ` / ${limits.bodyMax}` : ''} 字`, ok: bodyLength > 0 && (!limits.bodyMax || bodyLength <= limits.bodyMax), action: 'edit' },
     { label: render.platform === 'xiaohongshu' ? '发布卡片' : '图片', detail: `${images}${limits.imageMax ? ` / ${limits.imageMax}` : ''} 张（参考上限）`, ok: !limits.imageMax || images <= limits.imageMax, action: render.platform === 'xiaohongshu' ? 'cards' : 'assets' },
     { label: '原文与设置版本', detail: stale ? '已变化，请重新生成' : render.sourceUpdatedAt ? '与生成版本一致' : '旧记录未保存原文版本，建议重新生成', ok: !stale && Boolean(render.sourceUpdatedAt), action: 'render' },
   ]

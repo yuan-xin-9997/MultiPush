@@ -89,6 +89,35 @@ describe('Weibo publishing', () => {
     expect(driver.publish).toHaveBeenCalledTimes(1)
   })
 
+  it('publishes long content as a thread and stores per-segment results', async () => {
+    const { service, database, alice, driver, article } = setup()
+    const paragraphs = Array.from({ length: 40 }, (_, index) => `<p>第 ${index + 1} 段：${'这是一段较长的微博正文内容。'.repeat(8)}</p>`).join('')
+    const render = await article(paragraphs)
+    const result = database.getRender(alice.id, render.id)!.results[0]
+    expect(result.thread!.length).toBeGreaterThan(1)
+    const parts = result.thread!.map((_, index) => ({
+      index,
+      status: 'published' as const,
+      remoteId: `5000000000000${String(index).padStart(2, '0')}`,
+      url: 'https://weibo.com/1234567890/500000000000001',
+      message: '已发布',
+    }))
+    driver.publish.mockResolvedValueOnce({
+      state,
+      status: 'published',
+      remoteId: '500000000000001',
+      url: 'https://weibo.com/1234567890/500000000000001',
+      message: `微博串已发布（${parts.length} 条）`,
+      thread: parts,
+    })
+    const publication = await service.publish(alice.id, { renderId: render.id }, 'http://127.0.0.1:34080')
+    const done = await finish(service, alice.id, publication.id)
+    expect(driver.publish.mock.calls[0][1].thread).toHaveLength(result.thread!.length)
+    expect(done.status).toBe('published')
+    expect(done.thread).toHaveLength(parts.length)
+    expect(done.thread![1]).toMatchObject({ index: 1, status: 'published' })
+  })
+
   it('saves a local draft without calling the Weibo driver', async () => {
     const { service, alice, driver, image, article } = setup()
     image()
@@ -110,6 +139,25 @@ describe('Weibo publishing', () => {
     await expect(service.resolve(bob.id, publication.id, { action: 'not_published' })).rejects.toMatchObject({ status: 404 })
     await service.resolve(alice.id, publication.id, { action: 'not_published' })
     expect(service.get(alice.id, publication.id)).toMatchObject({ status: 'failed' })
+  })
+
+  it('does not mark a partially published thread as fully published', async () => {
+    const { service, database, alice, driver, article } = setup()
+    const render = await article('<p>正文</p>')
+    const publication = database.createWeiboPublication(alice.id, { renderId: render.id, title: '微博串', mode: 'publish', idempotencyKey: 'partial-thread' })
+    database.updateWeiboPublication(alice.id, publication.id, {
+      status: 'uncertain',
+      message: '微博串第 2/2 条未完成',
+      thread: [
+        { index: 0, status: 'published', remoteId: '500000000000001', url: 'https://weibo.com/1234567890/500000000000001', message: '已发布' },
+        { index: 1, status: 'failed', remoteId: null, url: null, message: '评论失败' },
+      ],
+    })
+    await service.resolve(alice.id, publication.id, { action: 'check' })
+    await vi.waitFor(() => expect(service.get(alice.id, publication.id).status).not.toBe('running'))
+    expect(service.get(alice.id, publication.id)).toMatchObject({ status: 'uncertain' })
+    expect(service.get(alice.id, publication.id).message).toContain('仅完成 1/2 条')
+    expect(driver.checkPublication).not.toHaveBeenCalled()
   })
 
   it('rejects videos and stale renders before submitting', async () => {

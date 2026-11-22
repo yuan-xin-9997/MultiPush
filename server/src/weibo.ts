@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { PublicationDeletion, WeiboAccount, WeiboLogin, WeiboPublication, WeiboPublishInput, WeiboResolveInput } from '../../shared/types'
+import type { PublicationDeletion, WeiboAccount, WeiboLogin, WeiboPublication, WeiboPublishInput, WeiboResolveInput, WeiboThreadPart } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -188,7 +188,12 @@ export class WeiboService {
     if (render.sourceUpdatedAt && render.sourceUpdatedAt !== content.updatedAt) throw new ApiError(409, 'weibo_render_stale', '原文已修改，请重新生成微博排版后发布')
     const text = (render.text ?? '').trim()
     if (!text) throw new ApiError(400, 'weibo_body_empty', '请先填写微博正文')
-    if (Array.from(text).length > 2000) throw new ApiError(400, 'weibo_body_too_long', '微博正文不能超过 2000 字')
+    const rawThread = Array.isArray(render.thread) ? render.thread.map((part) => part.trim()).filter(Boolean) : []
+    const thread = rawThread.length ? rawThread : [text]
+    if (!thread.length) throw new ApiError(400, 'weibo_body_empty', '请先填写微博正文')
+    if (thread.length > 20) throw new ApiError(400, 'weibo_thread_too_long', '微博串不能超过 20 条，请精简正文')
+    if (thread.some((part) => Array.from(part).length > 2000)) throw new ApiError(400, 'weibo_body_too_long', '微博单条正文不能超过 2000 字')
+    if (!rawThread.length && Array.from(text).length > 2000) throw new ApiError(400, 'weibo_body_too_long', '微博正文不能超过 2000 字')
     if (render.videos.length) throw new ApiError(400, 'weibo_media_unsupported', '微博发布暂不支持视频，请移除视频后重试')
     const urls = Array.from(new Set(render.assets.filter(asset => asset.kind === 'image').map(asset => asset.url))).slice(0, MAX_IMAGES)
     const images: PublisherImage[] = []
@@ -196,7 +201,7 @@ export class WeiboService {
       const image = await this.image(userId, src, baseUrl)
       images.push({ ...image, name: `weibo-${index + 1}-${image.name}` })
     }
-    return { text, images, title: render.title || content.title }
+    return { text: thread.join('\n\n---\n\n'), thread, images, title: render.title || content.title }
   }
 
   list(userId: string): WeiboPublication[] { return this.database.listWeiboPublications(userId) }
@@ -247,6 +252,16 @@ export class WeiboService {
 
   private async recheck(userId: string, id: string, state: PublisherStorageState, current: WeiboPublication): Promise<void> {
     try {
+      if (current.thread?.some((part) => part.status === 'failed')) {
+        const done = current.thread.filter((part) => part.status === 'published').length
+        this.database.resolveWeiboPublication(userId, id, 'check', {
+          status: 'uncertain',
+          message: `根微博已存在，但微博串仅完成 ${done}/${current.thread.length} 条；请到微博主页补齐后再人工核实`,
+          url: current.url,
+          remoteId: current.remoteId,
+        })
+        return
+      }
       const result = current.remoteId
         ? await this.driver.checkPublication(state, current.remoteId, current.title)
         : { status: 'unknown', url: null, message: '没有可核对的微博编号，请到微博主页核实后选择人工核实结果' }
@@ -268,7 +283,7 @@ export class WeiboService {
       this.save(userId, checked.state, checked.identity)
       const article = await this.article(userId, input, baseUrl)
       const mode = input.mode === 'draft' ? 'draft' : 'publish'
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, text: article.text, mode }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, text: article.thread.length === 1 ? article.text : article.thread, mode }))
       for (const image of article.images) hash.update(image.buffer)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findWeiboPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
@@ -298,7 +313,7 @@ export class WeiboService {
     try {
       const result = await this.driver.publish(state, article, progress => { this.database.updateWeiboPublication(userId, id, progress) })
       this.save(userId, result.state, identity)
-      this.database.updateWeiboPublication(userId, id, { status: 'published', message: result.message, url: result.url, remoteId: result.remoteId })
+      this.database.updateWeiboPublication(userId, id, { status: 'published', message: result.message, url: result.url, remoteId: result.remoteId, thread: result.thread ?? undefined })
     } catch (error) {
       this.expire(userId, error)
       const code = error instanceof ApiError ? error.code : ''

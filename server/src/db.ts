@@ -38,6 +38,7 @@ import type {
   BlogPublication,
   BlogResolution,
   WeiboPublication,
+  WeiboThreadPart,
   WeiboResolution,
   ToutiaoPublication,
   ToutiaoResolution,
@@ -995,6 +996,7 @@ export class Database {
         message TEXT NOT NULL,
         url TEXT,
         remote_id TEXT,
+        thread_json TEXT,
         idempotency_key TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -1284,7 +1286,7 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_bilibili_resolutions_publication ON bilibili_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 24;
+      PRAGMA user_version = 25;
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
@@ -1296,6 +1298,7 @@ export class Database {
     this.ensureAiColumns()
     this.ensureVideoStudioColumn()
     this.ensureRenderPlatformOptions()
+    this.ensureWeiboThreadColumn()
     this.run(`UPDATE xiaohongshu_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先在小红书核实结果，避免重复发布。', nowIso()])
     this.run(`UPDATE douyin_publications SET status = 'uncertain', message = ?, updated_at = ? WHERE status = 'running'`, ['服务已重启，请先核实抖音发布结果，避免重复发布。', nowIso()])
     // Never resend an operation that may already have reached WeChat before a restart.
@@ -1346,6 +1349,12 @@ export class Database {
     if (!columns.has('studio_json')) {
       this.database.exec('ALTER TABLE video_projects ADD COLUMN studio_json TEXT')
     }
+  }
+
+  /** Additive migration for Weibo thread part tracking. */
+  private ensureWeiboThreadColumn(): void {
+    const columns = new Set(this.all('PRAGMA table_info(weibo_publications)').map((row) => text(row.name)))
+    if (!columns.has('thread_json')) this.run('ALTER TABLE weibo_publications ADD COLUMN thread_json TEXT')
   }
 
   /** Additive migration for per-platform render settings on older databases. */
@@ -2876,7 +2885,11 @@ export class Database {
   private mapWeiboPublication(row: Row): WeiboPublication {
     const resolutions: WeiboResolution[] = this.all('SELECT * FROM weibo_publication_resolutions WHERE publication_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 10', [text(row.id), text(row.user_id)])
       .map(r => ({ id: text(r.id), action: r.action as WeiboResolution['action'], message: text(r.message), articleUrl: nullableText(r.article_url), createdAt: text(r.created_at) }))
-    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as WeiboPublication['mode'], status: row.status as WeiboPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), createdAt: text(row.created_at), updatedAt: text(row.updated_at), resolutions }
+    const rawThread = parseJson(row.thread_json)
+    const thread = Array.isArray(rawThread)
+      ? rawThread.filter((part): part is WeiboThreadPart => !!part && typeof part === 'object' && typeof (part as WeiboThreadPart).index === 'number')
+      : undefined
+    return { id: text(row.id), renderId: text(row.render_id), title: text(row.title), mode: row.mode as WeiboPublication['mode'], status: row.status as WeiboPublication['status'], message: text(row.message), url: nullableText(row.url), remoteId: nullableText(row.remote_id), thread: thread?.length ? thread : undefined, createdAt: text(row.created_at), updatedAt: text(row.updated_at), resolutions }
   }
 
   createWeiboPublication(userId: string, values: CreateWechatPublicationValues): WeiboPublication {
@@ -2907,11 +2920,11 @@ export class Database {
     return this.all('SELECT * FROM weibo_publications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50', [userId]).map(row => this.mapWeiboPublication(row))
   }
 
-  updateWeiboPublication(userId: string, id: string, values: Partial<Pick<WeiboPublication, 'status' | 'message' | 'url' | 'remoteId'>>): WeiboPublication | null {
+  updateWeiboPublication(userId: string, id: string, values: Partial<Pick<WeiboPublication, 'status' | 'message' | 'url' | 'remoteId' | 'thread'>>): WeiboPublication | null {
     const current = this.getWeiboPublication(userId, id)
     if (!current) return null
-    this.run(`UPDATE weibo_publications SET status = ?, message = ?, url = ?, remote_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
-      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, nowIso(), id, userId])
+    this.run(`UPDATE weibo_publications SET status = ?, message = ?, url = ?, remote_id = ?, thread_json = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      [values.status ?? current.status, values.message ?? current.message, values.url === undefined ? current.url : values.url, values.remoteId === undefined ? current.remoteId : values.remoteId, values.thread === undefined ? (current.thread ? JSON.stringify(current.thread) : null) : JSON.stringify(values.thread), nowIso(), id, userId])
     return this.getWeiboPublication(userId, id)
   }
 

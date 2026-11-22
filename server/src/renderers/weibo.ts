@@ -2,6 +2,7 @@ import { load } from 'cheerio'
 import { getPlatformInfo } from '../../../shared/types'
 import type { PlatformRender } from '../../../shared/types'
 import type { RenderInput, RendererContext } from './types'
+import { splitWeiboThread, weiboLength } from '../weibo-thread'
 import {
   ARTICLE_WRAPPER_STYLE,
   buildHtmlDocument,
@@ -110,21 +111,21 @@ export async function renderWeibo(input: RenderInput, context?: RendererContext)
   const info = getPlatformInfo('weibo')
   const prepared = prepareContent(input, context, info)
   const title = truncateToChars(prepared.rawTitle, info.limits.titleMax ?? 64)
-  const warnings = buildPlatformWarnings(prepared, [
+  let warnings = buildPlatformWarnings(prepared, [
     ...(prepared.media.videos.length ? ['微博发布暂不支持视频，正文中的视频会被忽略。'] : []),
     ...(prepared.media.images.length > WEIBO_IMAGE_MAX ? [`微博最多发布 ${WEIBO_IMAGE_MAX} 张图片，超出部分不会上传。`] : []),
   ])
 
   const includeTags = prepared.options.includeTags !== false
   const topics = includeTags ? buildWeiboTopics(prepared.tags, 5) : []
-  const topicText = topics.join(' ')
-  const reserved = topicText ? Array.from(topicText).length + 2 : 0
-  const titleReserved = title ? Array.from(title).length + 2 : 0
-  const budget = Math.max(1, WEIBO_BODY_MAX - reserved - titleReserved)
   const rawBody = buildWeiboBody(prepared.html, title) || prepared.plainText || prepared.summary || '（正文为空，可先补充文案再发布）'
-  const body = truncateToChars(rawBody, budget)
-  const caption = [title, body, topicText].filter(Boolean).join('\n\n').trim()
-  if (Array.from(rawBody).length > budget) warnings.push(`微博正文已截断到 ${WEIBO_BODY_MAX} 字以内，完整内容可在 HTML 文件中查看。`)
+  const body = rawBody
+  const thread = splitWeiboThread(title, body, topics)
+  const caption = thread.join('\n\n---\n\n').trim()
+  if (thread.length > 1) {
+    warnings = warnings.filter((warning) => !warning.includes('超过微博建议的 2000 字'))
+    warnings.push(`正文约 ${weiboLength(body)} 字，超过单条微博 ${WEIBO_BODY_MAX} 字，将自动发布为 ${thread.length} 条微博串（后续内容以评论接龙）。`)
+  }
 
   const article = buildStyledArticle(prepared.html, {
     styles: WEIBO_STYLES,
@@ -145,6 +146,7 @@ export async function renderWeibo(input: RenderInput, context?: RendererContext)
     title,
     caption,
     body,
+    thread,
     topics,
     tags: includeTags ? prepared.tags : [],
     images: prepared.media.images,
@@ -159,6 +161,7 @@ export async function renderWeibo(input: RenderInput, context?: RendererContext)
     html: article.html,
     markdown: null,
     text: caption,
+    thread,
     previewMode: 'vertical',
     themeColor: WEIBO_THEME,
     meta: { ...buildMeta(prepared), tags: includeTags ? prepared.tags : [] },

@@ -2,6 +2,7 @@ import type { ContentDetail, PlatformAdjustment, PlatformRender, RenderOptions }
 import { renderPlatforms } from './renderers'
 import { buildHtmlDocument, htmlToMarkdown, normalizeTags, safeFilename, charLength } from './renderers/common'
 import { getCaptionBody } from '../../shared/render-workbench'
+import { splitWeiboThread, weiboLength } from './weibo-thread'
 
 export async function adjustPlatformRender(current: PlatformRender, input: PlatformAdjustment, options: RenderOptions, baseUrl: string, original = current): Promise<PlatformRender> {
   let result = { ...current }
@@ -16,7 +17,13 @@ export async function adjustPlatformRender(current: PlatformRender, input: Platf
   if (current.platform === 'xiaohongshu' || current.platform === 'douyin' || current.platform === 'weibo' || current.platform === 'wechatpic') {
     result.captionBody = input.body ?? getCaptionBody(current)
     const hashtags = current.platform === 'weibo' ? tags.slice(0, 5).map((tag) => `#${tag}#`).join(' ') : tags.slice(0, 5).map((tag) => `#${tag}`).join(' ')
-    result.text = [input.title, result.captionBody, hashtags].filter(Boolean).join('\n\n')
+    if (current.platform === 'weibo') {
+      result.thread = splitWeiboThread(input.title, result.captionBody, tags.slice(0, 5).map((tag) => `#${tag}#`))
+      result.text = result.thread.join('\n\n---\n\n')
+    } else {
+      result.thread = undefined
+      result.text = [input.title, result.captionBody, hashtags].filter(Boolean).join('\n\n')
+    }
     result.meta = { ...result.meta, wordCount: charLength(result.captionBody), readMinutes: Math.max(1, Math.ceil(charLength(result.captionBody) / 350)), summary: result.captionBody.slice(0, 120) }
   }
   if (current.platform === 'xiaohongshu') {
@@ -35,6 +42,9 @@ export async function adjustPlatformRender(current: PlatformRender, input: Platf
     result.meta = { ...result.meta, imageCount: imageUrls.size }
   }
   result.warnings = result.warnings.filter((warning) => !/标题.*字|正文.*字|截断/.test(warning))
+  if (current.platform === 'weibo' && (result.thread?.length ?? 0) > 1) {
+    result.warnings.push(`正文约 ${weiboLength(result.captionBody ?? '')} 字，超过单条微博 2000 字，将自动发布为 ${result.thread!.length} 条微博串（后续内容以评论接龙）。`)
+  }
   const base = safeFilename(input.title)
   result.downloads = [{ filename: `${base}.html`, kind: 'html', mimeType: 'text/html;charset=utf-8', content: buildHtmlDocument({ title: input.title, html: result.html, themeColor: result.themeColor, authorName: result.authorName }) }]
   if (current.platform === 'zhihu' || current.platform === 'sspai' || current.platform === 'blog' || current.platform === 'toutiao' || current.platform === 'baijiahao' || current.platform === 'douban' || current.platform === 'csdn') {
