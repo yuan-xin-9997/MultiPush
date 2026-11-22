@@ -1,8 +1,10 @@
-import { chromium, type Browser, type BrowserContext, type Frame, type Page } from 'playwright-core'
+import { chromium, type Browser, type BrowserContext, type Frame, type Locator, type Page } from 'playwright-core'
 import type { PublisherStorageState } from './publisher-session'
 import { publisherExecutablePath } from './wechat-browser'
 import { qrReady } from './qr-capture'
 import { ApiError } from './errors'
+import { wbiSign } from './bilibili-api'
+import { pasteHtml, writeClipboardImage } from './browser-clipboard'
 
 export interface BilibiliIdentity { accountId: string; name: string }
 export interface BilibiliArticleImage { name: string; mime: string; buffer: Buffer }
@@ -49,6 +51,63 @@ const EXPIRED_TEXT = /二维码已过期|二维码失效|请重新登录|登录�
 const SECURITY_TEXT = /安全验证|风险验证|请完成验证|验证码/
 const SELECT_ALL = process.platform === 'darwin' ? 'Meta+A' : 'Control+A'
 const PASTE = process.platform === 'darwin' ? 'Meta+V' : 'Control+V'
+const IMAGE_UPLOAD = 'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs'
+const IMAGE_NODE_SELECTOR = 'img'
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function stateCookie(state: PublisherStorageState, name: string): string {
+  return state.cookies.find((cookie) => cookie.name === name)?.value ?? ''
+}
+
+async function wbiKeys(context: BrowserContext): Promise<{ imgKey: string; subKey: string }> {
+  const response = await context.request.get(NAV, { timeout: 15_000 })
+  const body = object(await response.json().catch(() => null))
+  const wbi = object(object(body.data).wbi_img)
+  const imgKey = typeof wbi.img_url === 'string' ? wbi.img_url.split('/').pop()?.split('.')[0] ?? '' : ''
+  const subKey = typeof wbi.sub_url === 'string' ? wbi.sub_url.split('/').pop()?.split('.')[0] ?? '' : ''
+  if (!imgKey || !subKey) throw new ApiError(502, 'bilibili_image_upload', 'B 站没有返回图片上传所需的 WBI 密钥，请重新登录')
+  return { imgKey, subKey }
+}
+
+async function waitForImageUrl(context: BrowserContext, url: string, timeout = 15_000): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    try {
+      const response = await context.request.get(url, { timeout: 5_000 })
+      if (response.status() === 200 && (response.headers()['content-type'] ?? '').startsWith('image/')) return true
+    } catch {
+      // The BFS CDN may need a moment to expose a newly uploaded object.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  return false
+}
+
+async function waitForImageCount(editor: Locator, expected: number, timeout = 20_000): Promise<number> {
+  const start = Date.now()
+  let count = 0
+  while (Date.now() - start < timeout) {
+    count = await editor.locator(IMAGE_NODE_SELECTOR).count()
+    if (count >= expected) return count
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return count
+}
+
+async function editorDiagnostics(editor: Locator, page: Page): Promise<string> {
+  const stats = await editor.evaluate((element) => ({
+    imgs: element.querySelectorAll('img').length,
+    figures: element.querySelectorAll('figure').length,
+    imageWrappers: element.querySelectorAll('[class*="image"]').length,
+    placeholders: element.querySelectorAll('[class*="placeholder"], [class*="loading"], [class*="upload"]').length,
+  })).catch(() => null)
+  const bodyText = await page.locator('body').innerText().catch(() => '')
+  const security = SECURITY_TEXT.test(bodyText) ? '检测到安全验证' : '未检测到安全验证'
+  return `${JSON.stringify(stats ?? {})}；${security}`
+}
 
 type Json = Record<string, unknown>
 function object(value: unknown): Json {
@@ -120,23 +179,6 @@ async function captureQr(page: Page): Promise<string | null> {
   }
   return null
 }
-
-const CLIPBOARD_HTML_JS = `async ({html, plain}) => {
-  const item = new ClipboardItem({
-    'text/html': new Blob([html], {type: 'text/html'}),
-    'text/plain': new Blob([plain], {type: 'text/plain'})
-  });
-  await navigator.clipboard.write([item]);
-  return true;
-}`
-
-const CLIPBOARD_IMAGE_JS = `async ({b64, mime}) => {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  await navigator.clipboard.write([new ClipboardItem({[mime]: new Blob([bytes], {type: mime})})]);
-  return true;
-}`
 
 export class PlaywrightBilibiliDriver implements BilibiliDriver {
   private browser: Browser | null = null
@@ -212,6 +254,79 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
     }
   }
 
+  /** Upload one article image through Bilibili's editor image endpoint. */
+  private async uploadImage(
+    context: BrowserContext,
+    state: PublisherStorageState,
+    image: BilibiliArticleImage,
+    keys: { imgKey: string; subKey: string },
+    index: number,
+    total: number,
+  ): Promise<{ url: string; width: number; height: number; size: number }> {
+    const csrf = stateCookie(state, 'bili_jct')
+    if (!csrf) throw new ApiError(409, 'bilibili_session_expired', 'B 站登录状态缺少 CSRF 凭据，请重新扫码连接')
+    const signed = wbiSign({}, keys.imgKey, keys.subKey)
+    const query = new URLSearchParams(Object.fromEntries(Object.entries(signed).map(([key, value]) => [key, String(value)]))).toString()
+    const response = await context.request.post(`${IMAGE_UPLOAD}?${query}`, {
+      multipart: {
+        file_up: { name: image.name, mimeType: image.mime, buffer: image.buffer },
+        biz: 'new_dyn',
+        category: 'daily',
+        csrf,
+      },
+      headers: { Referer: 'https://member.bilibili.com/', Origin: 'https://member.bilibili.com' },
+      timeout: 30_000,
+    }).catch((error) => {
+      throw new ApiError(502, 'bilibili_image_upload', `B 站图片上传请求失败（第 ${index + 1}/${total} 张）：${error instanceof Error ? error.message : String(error)}`)
+    })
+    const body = object(await response.json().catch(() => null))
+    const message = typeof body.message === 'string' ? body.message : ''
+    if (response.status() !== 200 || Number(body.code) !== 0) {
+      throw new ApiError(502, 'bilibili_image_upload', `B 站图片上传失败（第 ${index + 1}/${total} 张，HTTP ${response.status()}，code ${String(body.code ?? 'unknown')}${message ? `：${message}` : ''}）`)
+    }
+    const data = object(body.data)
+    const raw = typeof data.image_url === 'string' ? data.image_url : ''
+    if (!raw) throw new ApiError(502, 'bilibili_image_upload', `B 站图片上传成功但没有返回地址（第 ${index + 1}/${total} 张）`)
+    const url = raw.startsWith('//') ? `https:${raw}` : raw.replace(/^http:\/\//, 'https://')
+    return {
+      url,
+      width: typeof data.image_width === 'number' ? data.image_width : 0,
+      height: typeof data.image_height === 'number' ? data.image_height : 0,
+      size: typeof data.img_size === 'number' ? data.img_size : 0,
+    }
+  }
+
+  /** Official editor clipboard fallback, with focus and a real DOM completion check. */
+  private async pasteClipboardImages(
+    page: Page,
+    frame: Frame,
+    editor: Locator,
+    images: BilibiliArticleImage[],
+    progress: (message: string) => void,
+    imageNotes: string[],
+  ): Promise<number> {
+    let inserted = 0
+    for (const [index, image] of images.entries()) {
+      await page.bringToFront()
+      await editor.click()
+      await page.waitForTimeout(120)
+      const before = await editor.locator(IMAGE_NODE_SELECTOR).count()
+      try {
+        await frame.evaluate(writeClipboardImage, { b64: image.buffer.toString('base64'), mime: image.mime })
+      } catch (error) {
+        throw new ApiError(502, 'bilibili_image_upload', `第 ${index + 1}/${images.length} 张图片写入剪贴板失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+      await page.keyboard.press(PASTE)
+      const count = await waitForImageCount(editor, before + 1, 15_000)
+      if (count <= before) {
+        throw new ApiError(502, 'bilibili_article_editor', `第 ${index + 1}/${images.length} 张图片粘贴后未出现在编辑器；${await editorDiagnostics(editor, page)}；${imageNotes.join('；')}`)
+      }
+      inserted += 1
+      progress(`正在写入 B 站正文图片 ${inserted}/${images.length}`)
+    }
+    return inserted
+  }
+
   async publishArticle(state: PublisherStorageState, article: BilibiliArticleInput, mode: 'draft' | 'publish', progress: (message: string) => void): Promise<{ state: PublisherStorageState; result: BilibiliArticleResult }> {
     const browser = await this.launch()
     const context = await browser.newContext({
@@ -229,6 +344,32 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
     })
 
     try {
+      const images = article.images.slice(0, 20)
+      const imageNotes: string[] = []
+      let imageCount = 0
+      let uploadFailure = ''
+      let imageHtml = ''
+      if (images.length) {
+        const uploaded: string[] = []
+        try {
+          const keys = await wbiKeys(context)
+          for (const [index, image] of images.entries()) {
+            progress(`正在上传 B 站正文图片 ${index + 1}/${images.length}`)
+            const result = await this.uploadImage(context, state, image, keys, index, images.length)
+            const ready = await waitForImageUrl(context, result.url)
+            if (!ready) throw new ApiError(502, 'bilibili_image_upload', `B 站图片 CDN 暂未就绪（第 ${index + 1}/${images.length} 张），已改用剪贴板兜底`)
+            uploaded.push(result.url)
+            imageNotes.push(`第 ${index + 1} 张 HTTP 200 code 0（${result.width}×${result.height}，CDN 已就绪）`)
+          }
+        } catch (error) {
+          uploadFailure = error instanceof Error ? error.message : String(error)
+          imageNotes.push(uploadFailure)
+        }
+        if (uploaded.length === images.length) {
+          imageHtml = uploaded.map((url, index) => `<figure><img src="${escapeAttribute(url)}" alt="正文图片 ${index + 1}"></figure>`).join('')
+        }
+      }
+
       progress('正在打开 B 站图文编辑器')
       await page.goto(TEXT_UPLOAD, { waitUntil: 'domcontentloaded', timeout: 30_000 })
       await page.waitForTimeout(3500)
@@ -238,13 +379,11 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
       const titleInput = frame.locator('textarea.title-input__inner').first()
       if (!(await titleInput.count())) throw new ApiError(502, 'bilibili_article_editor', '未找到 B 站图文标题输入框，已停止发布')
       await titleInput.fill(article.title)
-      progress('正在写入 B 站图文正文')
       const editor = frame.locator('.tiptap.ProseMirror[contenteditable="true"]').first()
+      progress('正在写入 B 站图文正文')
       await editor.click()
-      await page.keyboard.press(SELECT_ALL)
-      await frame.evaluate(CLIPBOARD_HTML_JS, { html: article.html, plain: article.plain })
-      await editor.click()
-      await page.keyboard.press(PASTE)
+      const pasted = await frame.evaluate(pasteHtml, { html: `${article.html}${imageHtml}`, plain: article.plain, replace: true })
+      if (!pasted?.ok) throw new ApiError(502, 'bilibili_article_editor', '未找到 B 站正文编辑区，无法写入正文')
       await page.waitForTimeout(2500)
       if (!(await editor.innerText()).includes(article.plain.slice(0, 18))) {
         await editor.click()
@@ -253,24 +392,23 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
         await page.waitForTimeout(1200)
       }
 
-      let pastedImages = 0
-      for (const image of article.images.slice(0, 20)) {
-        try {
-          await frame.evaluate(CLIPBOARD_IMAGE_JS, { b64: image.buffer.toString('base64'), mime: image.mime })
-          await editor.click()
-          await page.keyboard.press(PASTE)
-          await page.waitForTimeout(3500)
-          pastedImages += 1
-          progress(`正在上传 B 站正文图片 ${pastedImages}/${Math.min(article.images.length, 20)}`)
-        } catch {
-          // An image that cannot be pasted is reported by the verification step.
+      if (images.length) {
+        if (imageHtml) {
+          imageCount = await waitForImageCount(editor, images.length, 20_000)
+          if (imageCount < images.length) {
+            throw new ApiError(502, 'bilibili_article_editor', `正文图片写入不完整：期望 ${images.length} 张，实际 ${imageCount} 张；${await editorDiagnostics(editor, page)}；${imageNotes.join('；')}`)
+          }
+        } else {
+          // Official editor paste fallback: focus is mandatory before clipboard.write.
+          try {
+            imageCount = await this.pasteClipboardImages(page, frame, editor, images, progress, imageNotes)
+          } catch (error) {
+            throw new ApiError(502, 'bilibili_article_editor', `${uploadFailure ? `${uploadFailure}；` : ''}剪贴板兜底也失败：${error instanceof Error ? error.message : String(error)}；${await editorDiagnostics(editor, page)}`)
+          }
         }
       }
-      if (article.images.length) await page.waitForTimeout(6000)
 
-      const imageCount = await editor.locator('img').count()
       const textLength = Array.from(await editor.innerText()).length
-      if (article.images.length > 0 && imageCount === 0) throw new ApiError(502, 'bilibili_article_editor', '正文图片未能写入 B 站编辑器，已停止发布')
       progress('正在保存 B 站图文草稿')
       let draftClicked = false
       for (const candidate of [frame, page.mainFrame()]) {
@@ -288,9 +426,13 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
       try {
         const listResponse = await context.request.get(`${DRAFT_LIST}?pn=1&ps=5`, { timeout: 15_000 })
         const listBody = object(await listResponse.json())
-        const drafts = object(object(listBody.data).artlist).drafts
-        const first = object(Array.isArray(drafts) ? drafts[0] : null)
-        if (typeof first.id === 'number') draftId = String(first.id)
+        const artlist = object(listBody.artlist ?? object(listBody.data).artlist)
+        const drafts = artlist.drafts
+        if (Array.isArray(drafts)) {
+          const matched = drafts.find((draft) => object(draft).title === article.title) ?? drafts[0]
+          const first = object(matched)
+          if (typeof first.id === 'number') draftId = String(first.id)
+        }
       } catch {
         // Draft id is best effort; the publication is still useful.
       }

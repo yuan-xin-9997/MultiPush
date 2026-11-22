@@ -1,12 +1,12 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ContentDetail } from '../../shared/types'
 import { loadConfig } from '../src/config'
 import { openDatabase, type Database } from '../src/db'
 import { BilibiliService } from '../src/bilibili'
-import type { BilibiliArticleInput, BilibiliDriver } from '../src/bilibili-browser'
+import { PlaywrightBilibiliDriver, type BilibiliArticleInput, type BilibiliDriver } from '../src/bilibili-browser'
 import type { PublisherStorageState } from '../src/publisher-session'
 import { renderPlatforms } from '../src/renderers'
 import { publishBilibiliVideo, wbiMixinKey, wbiSign } from '../src/bilibili-api'
@@ -106,6 +106,29 @@ describe('Bilibili credentials', () => {
     const signed = wbiSign({ foo: "a'b", bar: 1 }, 'img-key', 'sub-key')
     expect(signed.wts).toBeTypeOf('number')
     expect(signed.w_rid).toMatch(/^[a-f0-9]{32}$/)
+  })
+})
+
+describe('Bilibili article image upload', () => {
+  it('uses the editor BFS endpoint with WBI, CSRF and the expected multipart fields', async () => {
+    const post = vi.fn(async (url: string, options: { multipart: Record<string, unknown> }) => {
+      expect(url).toContain('/x/dynamic/feed/draw/upload_bfs?')
+      expect(url).toContain('w_rid=')
+      expect(url).toContain('wts=')
+      expect(options.multipart).toMatchObject({ biz: 'new_dyn', category: 'daily', csrf: 'csrf' })
+      expect(options.multipart.file_up).toMatchObject({ name: 'image-1', mimeType: 'image/png' })
+      return {
+        status: () => 200,
+        json: async () => ({ code: 0, data: { image_url: 'http://i0.hdslb.com/bfs/new_dyn/test.png', image_width: 800, image_height: 500, img_size: 3.7 } }),
+      }
+    })
+    const driver = new PlaywrightBilibiliDriver()
+    const uploadImage = (driver as unknown as {
+      uploadImage: (context: unknown, state: PublisherStorageState, image: { name: string; mime: string; buffer: Buffer }, keys: { imgKey: string; subKey: string }, index: number, total: number) => Promise<{ url: string; width: number; height: number; size: number }>
+    }).uploadImage.bind(driver)
+    const result = await uploadImage({ request: { post } }, state(), { name: 'image-1', mime: 'image/png', buffer: Buffer.from('image') }, { imgKey: 'img', subKey: 'sub' }, 0, 1)
+    expect(result).toEqual({ url: 'https://i0.hdslb.com/bfs/new_dyn/test.png', width: 800, height: 500, size: 3.7 })
+    expect(post).toHaveBeenCalledTimes(1)
   })
 })
 

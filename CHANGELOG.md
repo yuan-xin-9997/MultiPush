@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 2026-11-22 · 修复 B 站图文正文图片无法写入
+
+**改了什么**
+
+- 根因一：Playwright 的 `frame.evaluate` 收到的是 JavaScript 字符串时不会执行该函数，原剪贴板写入实际没有发生；文本还有 `insertText` 兜底，图片则被静默跳过，最终 `img` 数量为 0。
+- 根因二：图片节点统计使用了被编辑器 locator 二次作用域的 `.tiptap.ProseMirror img`，即使图片存在也会统计为 0；改为在编辑器内统计 `img`。
+- 正文图片改为优先走 B 站编辑器真实接口 `x/dynamic/feed/draw/upload_bfs`：使用 WBI 签名、`bili_jct`、`file_up`、`biz=new_dyn`、`category=daily`，确认 CDN 可读后再写入编辑器。
+- 正文和图片通过一个合成的 paste 事件一次性写入，不再依赖系统剪贴板；保留剪贴板兜底，但兜底前聚焦编辑器并轮询图片节点确认完成。
+- 失败信息现在包含上传接口 HTTP/code、CDN 状态、`img`/`figure`/占位节点数量和安全验证状态。
+- 修正草稿列表响应解析（`artlist` 在响应顶层），保存草稿后可取回 B 站草稿 ID。
+- 新增图片上传接口参数/响应测试。
+
+**验证**
+
+- 使用真实 B 站账号、草稿模式发布一篇带 3 张图片的图文：3 张图片均上传成功并写入编辑器，保存草稿成功；重新打开草稿确认 3 张图片仍在正文中；测试草稿已删除。
+- `npm run typecheck`、`npm run build` 通过；`npm test -w server` 通过。
+
 ## 2026-11-22 · 微博长文改为微博串发布
 
 **改了什么**
