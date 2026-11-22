@@ -29,9 +29,10 @@
    | --- | --- |
    | 图片上传 | `POST https://upload.douban.com/j/group/topic/add_photo`，multipart 字段 `image_file` / `ck` / `primary_color` / `upload_auth_token`（token 从编辑器页面 `__INIT_STATE__` 读取） |
    | 发布日记 | `POST https://m.douban.com/rexxar/api/v2/topic/post`，JSON body 含 `title`、`content`（Draft.js raw state）、`image_ids`、`subtype: "note"`、`accessible: public/private`，请求头 `x-csrf-token` 取 `ck` Cookie |
+| 字段格式 | `image_ids` 必须是 `1_图片ID,2_图片ID`（每张图一个序号，不是 `3_id1,id2,id3`）；Draft `entityMap` 的 LINK/IMAGE 必须带 `mutability`；图片实体使用 `file_name`/`file_size` 等 snake_case 字段；无图时必须省略 `image_layout` |
    | 日记地址 | `https://www.douban.com/topic/<id>/`（旧地址 `/note/<id>/` 会跳转） |
 
-3. 正文图片先上传到豆瓣图床，再把返回的图片 id/URL 写进 Draft.js 正文和 `image_ids`。
+3. 正文图片先上传到豆瓣图床，再把返回的图片 id/URL 写进 Draft.js 正文和 `image_ids`。2026-11-22 修复了多图 `image_ids`、Draft 实体 `mutability`、图片字段和 `image_layout` 的格式问题；发布失败时会带上 HTTP 状态、响应 `code`、顶层字段和 `invalid_parameter` 等业务错误，便于定位。
 
 这意味着：
 
@@ -115,7 +116,7 @@ POST   /api/douban/publications/:id/resolve
 | 现象 | 处理 |
 | --- | --- |
 | 无法取得登录二维码 | 确认访问的是 `accounts.douban.com/passport/login?prefer_login_way=qrcode`；driver 使用桌面 UA 并经 Playwright API 代理 `asset.doubanio.com` 静态资源，避免无头 Chrome ORB 拦截。仍失败时检查服务器访问豆瓣 CDN 的网络/代理 |
-| 保存失败/接口不可用 | 豆瓣网页接口可能已改版；到发布页使用「复制 Markdown」或「打开豆瓣编辑器」手动发布 |
+| 保存失败/接口不可用 | 看错误中的 HTTP 状态与业务 `code`：`invalid_parameter` 通常是字段格式问题，`user_is_readonly` 是账号被临时限制，HTTP 404 是接口改版；接口不可用时使用「复制 Markdown」或「打开豆瓣编辑器」手动发布 |
 | 图片上传失败 | 检查图片格式（JPG/PNG/GIF）与大小（≤10 MB）；发布会在上传阶段停止，不会创建残缺日记 |
 | 结果待核实 | 先到豆瓣日记列表确认；确认未发布再重新提交，确认已发布则填写链接关联 |
 | 登录失效 | 断开后重新扫码；豆瓣 `dbcl2` 会滑动过期，长期不用需重新登录 |
@@ -123,5 +124,6 @@ POST   /api/douban/publications/:id/resolve
 ## 8. 当前验证状态
 
 - 渲染器、HTML/Markdown 导出、发布服务、API、前端页面、批量发布均有自动化测试或类型检查。
-- 豆瓣登录/保存接口依赖真实账号和豆瓣网络环境，当前开发环境无法访问豆瓣 CDN，未做真实豆瓣草稿/日记的端到端验证；首次部署后请用真实账号按第 4 节验证一次。
-- 如果豆瓣保存接口改版，`server/src/douban-browser.ts` 中的 `saveNote` 端点与响应解析需要按实际响应更新。
+- 2026-11-22 使用真实豆瓣账号验证了纯文字、带链接和带图片的**私密**日记创建，均返回 200 和日记 ID；请求体已与豆瓣编辑器实际请求逐字段对齐。
+- 联调过程中豆瓣对该账号短暂触发过只读风控（`user_is_readonly`），系统立即停止继续请求；冷却后已通过日记页「删除」入口清理全部测试私密日记，确认返回 404。没有向该账号发布公开日记。
+- 公开发布仍需用正式内容复测一次；如果豆瓣保存接口再次改版，`server/src/douban-browser.ts` 中的 `saveNote` 端点与响应解析需要按实际响应更新。

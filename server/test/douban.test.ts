@@ -16,7 +16,7 @@ import {
   type DoubanDriver,
   type DoubanLoginAttempt,
 } from '../src/douban-browser'
-import { buildDoubanTopicContent, parseDoubanTopicResult, parseDoubanUploadPhoto } from '../src/douban-topic'
+import { buildDoubanTopicContent, buildDoubanTopicPost, parseDoubanTopicResult, parseDoubanUploadPhoto } from '../src/douban-topic'
 import type { ContentDetail } from '../../shared/types'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -184,10 +184,29 @@ describe('Douban parsing', () => {
     expect(draft.blocks[1].text).toBe('正文加粗和链接')
     expect(draft.blocks[1].inlineStyleRanges[0]).toMatchObject({ style: 'BOLD' })
     expect(draft.blocks[1].entityRanges).toHaveLength(1)
-    expect(draft.entityMap['0']).toMatchObject({ type: 'LINK', data: { href: 'https://example.com' } })
-    expect(draft.entityMap['1']).toMatchObject({ type: 'IMAGE', data: { id: '754481196', src: photo.url } })
+    expect(draft.entityMap['0']).toMatchObject({ type: 'LINK', mutability: 'MUTABLE', data: { href: 'https://example.com' } })
+    expect(draft.entityMap['1']).toMatchObject({ type: 'IMAGE', mutability: 'IMMUTABLE', data: { id: '754481196', src: photo.url, file_name: 'a.png', file_size: 68, position: 0 } })
     expect(draft.blocks[3].entityRanges[0].key).toBe(1)
     expect(imageIds).toBe('1_754481196')
     expect(buildDoubanTopicContent('<p>没有图片</p>', []).imageIds).toBe('')
+  })
+
+  it('builds the exact text/image payload shape the Douban editor posts', () => {
+    const text = buildDoubanTopicPost({ title: '纯文字', content: '{"blocks":[],"entityMap":{}}', imageIds: '', privacy: 'public' })
+    expect(text).not.toHaveProperty('image_layout')
+    expect(text).toMatchObject({
+      title: '纯文字', image_ids: '', topic_tag_ids: '', interest_tags: '', subtype: 'note', accessible: 'public', send_status: true,
+    })
+    const image = buildDoubanTopicPost({ title: '图片', content: '{"blocks":[],"entityMap":{}}', imageIds: '1_id1,2_id2', privacy: 'private', interestTags: '读书#日记' })
+    expect(image).toMatchObject({ image_ids: '1_id1,2_id2', image_layout: 'horizontal', accessible: 'private', interest_tags: '读书#日记' })
+  })
+
+  it('joins multiple image ids with sequence numbers, not one count prefix', () => {
+    const photos = [
+      { id: '1001', url: 'https://img9.doubanio.com/p1.jpg', thumb: '', width: 1, height: 1, fileName: 'a.png', fileSize: 1, isAnimated: false, primaryColor: '' },
+      { id: '1002', url: 'https://img9.doubanio.com/p2.jpg', thumb: '', width: 1, height: 1, fileName: 'b.png', fileSize: 1, isAnimated: false, primaryColor: '' },
+    ]
+    const result = buildDoubanTopicContent('<p>图</p><p><img src="a"></p><p><img src="b"></p>', photos)
+    expect(result.imageIds).toBe('1_1001,2_1002')
   })
 })
