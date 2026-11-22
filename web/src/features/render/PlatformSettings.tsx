@@ -3,7 +3,7 @@ import { Check, Info, RotateCcw, Settings2, Sparkles } from 'lucide-react'
 import { getPlatformInfo, type PlatformId, type PlatformOptionOverrides, type RenderOptions } from '@shared/types'
 import { cn } from '@/lib/utils'
 import Modal from '@/components/Modal'
-import PlatformGlyph from './platform-glyph'
+import PlatformGlyph from '@/components/PlatformGlyph'
 import { CARD_STYLE_OPTIONS, resolveCardStyle } from './types'
 
 interface PlatformSettingsProps {

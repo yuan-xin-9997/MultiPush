@@ -372,6 +372,25 @@
   object-fit: cover;
 }
 
+.gallery-image-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.gallery-image-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .gallery-image-index {
   position: absolute;
   top: 7px;
@@ -672,23 +691,20 @@
   gap: 9px;
 }
 
-.gallery-target-dot {
-  width: 8px;
-  height: 8px;
+.gallery-target-icon {
   flex: 0 0 auto;
-  border-radius: 50%;
 }
 
-.gallery-target-dot.is-wechatpic {
-  background: var(--wechat);
+.gallery-target-icon.is-wechatpic {
+  color: var(--wechat);
 }
 
-.gallery-target-dot.is-xiaohongshu {
-  background: var(--xiaohongshu);
+.gallery-target-icon.is-xiaohongshu {
+  color: var(--xiaohongshu);
 }
 
-.gallery-target-dot.is-douyin {
-  background: var(--douyin);
+.gallery-target-icon.is-douyin {
+  color: var(--douyin);
 }
 
 .gallery-targets div {
