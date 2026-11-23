@@ -133,6 +133,7 @@ npm start
 | `AI_POOL_ACCESS` | 生产 `admin` | 服务器 AI 池可用范围：`admin` 仅管理员，`all` 所有账号 |
 | `AI_POOL_USERS` | 空 | 额外放行使用服务器池的普通账号（逗号分隔） |
 | `AI_POOL_DAILY_LIMIT` | `0` | 非管理员每天服务器池请求上限，0 为不限额 |
+| `AI_POOL_DAILY_TOKENS` | `0` | 非管理员每天服务器池 Token 上限（输入+输出），0 为不限额 |
 | `LOGIN_MAX_FAILURES` | `8` | 单账号 15 分钟登录失败上限 |
 | `MULTIPUSH_ALLOW_PRIVATE_NETWORK` | `0` | 是否允许用户 URL 访问内网/本机（仅本地调试） |
 | `TRUST_PROXY` | 生产 `loopback` | 反向代理场景的客户端 IP 解析方式 |

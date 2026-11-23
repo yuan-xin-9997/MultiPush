@@ -37,7 +37,8 @@ export function createAdminRouter(database: Database, requireAuth: RequestHandle
       failed: sum.failed + user.failed,
       tokensIn: sum.tokensIn + user.tokensIn,
       tokensOut: sum.tokensOut + user.tokensOut,
-    }), { requests: 0, success: 0, failed: 0, tokensIn: 0, tokensOut: 0 })
+      poolTokens: sum.poolTokens + user.poolTokensIn + user.poolTokensOut,
+    }), { requests: 0, success: 0, failed: 0, tokensIn: 0, tokensOut: 0, poolTokens: 0 })
     res.json({ report: { days, since: since.toISOString(), until: until.toISOString(), totals, users } })
   }))
 

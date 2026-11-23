@@ -957,18 +957,26 @@ export class AiGateway {
     const rateLimited: Candidate[] = []
     let previous: AttemptRef | null = null
     let attempts = 0
-    const quotaLimit = this.appConfig.aiPoolDailyLimit
-    const enforceQuota = input.enforcePoolQuota === true && quotaLimit > 0
+    const requestQuota = this.appConfig.aiPoolDailyLimit
+    const tokenQuota = this.appConfig.aiPoolDailyTokens
+    const enforceQuota = input.enforcePoolQuota === true && (requestQuota > 0 || tokenQuota > 0)
     const quotaStart = new Date()
     quotaStart.setHours(0, 0, 0, 0)
+    const quotaSince = quotaStart.toISOString()
     let poolAttempts = 0
-    const poolRequestsAtStart = enforceQuota
-      ? this.database.countAiProviderRequestsSince(input.userId, quotaStart.toISOString())
+    const poolRequestsAtStart = enforceQuota && requestQuota > 0
+      ? this.database.countAiProviderRequestsSince(input.userId, quotaSince)
       : 0
     const assertPoolQuota = (candidate: Candidate) => {
       if (!enforceQuota || candidate.provider.source !== 'config') return
-      if (poolRequestsAtStart + poolAttempts >= quotaLimit) {
-        throw new ApiError(429, 'ai_pool_quota', `今日服务器大模型额度已用完（${quotaLimit} 次），请明天再试或配置自己的 API Key`)
+      if (requestQuota > 0 && poolRequestsAtStart + poolAttempts >= requestQuota) {
+        throw new ApiError(429, 'ai_pool_quota', `今日服务器大模型额度已用完（${requestQuota} 次），请明天再试或配置自己的 API Key`)
+      }
+      if (tokenQuota > 0) {
+        const used = this.database.sumAiPoolTokensSince(input.userId, quotaSince)
+        if (used >= tokenQuota) {
+          throw new ApiError(429, 'ai_pool_quota', `今日服务器大模型 Token 额度已用完（${tokenQuota.toLocaleString('en-US')} Token），请明天再试或配置自己的 API Key`)
+        }
       }
     }
 

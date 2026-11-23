@@ -60,11 +60,13 @@ node scripts/cloudflare-login-ratelimit.mjs --apply
 | `AI_POOL_ACCESS` | 生产 `admin`，开发 `all` | 谁可以使用服务器提供商池 |
 | `AI_POOL_USERS` | 空 | 单独放行的普通账号（逗号分隔），无需授予管理员 |
 | `AI_POOL_DAILY_LIMIT` | `0` | 非管理员每天可用的服务器池请求数，0 为不限额 |
+| `AI_POOL_DAILY_TOKENS` | `0` | 非管理员每天可用的服务器池 Token 总量（输入+输出），0 为不限额 |
 
 - `admin` 模式：普通账号必须配置自己的 API Key，服务器的 Key 不会被消耗；管理员账号在 `is_admin` 或 `MULTIPUSH_ADMIN_USERNAMES` 中。
 - `all` 模式：所有账号可回退服务器池，非管理员受每日额度限制。
 - `AI_POOL_USERS`：在 `admin` 模式下单独放行指定用户名；这些账号仍受每日额度限制，但不能编辑提供商池。
-- 额度按实际服务器池请求（含失败重试）计数，管理员不受限制；账号有自己的 Key 时优先用自己的 Key，只有真正回退服务器池时才计入。
+- 额度按实际服务器池请求（含失败重试）与 Token 消耗计数，管理员不受限制；账号有自己的 Key 时优先用自己的 Key，只有真正回退服务器池时才计入。Token 额度在每次回退前校验，单次请求可能让用量略微超过上限。
+- 例：`AI_POOL_ACCESS=all` + `AI_POOL_DAILY_TOKENS=2000000` 表示每个普通账号每天最多消耗 200 万服务器池 Token。
 - 设置 → AI 用量（仅管理员）按账号查看请求数、失败数、Token 与最近使用时间；数据来自 `ai_provider_requests`。
 - 普通账号仍可在“设置 → 大模型高可用”只读查看池配置，但不能修改。
 

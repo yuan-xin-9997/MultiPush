@@ -1565,6 +1565,10 @@ export interface AiUsageUser {
   failed: number
   tokensIn: number
   tokensOut: number
+  /** Requests that used the server pool (provider_id is not a user override). */
+  poolRequests: number
+  poolTokensIn: number
+  poolTokensOut: number
   lastAt: string | null
 }
 
@@ -1572,7 +1576,7 @@ export interface AiUsageReport {
   days: number
   since: string
   until: string
-  totals: { requests: number; success: number; failed: number; tokensIn: number; tokensOut: number }
+  totals: { requests: number; success: number; failed: number; tokensIn: number; tokensOut: number; poolTokens: number }
   users: AiUsageUser[]
 }
 

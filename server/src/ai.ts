@@ -602,15 +602,25 @@ export class AiService {
     return !!user && this.config.aiPoolUsers.includes(user.username.toLowerCase())
   }
 
-  /** Daily cap for non-admin server-pool usage. 0 disables the cap. */
+  /** Daily caps for non-admin server-pool usage. 0 disables the respective cap. */
   private assertPoolQuota(userId: string): void {
-    const limit = this.config.aiPoolDailyLimit
-    if (limit <= 0) return
+    const requestLimit = this.config.aiPoolDailyLimit
+    const tokenLimit = this.config.aiPoolDailyTokens
+    if (requestLimit <= 0 && tokenLimit <= 0) return
     const start = new Date()
     start.setHours(0, 0, 0, 0)
-    const used = this.database.countAiProviderRequestsSince(userId, start.toISOString())
-    if (used >= limit) {
-      throw new ApiError(429, 'ai_pool_quota', `今日服务器大模型额度已用完（${limit} 次），请明天再试或配置自己的 API Key`)
+    const since = start.toISOString()
+    if (requestLimit > 0) {
+      const used = this.database.countAiProviderRequestsSince(userId, since)
+      if (used >= requestLimit) {
+        throw new ApiError(429, 'ai_pool_quota', `今日服务器大模型额度已用完（${requestLimit} 次），请明天再试或配置自己的 API Key`)
+      }
+    }
+    if (tokenLimit > 0) {
+      const used = this.database.sumAiPoolTokensSince(userId, since)
+      if (used >= tokenLimit) {
+        throw new ApiError(429, 'ai_pool_quota', `今日服务器大模型 Token 额度已用完（${tokenLimit.toLocaleString('en-US')} Token），请明天再试或配置自己的 API Key`)
+      }
     }
   }
 

@@ -36,6 +36,8 @@ export interface AppConfig {
   aiPoolUsers: string[]
   /** Per-user daily request limit for server-pool usage; 0 disables the limit. */
   aiPoolDailyLimit: number
+  /** Per-user daily token limit (input + output) for server-pool usage; 0 disables the limit. */
+  aiPoolDailyTokens: number
   /** Allow user-supplied URLs to reach loopback/private addresses (local modes only). */
   allowPrivateNetwork: boolean
   /** Express trust proxy setting; production defaults to loopback (cloudflared/nginx). */
@@ -60,6 +62,7 @@ export interface ConfigOverrides {
   aiPoolAccess?: 'admin' | 'all'
   aiPoolUsers?: string[]
   aiPoolDailyLimit?: number
+  aiPoolDailyTokens?: number
   allowPrivateNetwork?: boolean
   trustProxy?: boolean | number | string
   inviteCodeBypass?: boolean
@@ -278,6 +281,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
       .map(name => name.trim().toLowerCase())
       .filter(Boolean),
     aiPoolDailyLimit: overrides.aiPoolDailyLimit ?? parseNonNegativeInt(trimmedEnv('AI_POOL_DAILY_LIMIT'), 0),
+    aiPoolDailyTokens: overrides.aiPoolDailyTokens ?? parseNonNegativeInt(trimmedEnv('AI_POOL_DAILY_TOKENS'), 0),
     allowPrivateNetwork: overrides.allowPrivateNetwork ?? (trimmedEnv('MULTIPUSH_ALLOW_PRIVATE_NETWORK') === '1' || desktopMode || nodeEnv !== 'production'),
     trustProxy: overrides.trustProxy ?? parseTrustProxy(trimmedEnv('TRUST_PROXY'), nodeEnv === 'production'),
     inviteCodeRequired: nodeEnv === 'production' && !inviteCodeBypass,

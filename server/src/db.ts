@@ -4003,6 +4003,14 @@ export class Database {
     return numberValue(row?.total)
   }
 
+  /** Server-pool tokens (input + output) consumed by a user since an ISO timestamp. */
+  sumAiPoolTokensSince(userId: string, since: string): number {
+    const row = this.get(`SELECT COALESCE(SUM(tokens_in + tokens_out), 0) AS total
+      FROM ai_provider_requests
+      WHERE user_id = ? AND created_at >= ? AND provider_id NOT LIKE 'user:%'`, [userId, since])
+    return numberValue(row?.total)
+  }
+
   /** Per-user request aggregates for the admin usage panel. */
   listAiUsageByUser(since: string): Array<{
     userId: string
@@ -4013,6 +4021,9 @@ export class Database {
     failed: number
     tokensIn: number
     tokensOut: number
+    poolRequests: number
+    poolTokensIn: number
+    poolTokensOut: number
     lastAt: string | null
   }> {
     return this.all(`SELECT r.user_id,
@@ -4023,6 +4034,9 @@ export class Database {
         SUM(CASE WHEN r.status = 'failed' THEN 1 ELSE 0 END) AS failed,
         COALESCE(SUM(r.tokens_in), 0) AS tokens_in,
         COALESCE(SUM(r.tokens_out), 0) AS tokens_out,
+        SUM(CASE WHEN r.provider_id LIKE 'user:%' THEN 0 ELSE 1 END) AS pool_requests,
+        SUM(CASE WHEN r.provider_id LIKE 'user:%' THEN 0 ELSE r.tokens_in END) AS pool_tokens_in,
+        SUM(CASE WHEN r.provider_id LIKE 'user:%' THEN 0 ELSE r.tokens_out END) AS pool_tokens_out,
         MAX(r.created_at) AS last_at
       FROM ai_provider_requests r
       LEFT JOIN users u ON u.id = r.user_id
@@ -4037,6 +4051,9 @@ export class Database {
       failed: numberValue(row.failed),
       tokensIn: numberValue(row.tokens_in),
       tokensOut: numberValue(row.tokens_out),
+      poolRequests: numberValue(row.pool_requests),
+      poolTokensIn: numberValue(row.pool_tokens_in),
+      poolTokensOut: numberValue(row.pool_tokens_out),
       lastAt: nullableText(row.last_at),
     }))
   }

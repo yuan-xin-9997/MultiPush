@@ -53,8 +53,8 @@ export default function AiUsageSettings() {
             <dl className="settings-facts" style={{ marginTop: 12 }}>
               <div><dt>请求总数</dt><dd>{report.totals.requests}</dd></div>
               <div><dt>成功 / 失败</dt><dd>{report.totals.success} / {report.totals.failed}</dd></div>
-              <div><dt>输入 Token</dt><dd>{report.totals.tokensIn.toLocaleString()}</dd></div>
-              <div><dt>输出 Token</dt><dd>{report.totals.tokensOut.toLocaleString()}</dd></div>
+              <div><dt>输入 / 输出 Token</dt><dd>{report.totals.tokensIn.toLocaleString()} / {report.totals.tokensOut.toLocaleString()}</dd></div>
+              <div><dt>服务器池 Token</dt><dd>{report.totals.poolTokens.toLocaleString()}</dd></div>
             </dl>
             {report.users.length ? (
               <div style={{ overflowX: 'auto', marginTop: 12 }}>
@@ -62,9 +62,9 @@ export default function AiUsageSettings() {
                   <thead>
                     <tr style={{ textAlign: 'left', color: 'var(--text-muted, #78716c)' }}>
                       <th style={{ padding: '8px 10px' }}>账号</th>
-                      <th style={{ padding: '8px 10px' }}>请求</th>
+                      <th style={{ padding: '8px 10px' }}>请求（池）</th>
                       <th style={{ padding: '8px 10px' }}>失败</th>
-                      <th style={{ padding: '8px 10px' }}>输入/输出 Token</th>
+                      <th style={{ padding: '8px 10px' }}>Token（池）</th>
                       <th style={{ padding: '8px 10px' }}>最近使用</th>
                     </tr>
                   </thead>
@@ -72,9 +72,9 @@ export default function AiUsageSettings() {
                     {report.users.map(user => (
                       <tr key={user.userId} style={{ borderTop: '1px solid var(--border, #e7e5e4)' }}>
                         <td style={{ padding: '8px 10px' }}><strong>@{user.username}</strong><div style={{ color: 'var(--text-muted, #78716c)' }}>{user.displayName}</div></td>
-                        <td style={{ padding: '8px 10px' }}>{user.requests}</td>
+                        <td style={{ padding: '8px 10px' }}>{user.requests}{user.poolRequests !== user.requests ? `（${user.poolRequests}）` : ''}</td>
                         <td style={{ padding: '8px 10px' }}>{user.failed}</td>
-                        <td style={{ padding: '8px 10px' }}>{user.tokensIn.toLocaleString()} / {user.tokensOut.toLocaleString()}</td>
+                        <td style={{ padding: '8px 10px' }}>{(user.tokensIn + user.tokensOut).toLocaleString()}{user.poolTokensIn + user.poolTokensOut ? `（${(user.poolTokensIn + user.poolTokensOut).toLocaleString()}）` : ''}</td>
                         <td style={{ padding: '8px 10px' }}>{user.lastAt ? formatDateTime(user.lastAt) : '—'}</td>
                       </tr>
                     ))}

@@ -32,7 +32,7 @@ function response(data: unknown, status = 200): Response {
 function setup(
   defaults?: { apiKey: string; baseUrl: string; model: string; label: string },
   aiProviders?: AiProvidersConfig,
-  options?: { writePoolFile?: unknown; nodeEnv?: string; settingsAdmins?: string[]; aiPoolDailyLimit?: number; aiPoolAccess?: 'admin' | 'all'; aiPoolUsers?: string[] },
+  options?: { writePoolFile?: unknown; nodeEnv?: string; settingsAdmins?: string[]; aiPoolDailyLimit?: number; aiPoolDailyTokens?: number; aiPoolAccess?: 'admin' | 'all'; aiPoolUsers?: string[] },
 ) {
   const directory = mkdtempSync(path.join(tmpdir(), 'multipush-ai-'))
   if (options?.writePoolFile) {
@@ -46,6 +46,7 @@ function setup(
     ...(aiProviders ? { aiProviders } : {}),
     ...(options?.settingsAdmins ? { settingsAdmins: options.settingsAdmins } : {}),
     ...(options?.aiPoolDailyLimit !== undefined ? { aiPoolDailyLimit: options.aiPoolDailyLimit } : {}),
+    ...(options?.aiPoolDailyTokens !== undefined ? { aiPoolDailyTokens: options.aiPoolDailyTokens } : {}),
     ...(options?.aiPoolAccess ? { aiPoolAccess: options.aiPoolAccess } : {}),
     ...(options?.aiPoolUsers ? { aiPoolUsers: options.aiPoolUsers } : {}),
   })
@@ -621,6 +622,34 @@ describe('AI server pool access', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response({ choices: [{ message: { role: 'assistant', content: 'OK' } }] })))
     const result = await service.chat(user.id, session.id, { message: 'hi' })
     expect(result.reply.content).toBe('OK')
+  })
+
+  it('enforces the daily server-pool token quota and ignores personal-key usage', async () => {
+    const { database, user, service, session } = setup(undefined, pool(), { nodeEnv: 'production', aiPoolAccess: 'all', aiPoolDailyTokens: 100 })
+    database.createAiProviderRequest({
+      userId: user.id, providerId: 'user:' + user.id, providerLabel: '用户 Key', model: 'user-model', keyId: 'user-key', keyLabel: '账号 Key',
+      keyMasked: 'sk-u…0000', status: 'success', durationMs: 10, tokensIn: 900, tokensOut: 900,
+    })
+    expect(database.sumAiPoolTokensSince(user.id, new Date(Date.now() - 60_000).toISOString())).toBe(0)
+    database.createAiProviderRequest({
+      userId: user.id, providerId: 'pool', providerLabel: 'Pool', model: 'pool-model', keyId: 'k1', keyLabel: 'K1',
+      keyMasked: 'sk-p…5678', status: 'success', durationMs: 10, tokensIn: 60, tokensOut: 50,
+    })
+    expect(database.sumAiPoolTokensSince(user.id, new Date(Date.now() - 60_000).toISOString())).toBe(110)
+    await expect(service.chat(user.id, session.id, { message: 'hi' })).rejects.toMatchObject({ code: 'ai_pool_quota' })
+  })
+
+  it('blocks a personal-key fallback when the pool token quota is exhausted', async () => {
+    const { database, user, service, session } = setup(undefined, pool(), { nodeEnv: 'production', aiPoolAccess: 'all', aiPoolDailyTokens: 100 })
+    service.saveSettings(user.id, { baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'sk-test' })
+    database.createAiProviderRequest({
+      userId: user.id, providerId: 'pool', providerLabel: 'Pool', model: 'pool-model', keyId: 'k1', keyLabel: 'K1',
+      keyMasked: 'sk-p…5678', status: 'success', durationMs: 10, tokensIn: 60, tokensOut: 50,
+    })
+    const fetchMock = vi.fn(async () => response({ error: { message: 'personal key failed' } }, 500))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(service.chat(user.id, session.id, { message: 'hi' })).rejects.toMatchObject({ code: 'ai_pool_quota' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('enforces the daily server-pool quota', async () => {

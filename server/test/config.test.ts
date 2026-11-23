@@ -20,6 +20,7 @@ describe('security-related config defaults', () => {
     expect(config.aiPoolAccess).toBe('admin')
     expect(config.aiPoolUsers).toEqual([])
     expect(config.aiPoolDailyLimit).toBe(0)
+    expect(config.aiPoolDailyTokens).toBe(0)
     expect(config.allowPrivateNetwork).toBe(false)
     expect(config.trustProxy).toBe('loopback')
   })
@@ -35,9 +36,10 @@ describe('security-related config defaults', () => {
       aiPoolAccess: 'all',
       aiPoolUsers: ['someone'],
       aiPoolDailyLimit: 25,
+      aiPoolDailyTokens: 2_000_000,
       allowPrivateNetwork: true,
       trustProxy: false,
     })
-    expect(hardened).toMatchObject({ aiPoolAccess: 'all', aiPoolUsers: ['someone'], aiPoolDailyLimit: 25, allowPrivateNetwork: true, trustProxy: false })
+    expect(hardened).toMatchObject({ aiPoolAccess: 'all', aiPoolUsers: ['someone'], aiPoolDailyLimit: 25, aiPoolDailyTokens: 2_000_000, allowPrivateNetwork: true, trustProxy: false })
   })
 })
