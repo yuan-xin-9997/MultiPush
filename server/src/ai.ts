@@ -597,7 +597,9 @@ export class AiService {
   }
 
   private canUseServerPool(userId: string): boolean {
-    return this.config.aiPoolAccess === 'all' || this.isAdminUser(userId)
+    if (this.config.aiPoolAccess === 'all' || this.isAdminUser(userId)) return true
+    const user = this.database.findUserById(userId)
+    return !!user && this.config.aiPoolUsers.includes(user.username.toLowerCase())
   }
 
   /** Daily cap for non-admin server-pool usage. 0 disables the cap. */
@@ -628,6 +630,7 @@ export class AiService {
       maxTokens: 16,
       preferred,
       allowServerPool,
+      enforcePoolQuota: allowServerPool && !this.isAdminUser(userId),
     })
     return { ok: true, message: result.content || '连接成功', model: result.routing.model, routing: result.routing }
   }
@@ -807,6 +810,7 @@ export class AiService {
         temperature: preferred?.temperature ?? 0.7,
         preferred,
         allowServerPool,
+        enforcePoolQuota: allowServerPool && !this.isAdminUser(userId),
       })
       routing = response.routing
       turnAttempts += response.routing.attempts

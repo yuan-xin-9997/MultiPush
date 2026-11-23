@@ -7,7 +7,7 @@
 - 新增登录失败限速：账号 15 分钟 8 次、IP 15 分钟 30 次，超限返回 `429` 与 `Retry-After`；二次验证单独限速。生产环境通过 `CF-Connecting-IP` 还原真实客户端 IP，避免 Cloudflare 隧道把所有人算成同一个内网 IP。
 - 新增可选 TOTP 两步验证：设置页开启，登录先返回 5 分钟有效的 challenge，再验证 6 位动态码或一次性恢复码；密钥 AES-256-GCM 加密（AAD 绑定用户 ID），恢复码只存 HMAC 哈希。提供 `scripts/reset-2fa.mjs` 应急重置。
 - 新增统一 SSRF 防护 `network-guard.ts`：用户可控的博客地址、AI 接口、正文外链图片、B站文章图片全部走公网 DNS 校验、私网/回环地址阻断、DNS 固定、逐跳重定向校验与响应大小限制。
-- AI 服务器提供商池改为管理员可用（生产默认 `AI_POOL_ACCESS=admin`），普通账号必须配置自己的 Key；新增非管理员每日额度 `AI_POOL_DAILY_LIMIT`；AI 用量页按账号统计请求、失败、Token 和最近使用时间。
+- AI 服务器提供商池改为管理员可用（生产默认 `AI_POOL_ACCESS=admin`），普通账号必须配置自己的 Key；新增 `AI_POOL_USERS` 单独放行指定普通账号、非管理员每日额度 `AI_POOL_DAILY_LIMIT`；额度按实际服务器池请求计数；AI 用量页按账号统计请求、失败、Token 和最近使用时间。
 - Cloudflare 登录限流规则：新增 `scripts/cloudflare-login-ratelimit.mjs`，并在 `publish.yuan-xin.top` 应用每 IP 每 10 秒 5 次的登录/二次验证限流（免费版限制周期与封禁均为 10 秒）。
 - 新增 `docs/SECURITY.md`、相关环境变量说明与测试。
 

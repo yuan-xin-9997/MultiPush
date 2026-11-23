@@ -61,6 +61,8 @@ export interface GatewayCompletionInput {
   preferred?: PreferredAiProvider | null
   /** False for accounts that may not fall back to the server-wide provider pool. */
   allowServerPool?: boolean
+  /** Enforce AI_POOL_DAILY_LIMIT for non-admin users before touching the pool. */
+  enforcePoolQuota?: boolean
 }
 
 export interface GatewayCompletionResult {
@@ -955,6 +957,20 @@ export class AiGateway {
     const rateLimited: Candidate[] = []
     let previous: AttemptRef | null = null
     let attempts = 0
+    const quotaLimit = this.appConfig.aiPoolDailyLimit
+    const enforceQuota = input.enforcePoolQuota === true && quotaLimit > 0
+    const quotaStart = new Date()
+    quotaStart.setHours(0, 0, 0, 0)
+    let poolAttempts = 0
+    const poolRequestsAtStart = enforceQuota
+      ? this.database.countAiProviderRequestsSince(input.userId, quotaStart.toISOString())
+      : 0
+    const assertPoolQuota = (candidate: Candidate) => {
+      if (!enforceQuota || candidate.provider.source !== 'config') return
+      if (poolRequestsAtStart + poolAttempts >= quotaLimit) {
+        throw new ApiError(429, 'ai_pool_quota', `今日服务器大模型额度已用完（${quotaLimit} 次），请明天再试或配置自己的 API Key`)
+      }
+    }
 
     const candidates: Candidate[] = chain.flatMap((provider) => provider.keys.map((key) => ({
       provider,
@@ -965,6 +981,7 @@ export class AiGateway {
     for (const candidate of candidates) {
       if (!this.providerUsable(candidate.provider.id)) continue
       if (!this.keyUsable(candidate.provider.id, candidate.key.id)) continue
+      assertPoolQuota(candidate)
       const current = this.attemptRef(candidate)
       if (previous && (previous.providerId !== current.providerId || previous.keyId !== current.keyId)) {
         this.logEvent(previous.providerId === current.providerId ? 'key_switch' : 'provider_switch', previous.failure?.code ?? 'fallback', {
@@ -979,6 +996,7 @@ export class AiGateway {
       }
       previous = current
       attempts += 1
+      if (candidate.provider.source === 'config') poolAttempts += 1
       const result = await this.attemptOnce(candidate, input, requestedModel, failures)
       if (result) return this.withRootFallback(result, chain, input)
       const failure = failures[failures.length - 1]
@@ -1015,6 +1033,7 @@ export class AiGateway {
       for (const candidate of retryable) {
         if (!this.keyUsable(candidate.provider.id, candidate.key.id)) continue
         if (!this.providerUsable(candidate.provider.id) && this.providerState(candidate.provider.id).reason !== 'keys_unavailable') continue
+        assertPoolQuota(candidate)
         const current = this.attemptRef(candidate)
         if (previous && (previous.providerId !== current.providerId || previous.keyId !== current.keyId)) {
           this.logEvent('key_switch', previous.failure?.code ?? 'rate_limited', {
@@ -1029,6 +1048,7 @@ export class AiGateway {
         }
         previous = current
         attempts += 1
+        if (candidate.provider.source === 'config') poolAttempts += 1
         const result = await this.attemptOnce(candidate, input, requestedModel, failures)
         if (result) return this.withRootFallback(result, chain, input)
         current.failure = failures[failures.length - 1]

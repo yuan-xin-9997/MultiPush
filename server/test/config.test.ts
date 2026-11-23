@@ -18,6 +18,7 @@ describe('security-related config defaults', () => {
   it('locks the server pool to admins and public URLs in production', () => {
     const config = loadConfig({ nodeEnv: 'production', dataDir: dataDir(), jwtSecret: 'x' })
     expect(config.aiPoolAccess).toBe('admin')
+    expect(config.aiPoolUsers).toEqual([])
     expect(config.aiPoolDailyLimit).toBe(0)
     expect(config.allowPrivateNetwork).toBe(false)
     expect(config.trustProxy).toBe('loopback')
@@ -32,10 +33,11 @@ describe('security-related config defaults', () => {
       dataDir: dataDir(),
       jwtSecret: 'x',
       aiPoolAccess: 'all',
+      aiPoolUsers: ['someone'],
       aiPoolDailyLimit: 25,
       allowPrivateNetwork: true,
       trustProxy: false,
     })
-    expect(hardened).toMatchObject({ aiPoolAccess: 'all', aiPoolDailyLimit: 25, allowPrivateNetwork: true, trustProxy: false })
+    expect(hardened).toMatchObject({ aiPoolAccess: 'all', aiPoolUsers: ['someone'], aiPoolDailyLimit: 25, allowPrivateNetwork: true, trustProxy: false })
   })
 })

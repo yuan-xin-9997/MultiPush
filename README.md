@@ -131,6 +131,7 @@ npm start
 | `BILIBILI_BROWSER_PATH` | 自动探测 | B站发布使用的 Chrome / Chromium 路径 |
 | `MULTIPUSH_<PLATFORM>_MIN_PUBLISH_INTERVAL_MS` | 平台默认 | 两次提交的最小间隔（如 `MULTIPUSH_ZHIHU_MIN_PUBLISH_INTERVAL_MS`） |
 | `AI_POOL_ACCESS` | 生产 `admin` | 服务器 AI 池可用范围：`admin` 仅管理员，`all` 所有账号 |
+| `AI_POOL_USERS` | 空 | 额外放行使用服务器池的普通账号（逗号分隔） |
 | `AI_POOL_DAILY_LIMIT` | `0` | 非管理员每天服务器池请求上限，0 为不限额 |
 | `LOGIN_MAX_FAILURES` | `8` | 单账号 15 分钟登录失败上限 |
 | `MULTIPUSH_ALLOW_PRIVATE_NETWORK` | `0` | 是否允许用户 URL 访问内网/本机（仅本地调试） |

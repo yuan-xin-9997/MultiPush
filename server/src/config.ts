@@ -32,6 +32,8 @@ export interface AppConfig {
   settingsAdmins: string[]
   /** Who may fall back to the server-wide AI provider pool. */
   aiPoolAccess: 'admin' | 'all'
+  /** Extra usernames allowed to use the server pool without admin rights. */
+  aiPoolUsers: string[]
   /** Per-user daily request limit for server-pool usage; 0 disables the limit. */
   aiPoolDailyLimit: number
   /** Allow user-supplied URLs to reach loopback/private addresses (local modes only). */
@@ -56,6 +58,7 @@ export interface ConfigOverrides {
   aiProviders?: AiProvidersConfig | null
   settingsAdmins?: string[]
   aiPoolAccess?: 'admin' | 'all'
+  aiPoolUsers?: string[]
   aiPoolDailyLimit?: number
   allowPrivateNetwork?: boolean
   trustProxy?: boolean | number | string
@@ -270,6 +273,10 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
       .map(name => name.trim().toLowerCase())
       .filter(Boolean),
     aiPoolAccess: overrides.aiPoolAccess ?? parseAiPoolAccess(trimmedEnv('AI_POOL_ACCESS'), nodeEnv === 'production' ? 'admin' : 'all'),
+    aiPoolUsers: overrides.aiPoolUsers ?? (trimmedEnv('AI_POOL_USERS') ?? '')
+      .split(/[\s,;]+/)
+      .map(name => name.trim().toLowerCase())
+      .filter(Boolean),
     aiPoolDailyLimit: overrides.aiPoolDailyLimit ?? parseNonNegativeInt(trimmedEnv('AI_POOL_DAILY_LIMIT'), 0),
     allowPrivateNetwork: overrides.allowPrivateNetwork ?? (trimmedEnv('MULTIPUSH_ALLOW_PRIVATE_NETWORK') === '1' || desktopMode || nodeEnv !== 'production'),
     trustProxy: overrides.trustProxy ?? parseTrustProxy(trimmedEnv('TRUST_PROXY'), nodeEnv === 'production'),
