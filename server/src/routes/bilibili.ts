@@ -26,7 +26,7 @@ const resolveSchema = z.discriminatedUnion('action', [
 export function createBilibiliRouter(service: BilibiliService): Router {
   const router = Router()
   router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next() })
-  router.get('/account', asyncHandler(async (req, res) => { res.json({ account: await service.account(currentUser(req).id) }) }))
+  router.get('/account', asyncHandler(async (req, res) => { res.json({ account: await service.account(currentUser(req).id, req.query.refresh === '1') }) }))
   router.post('/login', asyncHandler(async (req, res) => { res.json({ login: await service.beginLogin(currentUser(req).id) }) }))
   router.get('/login/:id', asyncHandler(async (req, res) => { res.json({ login: await service.loginStatus(currentUser(req).id, req.params.id) }) }))
   router.delete('/account', asyncHandler(async (req, res) => { await service.disconnect(currentUser(req).id); res.json({ ok: true }) }))

@@ -108,10 +108,10 @@ export default function BilibiliPublishPage() {
   const videoReady = type !== 'video' || (!!videoMediaId && !!coverMediaId)
   const ready = account?.status === 'connected' && !!article && contentReady && videoReady && !busy && !recordLoading && !uncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
     const results = await Promise.allSettled([
-      api.bilibili.account(),
+      api.bilibili.account(force ? { refresh: true } : undefined),
       api.renders.list(),
       api.bilibili.listPublications(),
       api.bilibili.partitions(),
@@ -329,7 +329,7 @@ export default function BilibiliPublishPage() {
           <h1>把内容发布到哔哩哔哩</h1>
           <p>B 站视频投稿与专栏/opus 图文分开处理；扫码登录后自动上传或写入编辑器，失败时提供手动兜底。</p>
         </div>
-        <button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}>
+        <button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh(true)}>
           <RefreshCw size={15} className={refreshing ? 'spin' : undefined} />
           刷新状态
         </button>

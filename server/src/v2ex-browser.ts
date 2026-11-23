@@ -3,6 +3,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import type { V2exNode } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { ApiError } from './errors'
 
 export interface V2exIdentity {
@@ -96,8 +97,11 @@ export function parseV2exNodesFromHtml(html: string): V2exNode[] {
 
 export class PlaywrightV2exDriver implements V2exDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
 
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const executablePath = publisherExecutablePath('v2ex')
       if (!executablePath) throw new ApiError(503, 'v2ex_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
@@ -122,7 +126,12 @@ export class PlaywrightV2exDriver implements V2exDriver {
       ...(proxy ? { proxy: { server: proxy } } : {}),
     })
     context.setDefaultTimeout(20_000)
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   private async openComposer(context: BrowserContext): Promise<Page> {
@@ -189,7 +198,7 @@ export class PlaywrightV2exDriver implements V2exDriver {
         await page.close().catch(() => {})
       }
     } finally {
-      await context.close().catch(() => {})
+      await this.releaseContext(context)
     }
   }
 
@@ -206,7 +215,7 @@ export class PlaywrightV2exDriver implements V2exDriver {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'v2ex_check_failed', 'V2EX 连接检查未完成，请检查网络后重试')
     } finally {
-      await context.close().catch(() => {})
+      await this.releaseContext(context)
     }
   }
 
@@ -223,7 +232,7 @@ export class PlaywrightV2exDriver implements V2exDriver {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'v2ex_nodes_failed', '读取 V2EX 节点列表失败，请稍后重试')
     } finally {
-      await context.close().catch(() => {})
+      await this.releaseContext(context)
     }
   }
 
@@ -247,7 +256,7 @@ export class PlaywrightV2exDriver implements V2exDriver {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'v2ex_check_failed', 'V2EX 发布结果核实未完成，请稍后重试')
     } finally {
-      await context.close().catch(() => {})
+      await this.releaseContext(context)
     }
   }
 
@@ -361,11 +370,12 @@ export class PlaywrightV2exDriver implements V2exDriver {
       if (submitted) throw uncertain('V2EX 发布过程异常中断，结果未确认；请先到 V2EX 核实，避免重复发布')
       throw new ApiError(502, 'v2ex_publish_failed', 'V2EX 发帖页操作失败，尚未提交主题，请重试')
     } finally {
-      await context.close().catch(() => {})
+      await this.releaseContext(context)
     }
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     if (!this.browser) return
     const browser = await this.browser.catch(() => null)
     this.browser = null

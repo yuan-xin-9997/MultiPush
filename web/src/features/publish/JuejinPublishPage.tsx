@@ -62,9 +62,9 @@ export default function JuejinPublishPage() {
   const uncertain = publications.some(item => item.renderId === selectedId && item.status === 'uncertain')
   const ready = account?.status === 'connected' && !!article && !busy && !recordLoading && !uncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
-    const results = await Promise.allSettled([api.juejin.account(), api.renders.list(), api.juejin.listPublications()])
+    const results = await Promise.allSettled([api.juejin.account(force ? { refresh: true } : undefined), api.renders.list(), api.juejin.listPublications()])
     if (!mounted.current) return
     const [a, r, p] = results
     if (a.status === 'fulfilled') setAccount(a.value.account)
@@ -165,7 +165,7 @@ export default function JuejinPublishPage() {
   }
 
   return <div className="publish-page juejin-publish-page">
-    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 掘金</span><h1>把内容发布到掘金</h1><p>连接掘金账号，选择技术分类和标签，保存草稿或直接发布文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
+    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 掘金</span><h1>把内容发布到掘金</h1><p>连接掘金账号，选择技术分类和标签，保存草稿或直接发布文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh(true)}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
     <section className="publish-account" aria-label="掘金账号"><span className="publish-account-icon">掘</span><div className="publish-account-copy"><h2>{account?.name || '掘金账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存，下次访问和服务重启后自动复用；失效时重新扫码或使用手机验证码。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码或使用手机验证码连接。' : '使用掘金 App 扫码登录，或使用手机验证码登录。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div><span className={`publish-status ${account?.status === 'connected' ? 'is-success' : ''}`}>{account?.status === 'connected' ? <><CheckCircle2 size={13} />已连接</> : account?.status === 'expired' ? '已过期' : '未连接'}</span><div className="publish-account-actions">{account?.status === 'connected' ? <button type="button" className="btn btn-sm" disabled={busy || loginBusy} onClick={() => setConfirmation('disconnect')}><LogOut size={14} />断开连接</button> : <><button type="button" className="btn btn-primary" disabled={busy || loginBusy || refreshing} onClick={() => void startLogin()}><QrCode size={16} />扫码连接掘金</button><button type="button" className="btn" disabled={busy || loginBusy || refreshing || smsLogin.busy || loginOpen} onClick={smsLogin.openModal}><Smartphone size={15} />手机验证码登录</button></>}{login && ['waiting', 'scanned'].includes(login.status) ? <button type="button" className="btn btn-sm" onClick={() => setLoginOpen(true)}>查看登录二维码</button> : null}</div></section>
     <div className="publish-compose-grid"><section className="publish-panel">

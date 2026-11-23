@@ -6,6 +6,7 @@ import type { PublicationDeletion, WechatAccount, WechatLogin, WechatPublication
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { downloadWechatImage } from './wechat-image'
 import { normalizeWechatCaptions, normalizeWechatLists } from './renderers/wechat'
@@ -14,7 +15,6 @@ import type { WechatBrowserDriver, WechatLoginAttempt, WechatStorageState } from
 import { loadPublisherKey, encryptPublisherSession, decryptPublisherSession } from './publisher-session'
 
 const LOGIN_TTL = 5 * 60_000
-const CHECK_TTL = 5 * 60_000
 const now = () => new Date().toISOString()
 
 // A separate key preserves platform sessions when the application's JWT secret rotates.
@@ -41,11 +41,13 @@ export class WechatService {
   private readonly activeUsers = new Set<string>()
   private readonly startingLogins = new Set<string>()
   private readonly checks = new Map<string, Promise<WechatAccount>>()
+  private readonly actions: PlatformActionGuard
   private readonly qrCodes = new Map<string, string>()
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: WechatBrowserDriver) {
     this.key = loadWechatKey(config.dataDir)
+    this.actions = new PlatformActionGuard(database, 'wechat')
   }
 
   private assertIdle(userId: string): void {
@@ -72,12 +74,13 @@ export class WechatService {
     })
   }
 
-  async account(userId: string): Promise<WechatAccount> {
+  async account(userId: string, force = false): Promise<WechatAccount> {
     const current = this.database.getWechatAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
-    if (current.status === 'expired' || this.activeUsers.has(userId) || this.startingLogins.has(userId) || Date.now() - Date.parse(current.checkedAt) < CHECK_TTL) {
+    if (!force || current.status === 'expired' || this.activeUsers.has(userId) || this.startingLogins.has(userId)) {
       return { status: current.status, name: current.name, checkedAt: current.checkedAt }
     }
+    if (!this.actions.allowSessionCheck(userId)) return { status: current.status, name: current.name, checkedAt: current.checkedAt }
     const pending = this.checks.get(userId)
     if (pending) return pending
     const check = (async (): Promise<WechatAccount> => {
@@ -103,6 +106,7 @@ export class WechatService {
 
   async startLogin(userId: string): Promise<WechatLogin> {
     this.assertIdle(userId)
+    this.actions.assertLogin(userId)
     this.startingLogins.add(userId)
     try {
       for (const [id, entry] of this.logins) {
@@ -271,13 +275,16 @@ export class WechatService {
     this.activeUsers.add(userId)
     let handedOff = false
     try {
-      const checked = await this.driver.checkSession(this.readState(userId))
-      this.saveState(userId, checked.state, checked.name)
+      const state = this.readState(userId)
+      const account = this.database.getWechatAccount(userId)
+      if (!account) throw new ApiError(409, 'wechat_session_expired', '请先扫码登录微信公众号')
+      const checked = { state, name: account.name || '微信公众号' }
       const article = await this.article(userId, input, baseUrl)
       const identity = checked.state.cookies.filter((cookie) => ['bizuin', 'data_bizuin', 'slave_user'].includes(cookie.name)).map((cookie) => `${cookie.name}=${cookie.value}`).sort()
       const idempotencyKey = createHash('sha256').update(JSON.stringify({ identity: identity.length ? identity : checked.name, contentId: this.database.getRender(userId, input.renderId)?.contentId, mode: input.mode, author: article.author, digest: article.digest, title: article.title, html: article.html, ...(article.sourceUrl ? { sourceUrl: article.sourceUrl } : {}) })).update(article.cover.buffer).digest('hex')
       const previous = this.database.findWechatPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return this.withQr(previous)
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createWechatPublication(userId, { renderId: input.renderId, title: article.title, mode: input.mode, idempotencyKey })
       if (previous?.remoteId) return this.withQr(previous)
       this.database.updateWechatPublication(userId, publication.id, { status: 'running', message: '正在上传图片并创建公众号草稿' })

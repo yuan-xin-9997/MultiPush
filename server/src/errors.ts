@@ -12,13 +12,16 @@ export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly issues?: ApiErrorIssue[]
+  /** Optional Retry-After hint for 429 responses. */
+  readonly retryAfterSeconds?: number
 
-  constructor(status: number, code: string, message: string, issues?: ApiErrorIssue[]) {
+  constructor(status: number, code: string, message: string, issues?: ApiErrorIssue[], retryAfterSeconds?: number) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.issues = issues
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
@@ -61,6 +64,7 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
   if (error instanceof ApiError) {
     const body: ApiErrorBody = { error: error.code, message: error.message }
     if (error.issues?.length) body.issues = error.issues
+    if (error.retryAfterSeconds) res.setHeader('Retry-After', String(error.retryAfterSeconds))
     res.status(error.status).json(body)
     return
   }

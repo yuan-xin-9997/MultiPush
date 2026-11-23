@@ -4,6 +4,7 @@ import type { SspaiPublication } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { ApiError } from './errors'
 import { prepareSspaiContent, sspaiEditorContent, sspaiImageUrl, verifySspaiContent } from './sspai-content'
 
@@ -119,8 +120,11 @@ async function uploadImage(context: BrowserContext, token: string, image: Publis
 
 export class PlaywrightSspaiDriver implements SspaiDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
 
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const executablePath = publisherExecutablePath('sspai')
       if (!executablePath) throw new ApiError(503, 'sspai_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
@@ -131,7 +135,12 @@ export class PlaywrightSspaiDriver implements SspaiDriver {
     }
     const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 2 })
     context.setDefaultTimeout(20_000)
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   private async token(context: BrowserContext, state?: PublisherStorageState): Promise<string> {
@@ -161,7 +170,7 @@ export class PlaywrightSspaiDriver implements SspaiDriver {
   async beginLogin(): Promise<SspaiLoginAttempt> {
     const context = await this.context(), page = await context.newPage()
     let closed = false, qrCode: string | null = null
-    const close = async () => { if (!closed) { closed = true; await context.close().catch(() => {}) } }
+    const close = async () => { if (!closed) { closed = true; await this.releaseContext(context) } }
     const deadline = Date.now() + 5 * 60_000
     const loadQr = async (): Promise<string | null> => {
       const src = await page.locator(QR).first().getAttribute('src').catch(() => null)
@@ -240,7 +249,7 @@ export class PlaywrightSspaiDriver implements SspaiDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'sspai_check_failed', '少数派连接检查未完成，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async checkPublication(state: PublisherStorageState, remoteId: string, title: string) {
@@ -262,7 +271,7 @@ export class PlaywrightSspaiDriver implements SspaiDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'sspai_check_failed', '重新核实少数派结果未完成，请稍后重试或人工核实')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async deleteDraft(state: PublisherStorageState, remoteId: string) {
@@ -287,7 +296,7 @@ export class PlaywrightSspaiDriver implements SspaiDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'sspai_draft_delete_failed', '删除少数派草稿未完成，请稍后重试或到少数派后台手动删除')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async publish(state: PublisherStorageState, article: SspaiArticle, mode: 'draft' | 'publish', progress: Parameters<SspaiDriver['publish']>[3], resumeId?: string) {
@@ -387,10 +396,11 @@ export class PlaywrightSspaiDriver implements SspaiDriver {
       }
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'sspai_preparation_failed', remoteId ? '少数派操作中断，已保留草稿，请在少数派后台检查' : '少数派准备步骤失败，尚未提交文章，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     const browser = this.browser
     this.browser = null
     if (browser) await browser.then(value => value.close()).catch(() => {})

@@ -65,10 +65,10 @@ function WechatPublishPage() {
   const selectedUncertain = publications.some((item) => item.renderId === selectedId && item.status === 'uncertain')
   const canPublish = account?.status === 'connected' && !!article && !!cover && !busy && !recordLoading && !selectedUncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
     setError('')
-    const results = await Promise.allSettled([api.wechat.account(), api.renders.list(), api.wechat.listPublications()])
+    const results = await Promise.allSettled([api.wechat.account(force ? { refresh: true } : undefined), api.renders.list(), api.wechat.listPublications()])
     if (!mounted.current) return
     const [accountResult, rendersResult, publicationsResult] = results
     if (accountResult.status === 'fulfilled') setAccount(accountResult.value.account)
@@ -264,7 +264,7 @@ function WechatPublishPage() {
     <div className="publish-page">
       <header className="publish-heading">
         <div><span className="publish-eyebrow"><Send size={14} /> 发布中心</span><h1>把内容发布到公众号</h1><p>连接公众号，选好排版与封面，一键保存草稿或正式发表。</p></div>
-        <button type="button" className="btn" onClick={() => void refresh()} disabled={refreshing || submitting}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button>
+        <button type="button" className="btn" onClick={() => void refresh(true)} disabled={refreshing || submitting}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button>
       </header>
 
       {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}

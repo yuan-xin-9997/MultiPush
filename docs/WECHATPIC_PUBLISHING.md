@@ -43,7 +43,7 @@
 
 | 方法与路径 | 用途 |
 | --- | --- |
-| `GET /api/wechatpic/account` | 查询和校验连接状态（TTL 5 分钟内复用缓存） |
+| `GET /api/wechatpic/account` | 查询连接状态；加 `?refresh=1` 时校验 AppID/AppSecret |
 | `POST /api/wechatpic/connect` | 提交 `{appId, appSecret}` 验证并加密保存 |
 | `DELETE /api/wechatpic/account` | 清除保存的连接（不影响后台已创建草稿） |
 | `POST /api/wechatpic/publications` | 提交 `{renderId}`，创建贴图草稿（异步任务，202 返回记录） |

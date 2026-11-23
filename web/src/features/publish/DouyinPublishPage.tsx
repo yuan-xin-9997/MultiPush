@@ -40,9 +40,9 @@ export default function DouyinPublishPage() {
       setLoginOpen(false)
     },
   })
-  async function refresh() {
+  async function refresh(force = false) {
     try {
-      const [a, r, p] = await Promise.all([api.douyin.account(), api.renders.list(), api.douyin.listPublications()])
+      const [a, r, p] = await Promise.all([api.douyin.account(force ? { refresh: true } : undefined), api.renders.list(), api.douyin.listPublications()])
       setAccount(a.account); setRenders(r.renders.filter(item => item.platforms.includes('douyin'))); setPublications(p.publications)
     } catch (cause) { setError(getErrorMessage(cause)) }
   }
@@ -125,7 +125,7 @@ export default function DouyinPublishPage() {
     finally { setBusy(false) }
   }
   return <div className="publish-page">
-    <header className="publish-heading"><div><span className="publish-eyebrow">发布中心 · 抖音</span><h1>把内容发布到抖音</h1><p>扫码或手机验证码连接创作者账号，发布视频或图文作品。</p></div><button className="btn" disabled={locked} onClick={() => void refresh()}>刷新状态</button></header>
+    <header className="publish-heading"><div><span className="publish-eyebrow">发布中心 · 抖音</span><h1>把内容发布到抖音</h1><p>扫码或手机验证码连接创作者账号，发布视频或图文作品。</p></div><button className="btn" disabled={locked} onClick={() => void refresh(true)}>刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}</div> : null}
     <section className="publish-account"><div className="publish-account-copy"><h2>{account?.name || '抖音账号'}</h2><p>{account?.status === 'connected' ? '已连接，登录会话已加密保存，服务重启后可复用。' : account?.status === 'expired' ? '登录已过期，请重新扫码或使用手机验证码。' : '使用抖音 App 扫码，或使用手机验证码登录。'}</p></div><div className="publish-account-actions"><button className="btn btn-primary" disabled={locked} onClick={() => void connect()}>扫码连接抖音</button>{account?.status !== 'connected' ? <button className="btn" disabled={locked || smsLogin.busy || loginOpen} onClick={smsLogin.openModal}><Smartphone size={15} />手机验证码登录</button> : <button className="btn" disabled={locked} onClick={async () => { setBusy(true); try { await api.douyin.disconnect(); await refresh() } catch (cause) { setError(getErrorMessage(cause)) } finally { setBusy(false) } }}>断开连接</button>}</div></section>
     <section className="publish-panel"><h2>准备发布</h2><label className="publish-field">选择抖音排版<select className="input" disabled={locked} value={selectedId} onChange={event => setParams({ platform: 'douyin', renderId: event.target.value })}><option value="">请选择内容</option>{renders.map(item => <option key={item.id} value={item.id}>{item.contentTitle}</option>)}</select></label><Link to="/render">前往渲染工作台</Link>

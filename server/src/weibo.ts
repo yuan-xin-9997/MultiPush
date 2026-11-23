@@ -5,6 +5,7 @@ import type { PublicationDeletion, WeiboAccount, WeiboLogin, WeiboPublication, W
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { downloadPublisherImage, publisherImage, type PublisherImage } from './publisher-image'
@@ -38,10 +39,12 @@ export class WeiboService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<WeiboAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: WeiboDriver) {
     this.key = loadPublisherKey(config.dataDir, 'weibo')
+    this.actions = new PlatformActionGuard(database, 'weibo')
   }
 
   private idle(userId: string): void {
@@ -63,11 +66,12 @@ export class WeiboService {
     if (!this.closed) this.database.saveWeiboAccount(userId, { encryptedSession: encryptPublisherSession(state, this.key, userId), ...identity, status: 'connected', checkedAt: now() })
   }
 
-  async account(userId: string): Promise<WeiboAccount> {
+  async account(userId: string, force = false): Promise<WeiboAccount> {
     const current = this.database.getWeiboAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<WeiboAccount> => {
       try {
@@ -101,6 +105,7 @@ export class WeiboService {
     this.idle(userId)
     const pending = [...this.logins.values()].find(entry => entry.userId === userId && entry.preparing)
     if (pending) return pending.value
+    this.actions.assertLogin(userId)
     for (const [id, entry] of this.logins) {
       if (entry.userId === userId) { clearTimeout(entry.timer); this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }
     }
@@ -279,14 +284,17 @@ export class WeiboService {
     let handedOff = false
     try {
       if (this.database.hasUncertainWeiboPublication(userId)) throw new ApiError(409, 'weibo_result_uncertain', '请先核实所有结果待确认的微博任务，再提交新的发布')
-      const checked = await this.driver.checkSession(this.state(userId))
-      this.save(userId, checked.state, checked.identity)
+      const state = this.state(userId)
+      const account = this.database.getWeiboAccount(userId)
+      if (!account) throw new ApiError(409, 'weibo_session_expired', '请先在系统中扫码登录微博')
+      const checked = { state, identity: { accountId: account.accountId, name: account.name || '微博用户' } }
       const article = await this.article(userId, input, baseUrl)
       const mode = input.mode === 'draft' ? 'draft' : 'publish'
       const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, text: article.thread.length === 1 ? article.text : article.thread, mode }))
       for (const image of article.images) hash.update(image.buffer)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findWeiboPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createWeiboPublication(userId, { renderId: input.renderId, title: article.title, mode, idempotencyKey })
       if (mode === 'draft') {
         this.database.updateWeiboPublication(userId, publication.id, { status: 'draft', message: '已保存为 MultiPush 本地草稿；微博网页端没有草稿箱，请在渲染页复制文案/图片后手动发布' })

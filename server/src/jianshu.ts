@@ -4,12 +4,12 @@ import type { JianshuAccount, JianshuConnectInput, JianshuPublication, JianshuPu
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { downloadPublisherImage } from './publisher-image'
 import type { JianshuArticle, JianshuDriver, JianshuIdentity } from './jianshu-browser'
 
 const now = () => new Date().toISOString()
-const TTL = 5 * 60_000
 
 function slugFromUrl(value: string | null): string | null {
   if (!value) return null
@@ -36,10 +36,12 @@ export class JianshuService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<JianshuAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: JianshuDriver) {
     this.key = loadPublisherKey(config.dataDir, 'jianshu')
+    this.actions = new PlatformActionGuard(database, 'jianshu')
   }
 
   private idle(userId: string): void {
@@ -61,11 +63,12 @@ export class JianshuService {
     if (!this.closed) this.database.saveJianshuAccount(userId, { encryptedSession: encryptPublisherSession(state, this.key, userId), ...identity, status: 'connected', checkedAt: now() })
   }
 
-  async account(userId: string): Promise<JianshuAccount> {
+  async account(userId: string, force = false): Promise<JianshuAccount> {
     const current = this.database.getJianshuAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<JianshuAccount> => {
       try {
@@ -219,15 +222,17 @@ export class JianshuService {
     let handedOff = false
     try {
       if (this.database.hasUncertainJianshuPublication(userId)) throw new ApiError(409, 'jianshu_result_uncertain', '请先核实所有结果待确认的简书任务，再提交新的发布')
-      const checked = await this.driver.checkSession(this.state(userId))
-      this.save(userId, checked.state, checked.identity)
+      const state = this.state(userId)
+      const account = this.database.getJianshuAccount(userId)
+      if (!account) throw new ApiError(409, 'jianshu_session_expired', '请先在系统中扫码登录简书')
       const article = await this.article(userId, input)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: article.mode, notebookId: article.notebookId }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: article.mode, notebookId: article.notebookId }))
       const idempotencyKey = hash.digest('hex'), previous = this.database.findJianshuPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createJianshuPublication(userId, { renderId: input.renderId, title: article.title, mode: article.mode, idempotencyKey })
       this.database.updateJianshuPublication(userId, publication.id, { status: 'running', message: '正在准备简书正文' })
-      const task = this.run(userId, publication.id, checked.state, article)
+      const task = this.run(userId, publication.id, state, article)
       this.jobs.set(publication.id, task)
       handedOff = true
       void task.finally(() => { this.jobs.delete(publication.id); this.active.delete(userId) }).catch(() => {})

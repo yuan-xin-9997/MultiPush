@@ -5,6 +5,7 @@ import type { DouyinAccount, DouyinLogin, DouyinPublishInput, DouyinPublication,
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { publisherImage, type PublisherImage } from './publisher-image'
@@ -20,10 +21,12 @@ export class DouyinService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<DouyinAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: DouyinDriver) {
     this.key = loadPublisherKey(config.dataDir, 'douyin')
+    this.actions = new PlatformActionGuard(database, 'douyin')
   }
 
   private idle(userId: string): void {
@@ -45,11 +48,12 @@ export class DouyinService {
     if (!this.closed) this.database.saveDouyinAccount(userId, { encryptedSession: encryptPublisherSession(state, this.key, userId), ...identity, status: 'connected', checkedAt: now() })
   }
 
-  async account(userId: string): Promise<DouyinAccount> {
+  async account(userId: string, force = false): Promise<DouyinAccount> {
     const current = this.database.getDouyinAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<DouyinAccount> => {
       try {
@@ -83,6 +87,7 @@ export class DouyinService {
     this.idle(userId)
     const pending = [...this.logins.values()].find(entry => entry.userId === userId && entry.preparing)
     if (pending) return pending.value
+    this.actions.assertLogin(userId)
     for (const [id, entry] of this.logins) {
       if (entry.userId === userId) { clearTimeout(entry.timer); this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }
     }
@@ -243,14 +248,17 @@ export class DouyinService {
     let handedOff = false
     try {
       if (this.database.hasUncertainDouyinPublication(userId)) throw new ApiError(409, 'douyin_result_uncertain', '请先核实所有结果待确认的任务，再提交新的发布')
-      const checked = await this.driver.checkSession(this.state(userId))
-      this.save(userId, checked.state, checked.identity)
+      const state = this.state(userId)
+      const account = this.database.getDouyinAccount(userId)
+      if (!account) throw new ApiError(409, 'douyin_session_expired', '请先在系统中扫码登录抖音')
+      const checked: Awaited<ReturnType<DouyinDriver['checkSession']>> = { state, identity: { accountId: account.accountId, name: account.name || '抖音用户' } }
       const article = await this.article(userId, input, baseUrl)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, body: article.body, mode: input.mode }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, body: article.body, mode: input.mode }))
       for (const [src, image] of article.images) hash.update(src).update(image.buffer)
       if (article.video) hash.update(article.video.buffer)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findDouyinPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createDouyinPublication(userId, { renderId: input.renderId, title: article.title, mode: input.mode, idempotencyKey })
       this.database.updateDouyinPublication(userId, publication.id, { status: 'running', message: '正在准备抖音正文及图片' })
       const task = this.run(userId, publication.id, checked, article)

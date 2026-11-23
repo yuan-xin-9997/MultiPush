@@ -67,6 +67,7 @@ Express (single Node process, 0.0.0.0:34080)
 | `ai_failover_events` | user_id, session_id, kind, reason, from/to provider/key（脱敏）, model, target_model | Key/提供商切换、冷却、恢复审计 |
 | `ai_provider_requests` | user_id, session_id, provider, model, key（脱敏）, status, duration, tokens | 每次实际请求的路由记录 |
 | `batch_jobs` | id, user_id, kind, status, total, done, input_json, items_json | 批量渲染/发布任务与每项进度 |
+| `platform_actions` | id, user_id, platform, action, trigger, result, created_at | 平台登录/发布/会话检查审计与持久限流 |
 
 所有业务表都有 `user_id`，查询必须带当前用户条件；跨用户访问统一返回 404。提供商池 Key 只存在于进程环境或受保护配置文件，数据库仅保存脱敏后的 Key 标识与状态。
 

@@ -7,7 +7,7 @@ import type { WechatpicService } from '../wechatpic'
 export function createWechatpicRouter(service: WechatpicService): Router {
   const router = Router()
   router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next() })
-  router.get('/account', asyncHandler(async (req, res) => { res.json({ account: await service.account(currentUser(req).id) }) }))
+  router.get('/account', asyncHandler(async (req, res) => { res.json({ account: await service.account(currentUser(req).id, req.query.refresh === '1') }) }))
   router.post('/connect', asyncHandler(async (req, res) => {
     const input = parseInput(wechatpicConnectSchema, req.body)
     res.json({ account: await service.connect(currentUser(req).id, input) })

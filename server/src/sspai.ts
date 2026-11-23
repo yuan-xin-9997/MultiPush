@@ -6,16 +6,18 @@ import type { PublicationDeletion, SspaiAccount, SspaiLogin, SspaiPublishInput, 
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { downloadPublisherImage, publisherImage, type PublisherImage } from './publisher-image'
 import { prepareSspaiContent, sspaiImageUrl } from './sspai-content'
 import { parseSspaiPublishedId, sspaiPublicationUrl, type SspaiArticle, type SspaiDriver, type SspaiIdentity, type SspaiLoginAttempt } from './sspai-browser'
 
-const TTL = 5 * 60_000
+const LOGIN_TTL = 5 * 60_000
 const MAX_IMAGES = 100
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const now = () => new Date().toISOString()
+function log(...parts: unknown[]): void { console.log('[sspai]', ...parts) }
 type LoginEntry = { userId: string; value: SspaiLogin; attempt?: SspaiLoginAttempt; timer: ReturnType<typeof setTimeout>; preparing?: Promise<void>; polling?: Promise<SspaiLogin> }
 
 export class SspaiService {
@@ -24,10 +26,12 @@ export class SspaiService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<SspaiAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: SspaiDriver) {
     this.key = loadPublisherKey(config.dataDir, 'sspai')
+    this.actions = new PlatformActionGuard(database, 'sspai')
   }
 
   private idle(userId: string): void {
@@ -49,11 +53,12 @@ export class SspaiService {
     if (!this.closed) this.database.saveSspaiAccount(userId, { encryptedSession: encryptPublisherSession(state, this.key, userId), ...identity, status: 'connected', checkedAt: now() })
   }
 
-  async account(userId: string): Promise<SspaiAccount> {
+  async account(userId: string, force = false): Promise<SspaiAccount> {
     const current = this.database.getSspaiAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<SspaiAccount> => {
       try {
@@ -79,13 +84,14 @@ export class SspaiService {
     this.idle(userId)
     const pending = [...this.logins.values()].find(entry => entry.userId === userId && entry.preparing)
     if (pending) return pending.value
+    this.actions.assertLogin(userId)
     for (const [id, entry] of this.logins) {
       if (entry.userId === userId) { clearTimeout(entry.timer); this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }
     }
     if (this.logins.size >= 8) throw new ApiError(503, 'sspai_busy', '当前登录请求较多，请稍后重试')
     const id = randomUUID()
-    const value: SspaiLogin = { id, status: 'waiting', qrCode: null, message: '正在准备少数派微信登录二维码，请稍候', expiresAt: new Date(Date.now() + TTL).toISOString() }
-    const timer = setTimeout(() => { this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }, TTL)
+    const value: SspaiLogin = { id, status: 'waiting', qrCode: null, message: '正在准备少数派微信登录二维码，请稍候', expiresAt: new Date(Date.now() + LOGIN_TTL).toISOString() }
+    const timer = setTimeout(() => { this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }, LOGIN_TTL)
     timer.unref()
     const entry: LoginEntry = { userId, value, timer }
     this.logins.set(id, entry)
@@ -95,6 +101,7 @@ export class SspaiService {
         const attempt = await this.driver.beginLogin()
         if (this.closed || this.logins.get(id) !== entry) { await attempt.close().catch(() => {}); return }
         entry.attempt = attempt
+        log('login QR ready', 'user=' + userId)
         this.refreshLogin(userId, id, entry)
       } catch (error) {
         if (this.logins.get(id) === entry) entry.value = { ...entry.value, status: 'failed', qrCode: null, message: error instanceof ApiError ? error.message : '获取少数派登录二维码失败，请重新连接' }
@@ -263,16 +270,24 @@ export class SspaiService {
     let handedOff = false
     try {
       if (this.database.hasUncertainSspaiPublication(userId)) throw new ApiError(409, 'sspai_result_uncertain', '请先核实所有结果待确认的任务，再提交新的发布')
-      const checked = await this.driver.checkSession(this.state(userId))
-      this.save(userId, checked.state, checked.identity)
+      const state = this.state(userId)
+      const account = this.database.getSspaiAccount(userId)
+      if (!account) throw new ApiError(409, 'sspai_session_expired', '请先在系统中扫码登录少数派')
       const article = await this.article(userId, input, baseUrl)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, tags: article.tags, mode: input.mode }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, tags: article.tags, mode: input.mode }))
       if (article.cover) hash.update(article.cover.buffer)
       for (const [src, image] of article.images) hash.update(src).update(image.buffer)
       for (const src of article.external) hash.update(src)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findSspaiPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      // Throttle before touching SSPAI; every submission (draft included) counts.
+      this.actions.assertPublish(userId)
+      const checked: Awaited<ReturnType<SspaiDriver['checkSession']>> = {
+        state,
+        identity: { accountId: account.accountId, name: account.name || '少数派用户' },
+      }
       const publication = previous ?? this.database.createSspaiPublication(userId, { renderId: input.renderId, title: article.title, mode: input.mode, idempotencyKey })
+      log('publish accepted', 'mode=' + input.mode, 'user=' + userId, 'id=' + publication.id)
       this.database.updateSspaiPublication(userId, publication.id, { status: 'running', message: '正在准备少数派正文及图片' })
       const task = this.run(userId, publication.id, checked, article, input.mode, previous?.remoteId || undefined, previous?.resolutions?.some(entry => entry.action === 'not_published') || false)
       this.jobs.set(publication.id, task)
@@ -307,9 +322,11 @@ export class SspaiService {
       }
       this.save(userId, result.state, checked.identity)
       this.database.updateSspaiPublication(userId, id, result)
+      log('publish finished', 'status=' + result.status, 'id=' + id, 'remote=' + (result.remoteId || '-'))
     } catch (error) {
       this.expire(userId, error)
       const code = error instanceof ApiError ? error.code : ''
+      log('publish failed', 'id=' + id, 'code=' + (code || 'unknown'))
       const uncertain = !(error instanceof ApiError) || ['sspai_result_uncertain', 'sspai_draft_missing', 'sspai_content_mismatch', 'sspai_publish_unverified'].includes(code)
       this.database.updateSspaiPublication(userId, id, { status: uncertain ? 'uncertain' : 'failed', message: error instanceof ApiError ? error.message : '少数派操作中断，结果未确认，请先核对少数派后台，避免重复提交' })
     }

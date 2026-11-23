@@ -3,6 +3,7 @@ import type { DouyinPublication } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { ApiError } from './errors'
 
 export interface DouyinIdentity { accountId: string; name: string }
@@ -34,7 +35,10 @@ export function douyinPublishedResult(value: unknown): { remoteId: string; url: 
 
 export class PlaywrightDouyinDriver implements DouyinDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const executablePath = publisherExecutablePath('douyin')
       if (!executablePath) throw new ApiError(503, 'douyin_browser_unavailable', '服务器需要 Chrome / Chromium，可设置 DOUYIN_BROWSER_PATH')
@@ -44,7 +48,12 @@ export class PlaywrightDouyinDriver implements DouyinDriver {
     }
     const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1280, height: 1000 } })
     context.setDefaultTimeout(15_000)
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
   private async security(page: Page) {
     const text = await page.locator('body').innerText()
@@ -64,7 +73,7 @@ export class PlaywrightDouyinDriver implements DouyinDriver {
     const context = await this.context(), page = await context.newPage()
     let closed = false
     const deadline = Date.now() + 5 * 60_000
-    const close = async () => { closed = true; await context.close().catch(() => {}) }
+    const close = async () => { closed = true; await this.releaseContext(context) }
     try {
       await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await this.security(page)
@@ -90,7 +99,7 @@ export class PlaywrightDouyinDriver implements DouyinDriver {
       const identity = await this.identity(page)
       if (!identity) throw expired()
       return { identity, state: await context.storageState() }
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
   async checkPublication(state: PublisherStorageState, _remoteId: string, _title: string) {
     // shortcut: without a verified query API, ask the user to verify in creator center.
@@ -151,7 +160,7 @@ export class PlaywrightDouyinDriver implements DouyinDriver {
       if (submitted) throw new ApiError(409, 'douyin_result_uncertain', '已尝试提交，结果待核实；请先检查抖音创作者中心')
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'douyin_prepare_failed', '抖音页面加载、上传或填写失败，尚未提交；请检查平台页面与网络')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
-  async close() { if (this.browser) await (await this.browser).close().catch(() => {}); this.browser = null }
+  async close() { await this.contexts.close(); if (this.browser) await (await this.browser).close().catch(() => {}); this.browser = null }
 }

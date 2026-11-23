@@ -4,6 +4,7 @@ import type { DoubanPrivacy } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { ApiError } from './errors'
 import { qrReady } from './qr-capture'
 import { doubanNoteUrl, verifyDoubanContent } from './douban-content'
@@ -141,10 +142,13 @@ export function parseDoubanNoteResult(value: unknown, location?: string | null):
 
 export class PlaywrightDoubanDriver implements DoubanDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
 
   constructor(private readonly dataDir: string | null = null) {}
 
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const executablePath = publisherExecutablePath('douban')
       if (!executablePath) throw new ApiError(503, 'douban_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
@@ -179,7 +183,12 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
         await route.abort()
       }
     })
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   private async session(context: BrowserContext): Promise<{ uid: string; ck: string; name: string } | null> {
@@ -247,7 +256,7 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
   async beginLogin(): Promise<DoubanLoginAttempt> {
     const context = await this.context(), page = await context.newPage()
     let closed = false, qrCode: string | null = null
-    const close = async () => { if (!closed) { closed = true; await context.close().catch(() => {}) } }
+    const close = async () => { if (!closed) { closed = true; await this.releaseContext(context) } }
     const deadline = Date.now() + 5 * 60_000
     try {
       const response = await page.goto(LOGIN, { waitUntil: 'domcontentloaded', timeout: 30_000 })
@@ -299,7 +308,7 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'douban_check_failed', '豆瓣连接检查未完成，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   private async noteTitle(context: BrowserContext, url: string): Promise<{ status: number; title: string }> {
@@ -323,7 +332,7 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'douban_check_failed', '豆瓣发布结果核实未完成，请稍后重试或到豆瓣核实')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   /** `add_photo` needs the editor's one-shot upload token plus the `ck` cookie. */
@@ -467,10 +476,11 @@ export class PlaywrightDoubanDriver implements DoubanDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw uncertain(`豆瓣发布过程中网络或页面异常，结果未确认；请先到豆瓣核实，避免重复发布；${await this.failure(context).catch(() => '')}`)
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     const pending = this.browser
     this.browser = null
     if (pending) await (await pending).close().catch(() => {})

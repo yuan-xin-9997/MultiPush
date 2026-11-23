@@ -310,6 +310,18 @@ export interface CreateRenderValues {
   results: RenderRecord['results']
 }
 
+export type PlatformAction = 'login_started' | 'publish_started' | 'publish_finished' | 'session_checked'
+export type PlatformActionTrigger = 'manual' | 'batch' | 'ai' | 'system'
+
+export interface PlatformActionRecord {
+  id: string
+  platform: PlatformId
+  action: PlatformAction
+  trigger: PlatformActionTrigger
+  result: string
+  createdAt: string
+}
+
 export interface CreateBilibiliPublicationValues {
   renderId: string
   title: string
@@ -997,6 +1009,16 @@ export class Database {
         updated_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_batch_jobs_user_created ON batch_jobs(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS platform_actions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        platform TEXT NOT NULL,
+        action TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        result TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_platform_actions_lookup ON platform_actions(user_id, platform, action, created_at DESC);
       CREATE TABLE IF NOT EXISTS weibo_accounts (
         user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         encrypted_session TEXT NOT NULL,
@@ -3954,6 +3976,38 @@ export class Database {
       createdAt: text(row.created_at),
       updatedAt: text(row.updated_at),
     }
+  }
+
+  recordPlatformAction(userId: string, platform: PlatformId, action: PlatformAction, trigger: PlatformActionTrigger, result = ''): PlatformActionRecord {
+    const id = randomUUID(), createdAt = nowIso()
+    this.run('INSERT INTO platform_actions (id, user_id, platform, action, trigger, result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, userId, platform, action, trigger, result, createdAt])
+    return { id, platform, action, trigger, result, createdAt }
+  }
+
+  lastPlatformAction(userId: string, platform: PlatformId, action: PlatformAction): string | null {
+    const row = this.get('SELECT created_at FROM platform_actions WHERE user_id = ? AND platform = ? AND action = ? ORDER BY created_at DESC, id DESC LIMIT 1', [userId, platform, action])
+    return row ? text(row.created_at) : null
+  }
+
+  countPlatformActions(userId: string, platform: PlatformId, action: PlatformAction, since: string): number {
+    const row = this.get('SELECT COUNT(*) AS total FROM platform_actions WHERE user_id = ? AND platform = ? AND action = ? AND created_at >= ?', [userId, platform, action, since])
+    return row ? numberValue(row.total) : 0
+  }
+
+  listPlatformActions(userId: string, platform: PlatformId, limit = 20): PlatformActionRecord[] {
+    return this.all('SELECT * FROM platform_actions WHERE user_id = ? AND platform = ? ORDER BY created_at DESC, id DESC LIMIT ?', [userId, platform, limit]).map(row => ({
+      id: text(row.id),
+      platform: row.platform as PlatformId,
+      action: row.action as PlatformAction,
+      trigger: row.trigger as PlatformActionTrigger,
+      result: text(row.result),
+      createdAt: text(row.created_at),
+    }))
+  }
+
+  prunePlatformActions(before: string): number {
+    return this.run('DELETE FROM platform_actions WHERE created_at < ?', [before])
   }
 
   createBatchJob(userId: string, values: CreateBatchJobValues): BatchJob {

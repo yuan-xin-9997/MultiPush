@@ -145,7 +145,7 @@ describe('WeChat session security', () => {
     expect(await restored.account(alice.id)).toMatchObject({ status: 'connected', name: '测试公众号' })
     const account = database.getWechatAccount(alice.id)!
     database.saveWechatAccount(alice.id, { ...account, checkedAt: '2020-01-01T00:00:00.000Z' })
-    expect(await restored.account(alice.id)).toMatchObject({ status: 'connected' })
+    expect(await restored.account(alice.id, true)).toMatchObject({ status: 'connected' })
     expect(driver.checkSession).toHaveBeenCalledWith(session)
   })
 
@@ -170,7 +170,7 @@ describe('WeChat session security', () => {
     const { service, database, alice, bob, seedAccount } = setup()
     seedAccount(alice.id, '2020-01-01T00:00:00.000Z')
     database.saveWechatAccount(bob.id, database.getWechatAccount(alice.id)!)
-    expect(await service.account(bob.id)).toMatchObject({ status: 'expired' })
+    expect(await service.account(bob.id, true)).toMatchObject({ status: 'expired' })
     expect(database.getWechatAccount(bob.id)?.status).toBe('expired')
   })
 })
@@ -391,7 +391,7 @@ describe('WeChat API authentication', () => {
     expect((await fetch(`${base}/api/wechat/publications`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(401)
     seedAccount(alice.id, '2020-01-01T00:00:00.000Z')
     driver.checkSession.mockRejectedValueOnce(new ApiError(409, 'wechat_session_expired', '微信登录失效'))
-    const status = await fetch(`${base}/api/wechat/account`, { headers })
+    const status = await fetch(`${base}/api/wechat/account?refresh=1`, { headers })
     expect(status.status).toBe(200)
     expect(status.headers.get('cache-control')).toBe('no-store')
     expect(await status.json()).toEqual({ account: { status: 'expired', name: '测试公众号', checkedAt: expect.any(String) } })

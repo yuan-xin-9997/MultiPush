@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { load, type CheerioAPI } from 'cheerio'
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright-core'
 import { ApiError } from './errors'
+import { PublisherContextCache } from './publisher-context-cache'
 
 export type WechatStorageState = Awaited<ReturnType<BrowserContext['storageState']>>
 export interface WechatLoginAttempt {
@@ -278,6 +279,7 @@ async function turnSwitchOff(dialog: Locator, label: string, required: boolean):
 
 export class PlaywrightWechatDriver implements WechatBrowserDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
   constructor(private readonly config?: { dataDir: string }) {}
 
   /** Persist the login page state (URL, text, screenshot) for offline diagnosis. */
@@ -301,6 +303,8 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
   }
 
   private async context(state?: WechatStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const path = publisherExecutablePath()
       if (!path) throw new ApiError(503, 'wechat_browser_unavailable', '服务器未安装 Chrome / Chromium。请安装浏览器并设置 WECHAT_BROWSER_PATH，或执行 npx playwright-core install chromium')
@@ -319,7 +323,12 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
     }
     const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1440, height: 1100 } })
     context.setDefaultTimeout(10_000)
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   async beginLogin(): Promise<WechatLoginAttempt> {
@@ -328,7 +337,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
     const deadline = Date.now() + FIVE_MINUTES
     let qrCode: string | null = null
     let closed = false
-    const close = async () => { if (!closed) { closed = true; await context.close().catch(() => {}) } }
+    const close = async () => { if (!closed) { closed = true; await this.releaseContext(context) } }
     try {
       await page.goto(HOME, { waitUntil: 'commit', timeout: 30_000 })
       await page.locator(LOGIN_QR).first().waitFor({ state: 'visible', timeout: 20_000 })
@@ -415,7 +424,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
     try {
       const info = await sessionInfo(await context.newPage())
       return { state: await context.storageState(), name: info.name }
-    } finally { await context.close() }
+    } finally { await this.releaseContext(context) }
   }
 
   async deleteDraft(state: WechatStorageState, remoteId: string) {
@@ -436,7 +445,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'wechat_draft_delete_failed', '删除公众号草稿未完成，请稍后重试或到公众号后台手动删除')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async publish(state: WechatStorageState, article: WechatArticle, mode: 'draft' | 'publish', onProgress: (update: WechatProgress) => void) {
@@ -540,6 +549,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     const pending = this.browser
     this.browser = null
     if (pending) await (await pending).close().catch(() => {})

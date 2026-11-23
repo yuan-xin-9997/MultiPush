@@ -4,6 +4,7 @@ import type { DoubanAccount, DoubanLogin, DoubanPublication, DoubanPublishInput,
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { downloadPublisherImage, type PublisherImage } from './publisher-image'
 import { doubanNoteUrl, parseDoubanNoteId, prepareDoubanContent } from './douban-content'
@@ -35,10 +36,12 @@ export class DoubanService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<DoubanAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: DoubanDriver) {
     this.key = loadPublisherKey(config.dataDir, 'douban')
+    this.actions = new PlatformActionGuard(database, 'douban')
   }
 
   private idle(userId: string): void {
@@ -60,11 +63,12 @@ export class DoubanService {
     if (!this.closed) this.database.saveDoubanAccount(userId, { encryptedSession: encryptPublisherSession(state, this.key, userId), ...identity, status: 'connected', checkedAt: now() })
   }
 
-  async account(userId: string): Promise<DoubanAccount> {
+  async account(userId: string, force = false): Promise<DoubanAccount> {
     const current = this.database.getDoubanAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<DoubanAccount> => {
       try {
@@ -98,6 +102,7 @@ export class DoubanService {
     this.idle(userId)
     const pending = [...this.logins.values()].find(entry => entry.userId === userId && entry.preparing)
     if (pending) return pending.value
+    this.actions.assertLogin(userId)
     for (const [id, entry] of this.logins) {
       if (entry.userId === userId) { clearTimeout(entry.timer); this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }
     }
@@ -256,20 +261,22 @@ export class DoubanService {
     let handedOff = false
     try {
       if (this.database.hasUncertainDoubanPublication(userId)) throw new ApiError(409, 'douban_result_uncertain', '请先核实所有结果待确认的豆瓣任务，再提交新的发布')
-      const checked = await this.driver.checkSession(this.state(userId))
-      this.save(userId, checked.state, checked.identity)
+      const state = this.state(userId)
+      const account = this.database.getDoubanAccount(userId)
+      if (!account) throw new ApiError(409, 'douban_session_expired', '请先在系统中扫码登录豆瓣')
       const article = await this.article(userId, input)
       const mode = input.mode === 'draft' ? 'draft' : 'publish'
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, privacy: article.privacy, tags: article.tags, mode }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, privacy: article.privacy, tags: article.tags, mode }))
       const idempotencyKey = hash.digest('hex'), previous = this.database.findDoubanPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createDoubanPublication(userId, { renderId: input.renderId, title: article.title, mode, idempotencyKey })
       if (mode === 'draft') {
         this.database.updateDoubanPublication(userId, publication.id, { status: 'draft', message: '已保存为 MultiPush 本地草稿；豆瓣网页端没有草稿箱，请在渲染页复制正文或打开豆瓣编辑器发布' })
         return this.get(userId, publication.id)
       }
       this.database.updateDoubanPublication(userId, publication.id, { status: 'running', message: '正在准备豆瓣日记正文' })
-      const task = this.run(userId, publication.id, checked.state, article)
+      const task = this.run(userId, publication.id, state, article)
       this.jobs.set(publication.id, task)
       handedOff = true
       void task.finally(() => { this.jobs.delete(publication.id); this.active.delete(userId) }).catch(() => {})

@@ -3,11 +3,11 @@ import { V2EX_COMMON_NODES, type V2exAccount, type V2exConnectInput, type V2exNo
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import type { V2exArticle, V2exDriver, V2exIdentity } from './v2ex-browser'
 
 const now = () => new Date().toISOString()
-const TTL = 5 * 60_000
 
 function topicIdFromUrl(value: string): string | null {
   try {
@@ -23,10 +23,12 @@ export class V2exService {
   private readonly key: Buffer
   private readonly active = new Set<string>()
   private readonly checks = new Map<string, Promise<V2exAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: V2exDriver) {
     this.key = loadPublisherKey(config.dataDir, 'v2ex')
+    this.actions = new PlatformActionGuard(database, 'v2ex')
   }
 
   private idle(userId: string): void {
@@ -57,11 +59,12 @@ export class V2exService {
     }
   }
 
-  async account(userId: string): Promise<V2exAccount> {
+  async account(userId: string, force = false): Promise<V2exAccount> {
     const current = this.database.getV2exAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<V2exAccount> => {
       try {
@@ -151,11 +154,12 @@ export class V2exService {
     this.active.add(userId)
     try {
       if (this.database.hasUncertainV2exPublication(userId)) throw new ApiError(409, 'v2ex_result_uncertain', '请先核实所有结果待确认的 V2EX 任务，再提交新的发布')
-      const checked = await this.driver.checkSession(this.state(userId))
-      this.save(userId, checked.state, checked.identity)
+      const state = this.state(userId)
+      const account = this.database.getV2exAccount(userId)
+      if (!account) throw new ApiError(409, 'v2ex_session_expired', '请先在系统中扫码登录 V2EX')
       const article = this.article(userId, input)
       const hash = createHash('sha256').update(JSON.stringify({
-        account: checked.identity.accountId,
+        account: account.accountId,
         contentId: this.database.getRender(userId, input.renderId)?.contentId,
         title: article.title,
         nodeName: article.nodeName,
@@ -164,6 +168,7 @@ export class V2exService {
       const idempotencyKey = hash.digest('hex')
       const previous = this.database.findV2exPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createV2exPublication(userId, {
         renderId: input.renderId,
         title: article.title,
@@ -172,7 +177,7 @@ export class V2exService {
       })
       this.database.updateV2exPublication(userId, publication.id, { status: 'running', message: '正在打开 V2EX 发帖页' })
       try {
-        const result = await this.driver.publish(checked.state, article, ({ message }) => {
+        const result = await this.driver.publish(state, article, ({ message }) => {
           this.database.updateV2exPublication(userId, publication.id, { message })
         })
         const account = this.database.getV2exAccount(userId)

@@ -1,6 +1,7 @@
 import { chromium, type Browser, type BrowserContext, type Frame, type Locator, type Page } from 'playwright-core'
 import type { PublisherStorageState } from './publisher-session'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { qrReady } from './qr-capture'
 import { ApiError } from './errors'
 import { wbiSign } from './bilibili-api'
@@ -180,6 +181,7 @@ async function captureQr(page: Page): Promise<string | null> {
 
 export class PlaywrightBilibiliDriver implements BilibiliDriver {
   private browser: Browser | null = null
+  private readonly contexts = new PublisherContextCache()
 
   private async launch(): Promise<Browser> {
     if (this.browser?.isConnected()) return this.browser
@@ -190,6 +192,20 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     })
     return this.browser
+  }
+
+  private async sessionContext(state: PublisherStorageState, options: { viewport?: { width: number; height: number }; userAgent?: string } = {}): Promise<BrowserContext> {
+    const key = this.contexts.key(state)
+    const cached = this.contexts.get(key)
+    if (cached) return cached
+    const browser = await this.launch()
+    const context = await browser.newContext({ storageState: state, ...options })
+    this.contexts.set(key, context)
+    return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   async beginLogin(): Promise<BilibiliLoginAttempt> {
@@ -238,8 +254,7 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
   }
 
   async checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: BilibiliIdentity }> {
-    const browser = await this.launch()
-    const context = await browser.newContext({ storageState: state })
+    const context = await this.sessionContext(state)
     try {
       const nav = await readNav(context)
       if (!nav.login) throw expired()
@@ -248,7 +263,7 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
         identity: { accountId: nav.mid || 'bilibili', name: nav.name || 'B 站账号' },
       }
     } finally {
-      await context.close().catch(() => {})
+      await this.releaseContext(context)
     }
   }
 
@@ -326,9 +341,7 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
   }
 
   async publishArticle(state: PublisherStorageState, article: BilibiliArticleInput, mode: 'draft' | 'publish', progress: (message: string) => void): Promise<{ state: PublisherStorageState; result: BilibiliArticleResult }> {
-    const browser = await this.launch()
-    const context = await browser.newContext({
-      storageState: state,
+    const context = await this.sessionContext(state, {
       viewport: { width: 1440, height: 920 },
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
     })
@@ -502,11 +515,12 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
       if (error instanceof ApiError) throw error
       throw new Error(`B 站图文发布失败：${error instanceof Error ? error.message : String(error)}`)
     } finally {
-      await context.close().catch(() => {})
+      await this.releaseContext(context)
     }
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     await this.browser?.close().catch(() => {})
     this.browser = null
   }

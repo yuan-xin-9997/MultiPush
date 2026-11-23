@@ -57,9 +57,9 @@ export default function ZhihuPublishPage() {
   const uncertain = uncertainItems.length > 0
   const ready = account?.status === 'connected' && !!article && !busy && !recordLoading && !uncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
-    const results = await Promise.allSettled([api.zhihu.account(), api.renders.list(), api.zhihu.listPublications()])
+    const results = await Promise.allSettled([api.zhihu.account(force ? { refresh: true } : undefined), api.renders.list(), api.zhihu.listPublications()])
     if (!mounted.current) return
     const [a, r, p] = results
     if (a.status === 'fulfilled') setAccount(a.value.account)
@@ -193,7 +193,7 @@ export default function ZhihuPublishPage() {
   }
 
   return <div className="publish-page zhihu-publish-page">
-    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 知乎</span><h1>把内容发布到知乎</h1><p>连接知乎账号，选择排版，一键保存草稿或正式发布文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
+    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 知乎</span><h1>把内容发布到知乎</h1><p>连接知乎账号，选择排版，一键保存草稿或正式发布文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh(true)}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
     <section className="publish-account" aria-label="知乎账号">
       <span className="publish-account-icon">知</span><div className="publish-account-copy"><h2>{account?.name || '知乎账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存，下次访问和服务重启后自动复用；失效时重新扫码或使用手机验证码。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码或使用手机验证码连接。' : '使用知乎 App 扫码登录，或使用手机验证码连接。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div>

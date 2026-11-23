@@ -41,9 +41,9 @@ export default function JianshuPublishPage() {
   const uncertain = publications.some(item => item.renderId === selectedId && item.status === 'uncertain')
   const ready = account?.status === 'connected' && !!article && !busy && !recordLoading && !uncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
-    const results = await Promise.allSettled([api.jianshu.account(), api.renders.list(), api.jianshu.listPublications()])
+    const results = await Promise.allSettled([api.jianshu.account(force ? { refresh: true } : undefined), api.renders.list(), api.jianshu.listPublications()])
     if (!mounted.current) return
     const [a, r, p] = results
     if (a.status === 'fulfilled') setAccount(a.value.account)
@@ -126,7 +126,7 @@ export default function JianshuPublishPage() {
   }
 
   return <div className="publish-page jianshu-publish-page">
-    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 简书</span><h1>把内容发布到简书</h1><p>连接简书账号，选择简书排版，保存草稿或直接发布文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
+    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 简书</span><h1>把内容发布到简书</h1><p>连接简书账号，选择简书排版，保存草稿或直接发布文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh(true)}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
     <section className="publish-account" aria-label="简书账号"><span className="publish-account-icon">简</span><div className="publish-account-copy"><h2>{account?.name || '简书账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存；简书网页端没有可用的扫码登录，使用浏览器 Cookie 连接。' : account?.status === 'expired' ? '登录状态已失效，请重新复制 Cookie 连接。' : '在已登录简书的浏览器中复制 Cookie，粘贴连接（至少包含 remember_user_token）。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div><span className={`publish-status ${account?.status === 'connected' ? 'is-success' : ''}`}>{account?.status === 'connected' ? <><CheckCircle2 size={13} />已连接</> : account?.status === 'expired' ? '已过期' : '未连接'}</span><div className="publish-account-actions">{account?.status === 'connected' ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => setConfirmation('disconnect')}><LogOut size={14} />断开连接</button> : <button type="button" className="btn btn-primary" disabled={busy || refreshing} onClick={() => { setConnectOpen(true); setConnectError('') }}><KeyRound size={16} />连接简书</button>}</div></section>
     <div className="publish-compose-grid"><section className="publish-panel">

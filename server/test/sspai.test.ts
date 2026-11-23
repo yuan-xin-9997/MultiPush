@@ -141,6 +141,39 @@ describe('Sspai publishing', () => {
   })
 })
 
+describe('Sspai rate limiting', () => {
+  it('rejects a second submission inside the cooldown before opening a browser', async () => {
+    vi.stubEnv('MULTIPUSH_SSPAI_MIN_PUBLISH_INTERVAL_MS', String(10 * 60_000))
+    try {
+      const { service, alice, driver, article } = setup()
+      const first = await service.publish(alice.id, { renderId: article().id, mode: 'draft' })
+      await finish(service, alice.id, first.id)
+      await expect(service.publish(alice.id, { renderId: article().id, mode: 'draft' })).rejects.toMatchObject({ status: 429, code: 'platform_publish_rate_limited' })
+      expect(driver.publish).toHaveBeenCalledTimes(1)
+      expect(driver.checkSession).not.toHaveBeenCalled()
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it('supports a forced account refresh without waiting for the cache', async () => {
+    const { service, alice, driver } = setup()
+    expect((await service.account(alice.id)).status).toBe('connected')
+    expect(driver.checkSession).not.toHaveBeenCalled()
+    expect((await service.account(alice.id, true)).status).toBe('connected')
+    expect(driver.checkSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('cools down repeated QR login attempts', async () => {
+    vi.stubEnv('MULTIPUSH_SSPAI_LOGIN_COOLDOWN_MS', String(2 * 60_000))
+    try {
+      const { service, alice, driver } = setup()
+      await service.startLogin(alice.id)
+      await vi.waitFor(() => expect(driver.beginLogin).toHaveBeenCalledTimes(1))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      await expect(service.startLogin(alice.id)).rejects.toMatchObject({ status: 429, code: 'platform_login_rate_limited' })
+    } finally { vi.unstubAllEnvs() }
+  })
+})
+
 describe('Sspai content preparation', () => {
   it('demotes duplicate titles, strips styles and flattens captions', () => {
     const html = '<h1 style="color:red">标题</h1><p style="color:red">正文<script>alert(1)</script></p><figure><img src="/uploads/a.png" style="width:10px"><figcaption>图注</figcaption></figure>'

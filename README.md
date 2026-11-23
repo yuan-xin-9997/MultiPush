@@ -127,6 +127,10 @@ npm start
 | `JIANSHU_BROWSER_PATH` | 自动探测 | 简书发布使用的 Chrome / Chromium 路径 |
 | `V2EX_BROWSER_PATH` | 自动探测 | V2EX 发布使用的 Chrome / Chromium 路径 |
 | `BILIBILI_BROWSER_PATH` | 自动探测 | B站发布使用的 Chrome / Chromium 路径 |
+| `MULTIPUSH_<PLATFORM>_MIN_PUBLISH_INTERVAL_MS` | 平台默认 | 两次提交的最小间隔（如 `MULTIPUSH_ZHIHU_MIN_PUBLISH_INTERVAL_MS`） |
+| `MULTIPUSH_<PLATFORM>_DAILY_PUBLISH_LIMIT` | 平台默认 | 滚动 24 小时最多提交篇数 |
+| `MULTIPUSH_<PLATFORM>_LOGIN_COOLDOWN_MS` | 平台默认 | 两次登录尝试的最小间隔 |
+| `MULTIPUSH_<PLATFORM>_SESSION_CHECK_COOLDOWN_MS` | `60000` | 两次手动「刷新状态」的最小间隔 |
 | `BILIBILI_HEADLESS` | `1` | 设为 `0` 时显示 B站登录/图文编辑器浏览器窗口，便于调试 |
 | `V2EX_PROXY_SERVER` | 空 | V2EX 浏览器代理，例如 `http://192.168.0.100:7890` |
 | `AI_PROVIDERS_JSON` | 未设置 | AI 提供商池完整 JSON；支持多提供商、多 Key、模型映射（优先级最高） |

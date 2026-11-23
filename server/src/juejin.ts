@@ -3,6 +3,7 @@ import type { JuejinAccount, JuejinLogin, JuejinPublication, JuejinPublishInput,
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { parseJuejinPublishedId } from './juejin-browser'
 import type { JuejinArticle, JuejinDriver, JuejinIdentity, JuejinLoginAttempt } from './juejin-browser'
@@ -32,10 +33,12 @@ export class JuejinService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<JuejinAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: JuejinDriver) {
     this.key = loadPublisherKey(config.dataDir, 'juejin')
+    this.actions = new PlatformActionGuard(database, 'juejin')
   }
 
   private idle(userId: string): void {
@@ -57,11 +60,12 @@ export class JuejinService {
     if (!this.closed) this.database.saveJuejinAccount(userId, { encryptedSession: encryptPublisherSession(state, this.key, userId), ...identity, status: 'connected', checkedAt: now() })
   }
 
-  async account(userId: string): Promise<JuejinAccount> {
+  async account(userId: string, force = false): Promise<JuejinAccount> {
     const current = this.database.getJuejinAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<JuejinAccount> => {
       try {
@@ -95,6 +99,7 @@ export class JuejinService {
     this.idle(userId)
     const pending = [...this.logins.values()].find(entry => entry.userId === userId && entry.preparing)
     if (pending) return pending.value
+    this.actions.assertLogin(userId)
     for (const [id, entry] of this.logins) {
       if (entry.userId === userId) { clearTimeout(entry.timer); this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }
     }
@@ -262,15 +267,17 @@ export class JuejinService {
     let handedOff = false
     try {
       if (this.database.hasUncertainJuejinPublication(userId)) throw new ApiError(409, 'juejin_result_uncertain', '请先核实所有结果待确认的掘金任务，再提交新的发布')
-      const checked = await this.driver.checkSession(this.state(userId))
-      this.save(userId, checked.state, checked.identity)
+      const state = this.state(userId)
+      const account = this.database.getJuejinAccount(userId)
+      if (!account) throw new ApiError(409, 'juejin_session_expired', '请先在系统中扫码登录掘金')
       const article = await this.article(userId, input)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, markdown: article.markdown, mode: article.mode, categoryId: article.categoryId, tags: article.tagNames }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, markdown: article.markdown, mode: article.mode, categoryId: article.categoryId, tags: article.tagNames }))
       const idempotencyKey = hash.digest('hex'), previous = this.database.findJuejinPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createJuejinPublication(userId, { renderId: input.renderId, title: article.title, mode: article.mode, idempotencyKey })
       this.database.updateJuejinPublication(userId, publication.id, { status: 'running', message: '正在准备掘金正文' })
-      const task = this.run(userId, publication.id, checked.state, article)
+      const task = this.run(userId, publication.id, state, article)
       this.jobs.set(publication.id, task)
       handedOff = true
       void task.finally(() => { this.jobs.delete(publication.id); this.active.delete(userId) }).catch(() => {})

@@ -4,6 +4,7 @@ import type { ToutiaoPublication } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { ApiError } from './errors'
 import { qrReady } from './qr-capture'
 import { capturePageFailure, describePageFailure } from './publisher-diagnostics'
@@ -120,10 +121,13 @@ export function parseToutiaoPublished(value: unknown): { remoteId: string; url: 
 
 export class PlaywrightToutiaoDriver implements ToutiaoDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
 
   constructor(private readonly dataDir: string | null = null) {}
 
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const executablePath = publisherExecutablePath('toutiao')
       if (!executablePath) throw new ApiError(503, 'toutiao_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
@@ -152,7 +156,12 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
     }
     const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1440, height: 1000 } })
     context.setDefaultTimeout(20_000)
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   private async profile(context: BrowserContext, verbose = false): Promise<ToutiaoIdentity | null> {
@@ -203,7 +212,7 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
   async beginLogin(): Promise<ToutiaoLoginAttempt> {
     const context = await this.context(), page = await context.newPage()
     let closed = false, qrCode: string | null = null
-    const close = async () => { if (!closed) { closed = true; await context.close().catch(() => {}) } }
+    const close = async () => { if (!closed) { closed = true; await this.releaseContext(context) } }
     const deadline = Date.now() + 5 * 60_000
     const readQr = async (): Promise<string | null> => {
       const qr = page.locator(QR).first()
@@ -258,7 +267,7 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'toutiao_check_failed', '今日头条连接检查未完成，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async checkPublication(state: PublisherStorageState, remoteId: string, title: string) {
@@ -277,7 +286,7 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'toutiao_check_failed', '重新核实今日头条结果未完成，请稍后重试或人工核实')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   private async fillEditor(page: Page, article: ToutiaoArticle, progress: (value: Partial<Pick<ToutiaoPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<void> {
@@ -402,7 +411,7 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
       }
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'toutiao_preparation_failed', `今日头条发布准备失败，尚未提交；请检查网络后重试${page ? `；${await this.failure(page)}` : ''}`)
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   /** Remove the cloud draft created by the editor (draft_type 2 = 图文). */
@@ -420,10 +429,11 @@ export class PlaywrightToutiaoDriver implements ToutiaoDriver {
         throw new ApiError(502, 'toutiao_draft_delete_failed', `今日头条草稿删除失败${payload.message ? `：${String(payload.message)}` : ''}（code ${String(payload.code ?? '未知')}）`)
       }
       return { state: await context.storageState() }
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     const browser = this.browser
     this.browser = null
     if (browser) await browser.then(value => value.close()).catch(() => {})

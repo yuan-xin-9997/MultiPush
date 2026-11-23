@@ -56,9 +56,9 @@ export default function DoubanPublishPage() {
   const uncertain = publications.some(item => item.renderId === selectedId && item.status === 'uncertain')
   const ready = account?.status === 'connected' && !!article && !busy && !recordLoading && !uncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
-    const results = await Promise.allSettled([api.douban.account(), api.renders.list(), api.douban.listPublications()])
+    const results = await Promise.allSettled([api.douban.account(force ? { refresh: true } : undefined), api.renders.list(), api.douban.listPublications()])
     if (!mounted.current) return
     const [a, r, p] = results
     if (a.status === 'fulfilled') setAccount(a.value.account)
@@ -172,7 +172,7 @@ export default function DoubanPublishPage() {
   }
 
   return <div className="publish-page douban-publish-page">
-    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 豆瓣</span><h1>把内容发布到豆瓣日记</h1><p>连接豆瓣账号，选择豆瓣日记排版，发布长文日记；图片会自动转存到豆瓣图床。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
+    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 豆瓣</span><h1>把内容发布到豆瓣日记</h1><p>连接豆瓣账号，选择豆瓣日记排版，发布长文日记；图片会自动转存到豆瓣图床。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh(true)}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
     <section className="publish-account" aria-label="豆瓣账号">
       <span className="publish-account-icon">豆</span><div className="publish-account-copy"><h2>{account?.name || '豆瓣账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存；豆瓣没有官方开放写接口，发布使用已登录的浏览器会话。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码或使用手机验证码连接。' : '使用豆瓣 App 扫码登录，或使用手机验证码连接。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div>

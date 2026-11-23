@@ -46,10 +46,10 @@ export default function WechatpicPublishPage() {
   const uncertain = publications.some((item) => item.renderId === selectedId && item.status === 'uncertain')
   const canPublish = account?.status === 'connected' && !!sticker && images.length > 0 && !busy && !recordLoading && !uncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
     setError('')
-    const results = await Promise.allSettled([api.wechatpic.account(), api.renders.list(), api.wechatpic.listPublications()])
+    const results = await Promise.allSettled([api.wechatpic.account(force ? { refresh: true } : undefined), api.renders.list(), api.wechatpic.listPublications()])
     if (!mounted.current) return
     const [accountResult, rendersResult, publicationsResult] = results
     if (accountResult.status === 'fulfilled') {
@@ -184,7 +184,7 @@ export default function WechatpicPublishPage() {
   }
 
   return <div className="publish-page wechatpic-publish-page">
-    <header className="publish-heading"><div><span className="publish-eyebrow"><Images size={14} />发布中心 · 公众号贴图</span><h1>把内容保存为公众号贴图草稿</h1><p>通过公众号官方 API 创建图片消息（贴图）草稿；发表这最后一步请在公众号后台手动完成。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
+    <header className="publish-heading"><div><span className="publish-eyebrow"><Images size={14} />发布中心 · 公众号贴图</span><h1>把内容保存为公众号贴图草稿</h1><p>通过公众号官方 API 创建图片消息（贴图）草稿；发表这最后一步请在公众号后台手动完成。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh(true)}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
     <section className="publish-account" aria-label="公众号贴图账号">
       <span className="publish-account-icon">贴</span><div className="publish-account-copy"><h2>{account?.status === 'connected' ? account.name || '已连接公众号' : '尚未连接公众号'}</h2><p>{account?.status === 'connected' ? `已连接 ${account.appId || ''}，AppSecret 加密保存在本机服务中。` : account?.status === 'expired' ? '连接已失效，请重新输入 AppID 和 AppSecret。' : '使用公众号 AppID / AppSecret 连接，个人订阅号也可以创建贴图草稿。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div>

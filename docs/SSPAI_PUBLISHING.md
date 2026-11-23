@@ -10,7 +10,26 @@
 
 每个 MultiPush 用户连接一个少数派账号，浏览器 context、登录请求与发布记录按用户隔离。已验证的 Cookie / localStorage 状态使用 AES-256-GCM 加密后写入 `sspai_accounts`，加密绑定 MultiPush 用户 ID。账号 ID 用于重复提交判断，不能仅用昵称识别账号。
 
-密钥位于 `DATA_DIR/.sspai-session-key`，与微信公众号、知乎、抖音的密钥及 JWT 密钥分别保存。备份 SQLite 和数据目录时须包含此密钥。重启后可恢复登录；少数派令会话失效时提示重新扫码，不会退出 MultiPush。断开连接只删除系统内的会话，不删除少数派草稿和文章。状态查询最多缓存五分钟，实际提交前再次检查登录状态。二维码有效期五分钟，过期会关闭浏览器 context。
+密钥位于 `DATA_DIR/.sspai-session-key`，与微信公众号、知乎、抖音的密钥及 JWT 密钥分别保存。备份 SQLite 和数据目录时须包含此密钥。重启后可恢复登录；少数派令会话失效时提示重新扫码，不会退出 MultiPush。断开连接只删除系统内的会话，不删除少数派草稿和文章。状态查询默认只读缓存，发布页的「刷新状态」会强制实时检查；实际提交时由发布流程内部的账号校验确认登录状态，不再为每次发布单独打开一次浏览器检查。二维码有效期五分钟，过期会关闭浏览器 context。
+
+## 频率限制
+
+少数派对自动化操作敏感，连续创建文章（草稿也算）可能导致账号被限制。系统默认实施以下保护，超限时返回 `429`，不会向少数派发起请求：
+
+- 两次提交之间至少间隔 **10 分钟**。
+- 任意滚动 **24 小时**内最多提交 **5 篇**。
+- 两次扫码登录尝试之间至少间隔 **2 分钟**。
+- 账号状态默认只读缓存，不再在发布页打开时主动访问少数派；点「刷新状态」或实际发布时才检查。
+
+可通过环境变量调整。间隔和每日上限设为 `0` 表示不限制：
+
+| 变量 | 默认 |
+| --- | --- |
+| `MULTIPUSH_SSPAI_MIN_PUBLISH_INTERVAL_MS` | `600000`（10 分钟） |
+| `MULTIPUSH_SSPAI_DAILY_PUBLISH_LIMIT` | `5` |
+| `MULTIPUSH_SSPAI_LOGIN_COOLDOWN_MS` | `120000`（2 分钟） |
+
+若账号已被平台限制，请先在少数派官方渠道申诉或等待恢复；不要通过缩短间隔、重复登录或批量重试来试探，系统也不会自动重试登录或发布。
 
 服务器沿用现有 Playwright Chromium 运行库。可设置 `SSPAI_BROWSER_PATH`，也会使用现有 `WECHAT_BROWSER_PATH` / `CHROME_BIN` 及系统 Chrome/Chromium 路径。登录初始化立即返回 `202` 和登录请求 ID，浏览器启动、二维码获取及扫码检查在后台执行，轮询接口只读取当前状态，避免慢网页阻塞公网请求。遇到安全验证或登录页拒绝时显示原因，不自动破解验证码或绕过验证。
 
@@ -37,11 +56,11 @@
 
 ## API
 
-所有接口均要求 MultiPush Bearer JWT，响应使用 `Cache-Control: no-store`。少数派会话失效返回 `409 sspai_session_expired`；安全验证返回 `409 sspai_security_check`。
+所有接口均要求 MultiPush Bearer JWT，响应使用 `Cache-Control: no-store`。少数派会话失效返回 `409 sspai_session_expired`；安全验证返回 `409 sspai_security_check`；提交过快或超过每日上限返回 `429 platform_publish_rate_limited` / `429 platform_publish_daily_limit`，登录过快返回 `429 platform_login_rate_limited`，并带 `Retry-After` 响应头。
 
 | 方法与路径 | 用途 |
 | --- | --- |
-| `GET /api/sspai/account` | 查询账号状态 |
+| `GET /api/sspai/account` | 查询账号状态；加 `?refresh=1` 强制实时检查 |
 | `POST /api/sspai/login` | 获取少数派微信登录二维码 |
 | `GET /api/sspai/login/:id` | 查询扫码/确认状态 |
 | `DELETE /api/sspai/account` | 断开连接 |

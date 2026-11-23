@@ -25,23 +25,34 @@ function fixture(options: { security?: boolean; disabled?: boolean; mismatch?: b
       return response
     } }
   const context = { newPage: async () => page, setDefaultTimeout: () => {}, close: vi.fn(async () => {}), storageState: async () => ({ cookies: [], origins: [] }) }
+  const newContext = vi.fn(async () => context)
   vi.stubEnv('DOUYIN_BROWSER_PATH', process.execPath)
-  vi.spyOn(chromium, 'launch').mockResolvedValue({ newContext: async () => context, on: () => {}, close: async () => {}, version: () => '140.0.0.0' } as unknown as Browser)
+  vi.spyOn(chromium, 'launch').mockResolvedValue({ newContext, on: () => {}, close: async () => {}, version: () => '140.0.0.0' } as unknown as Browser)
   const driver = new PlaywrightDouyinDriver(); drivers.push(driver)
   const publish = () => driver.publish({ cookies: [], origins: [] }, { title: '标题', body: '正文', images: new Map([['0', { name: 'card.png', mimeType: 'image/png', buffer: Buffer.from('image') }]]) }, () => {})
-  return { publish, click, context }
+  return { publish, click, context, driver, newContext }
 }
 describe('Douyin browser submission boundary', () => {
-  it('confirms explicit platform success and always closes the context', async () => {
-    const { publish, click, context } = fixture()
+  it('confirms explicit platform success and parks the context for reuse', async () => {
+    const { publish, click, context, driver } = fixture()
     expect(await publish()).toMatchObject({ status: 'published', remoteId: '1234567890123456789' })
     expect(click).toHaveBeenCalledTimes(1)
+    expect(context.close).toHaveBeenCalledTimes(0)
+    await driver.close()
     expect(context.close).toHaveBeenCalledTimes(1)
   })
+  it('reuses the browser context for the same saved session', async () => {
+    const { publish, newContext } = fixture()
+    await publish()
+    await publish()
+    expect(newContext).toHaveBeenCalledTimes(1)
+  })
   it.each([{ security: true }, { mismatch: true }, { disabled: true }])('does not submit when preparation is blocked: %s', async options => {
-    const { publish, click, context } = fixture(options)
+    const { publish, click, context, driver } = fixture(options)
     await expect(publish()).rejects.toMatchObject({ status: 409 })
     expect(click).not.toHaveBeenCalled()
+    expect(context.close).toHaveBeenCalledTimes(0)
+    await driver.close()
     expect(context.close).toHaveBeenCalledTimes(1)
   })
   it.each([{ timeout: true }, { response: { code: 0, success: true } }, { response: { code: -1, success: false } }])('retains uncertainty after a submission without confirmation: %s', async options => {

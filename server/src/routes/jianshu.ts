@@ -20,7 +20,7 @@ const resolveSchema = z.discriminatedUnion('action', [
 export function createJianshuRouter(service: JianshuService): Router {
   const router = Router()
   router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next() })
-  router.get('/account', asyncHandler(async (req, res) => { res.json({ account: await service.account(currentUser(req).id) }) }))
+  router.get('/account', asyncHandler(async (req, res) => { res.json({ account: await service.account(currentUser(req).id, req.query.refresh === '1') }) }))
   router.post('/connect', asyncHandler(async (req, res) => { res.json({ account: await service.connect(currentUser(req).id, parseInput(connectSchema, req.body)) }) }))
   router.delete('/account', asyncHandler(async (req, res) => { await service.disconnect(currentUser(req).id); res.json({ ok: true }) }))
   router.get('/publications', asyncHandler((req, res) => { res.json({ publications: service.list(currentUser(req).id) }) }))

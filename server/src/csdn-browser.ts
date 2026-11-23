@@ -4,6 +4,7 @@ import { load } from 'cheerio'
 import type { CsdnPublication } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { ApiError } from './errors'
 
 export interface CsdnIdentity { accountId: string; name: string }
@@ -165,8 +166,11 @@ export function csdnArticleUrl(accountId: string, articleId: string): string {
 
 export class PlaywrightCsdnDriver implements CsdnDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
 
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const executablePath = publisherExecutablePath('csdn')
       if (!executablePath) throw new ApiError(503, 'csdn_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
@@ -177,7 +181,12 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
     }
     const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1440, height: 1000 } })
     context.setDefaultTimeout(20_000)
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   private async identity(context: BrowserContext): Promise<CsdnIdentity | null> {
@@ -206,7 +215,7 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
   async beginLogin(): Promise<CsdnLoginAttempt> {
     const context = await this.context(), page = await context.newPage()
     let closed = false, qrCode: string | null = null
-    const close = async () => { if (!closed) { closed = true; await context.close().catch(() => {}) } }
+    const close = async () => { if (!closed) { closed = true; await this.releaseContext(context) } }
     const deadline = Date.now() + 5 * 60_000
     try {
       await page.goto(LOGIN, { waitUntil: 'domcontentloaded', timeout: 30_000 })
@@ -276,7 +285,7 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'csdn_check_failed', 'CSDN 连接检查未完成，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async checkPublication(state: PublisherStorageState, remoteId: string, title: string, url?: string | null) {
@@ -298,7 +307,7 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'csdn_check_failed', 'CSDN 发布结果核实未完成，请稍后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async deleteDraft(state: PublisherStorageState, remoteId: string) {
@@ -322,7 +331,7 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'csdn_delete_failed', 'CSDN 删除草稿未完成，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   /**
@@ -537,10 +546,11 @@ export class PlaywrightCsdnDriver implements CsdnDriver {
       if (error instanceof ApiError) throw error
       if (saveRequested) throw uncertain(`CSDN ${stage}时页面或网络异常，结果未确认；请先到 CSDN 草稿箱和文章列表核实，避免重复发布`)
       throw new ApiError(502, 'csdn_publish_failed', `CSDN ${stage}时页面异常，尚未提交保存，请稍后重试`)
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     const pending = this.browser
     this.browser = null
     if (pending) await (await pending).close().catch(() => {})

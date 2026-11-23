@@ -7,13 +7,13 @@ import { BILIBILI_PARTITIONS, type BilibiliAccount, type BilibiliLogin, type Bil
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { bilibiliCookies } from './bilibili-cookies'
 import { checkBilibiliVideoStatus, publishBilibiliVideo } from './bilibili-api'
 import type { BilibiliArticleImage, BilibiliDriver, BilibiliIdentity } from './bilibili-browser'
 
 const now = () => new Date().toISOString()
-const TTL = 5 * 60_000
 const LOGIN_TTL = 3 * 60_000
 const MAX_ARTICLE_IMAGES = 20
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -30,11 +30,13 @@ export class BilibiliService {
   private readonly key: Buffer
   private readonly active = new Set<string>()
   private readonly checks = new Map<string, Promise<BilibiliAccount>>()
+  private readonly actions: PlatformActionGuard
   private readonly logins = new Map<string, { userId: string; expiresAt: number; attempt: Awaited<ReturnType<BilibiliDriver['beginLogin']>> }>()
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: BilibiliDriver) {
     this.key = loadPublisherKey(config.dataDir, 'bilibili')
+    this.actions = new PlatformActionGuard(database, 'bilibili')
   }
 
   close(): void {
@@ -72,11 +74,12 @@ export class BilibiliService {
     }
   }
 
-  async account(userId: string): Promise<BilibiliAccount> {
+  async account(userId: string, force = false): Promise<BilibiliAccount> {
     const current = this.database.getBilibiliAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<BilibiliAccount> => {
       try {
@@ -100,6 +103,7 @@ export class BilibiliService {
 
   async beginLogin(userId: string): Promise<BilibiliLogin> {
     this.idle(userId)
+    this.actions.assertLogin(userId)
     const attempt = await this.driver.beginLogin()
     const id = randomUUID()
     const expiresAt = Date.now() + LOGIN_TTL
@@ -259,6 +263,7 @@ export class BilibiliService {
     const title = truncate((input.title ?? result.title).trim(), titleLimit)
     if (!title) throw new ApiError(400, 'bilibili_title', 'B 站标题不能为空')
 
+    this.actions.assertPublish(userId)
     const publication = this.database.createBilibiliPublication(userId, {
       renderId: input.renderId,
       title,

@@ -3,6 +3,7 @@ import type { WeiboPublication, WeiboThreadPart } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { ApiError } from './errors'
 import { qrReady } from './qr-capture'
 
@@ -76,8 +77,11 @@ export function parseWeiboStatus(value: unknown, remoteId: string): { id: string
 
 export class PlaywrightWeiboDriver implements WeiboDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
 
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const executablePath = publisherExecutablePath('weibo')
       if (!executablePath) throw new ApiError(503, 'weibo_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
@@ -88,7 +92,12 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
     }
     const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1360, height: 1000 } })
     context.setDefaultTimeout(20_000)
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   /**
@@ -143,7 +152,7 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
   async beginLogin(): Promise<WeiboLoginAttempt> {
     const context = await this.context(), page = await context.newPage()
     let closed = false, qrCode: string | null = null, signedInAt = 0
-    const close = async () => { if (!closed) { closed = true; await context.close().catch(() => {}) } }
+    const close = async () => { if (!closed) { closed = true; await this.releaseContext(context) } }
     const deadline = Date.now() + 5 * 60_000
     const readQr = async (): Promise<string | null> => {
       const qr = page.locator(QR).first()
@@ -209,7 +218,7 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'weibo_check_failed', '微博连接检查未完成，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async checkPublication(state: PublisherStorageState, remoteId: string, text: string) {
@@ -229,7 +238,7 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'weibo_check_failed', '重新核实微博结果未完成，请稍后重试或人工核实')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   /** Add the next thread segment as a comment under the root Weibo post. */
@@ -348,10 +357,11 @@ export class PlaywrightWeiboDriver implements WeiboDriver {
       }
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'weibo_preparation_failed', '微博发布准备失败，尚未提交；请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     const browser = this.browser
     this.browser = null
     if (browser) await browser.then(value => value.close()).catch(() => {})

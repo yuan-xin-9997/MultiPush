@@ -6,6 +6,7 @@ import type { PublicationDeletion, ZhihuAccount, ZhihuLogin, ZhihuPublishInput, 
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { downloadPublisherImage, publisherImage, type PublisherImage } from './publisher-image'
@@ -22,10 +23,12 @@ export class ZhihuService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<ZhihuAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: ZhihuDriver) {
     this.key = loadPublisherKey(config.dataDir, 'zhihu')
+    this.actions = new PlatformActionGuard(database, 'zhihu')
   }
 
   private idle(userId: string): void {
@@ -47,11 +50,12 @@ export class ZhihuService {
     if (!this.closed) this.database.saveZhihuAccount(userId, { encryptedSession: encryptPublisherSession(state, this.key, userId), ...identity, status: 'connected', checkedAt: now() })
   }
 
-  async account(userId: string): Promise<ZhihuAccount> {
+  async account(userId: string, force = false): Promise<ZhihuAccount> {
     const current = this.database.getZhihuAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<ZhihuAccount> => {
       try {
@@ -85,6 +89,7 @@ export class ZhihuService {
     this.idle(userId)
     const pending = [...this.logins.values()].find(entry => entry.userId === userId && entry.preparing)
     if (pending) return pending.value
+    this.actions.assertLogin(userId)
     for (const [id, entry] of this.logins) {
       if (entry.userId === userId) { clearTimeout(entry.timer); this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }
     }
@@ -266,14 +271,17 @@ export class ZhihuService {
     this.active.add(userId)
     let handedOff = false
     try {
-      const checked = await this.driver.checkSession(this.state(userId))
-      this.save(userId, checked.state, checked.identity)
+      const state = this.state(userId)
+      const account = this.database.getZhihuAccount(userId)
+      if (!account) throw new ApiError(409, 'zhihu_session_expired', '请先在系统中扫码登录知乎')
       const article = await this.article(userId, input, baseUrl)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: input.mode }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: input.mode }))
       if (article.cover) hash.update(article.cover.buffer)
       for (const [src, image] of article.images) hash.update(src).update(image.buffer)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findZhihuPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
+      const checked: Awaited<ReturnType<ZhihuDriver['checkSession']>> = { state, identity: { accountId: account.accountId, name: account.name || '知乎用户' } }
       const publication = previous ?? this.database.createZhihuPublication(userId, { renderId: input.renderId, title: article.title, mode: input.mode, idempotencyKey })
       this.database.updateZhihuPublication(userId, publication.id, { status: 'running', message: '正在准备知乎正文及图片' })
       const task = this.run(userId, publication.id, checked, article, input.mode, previous?.remoteId || undefined, previous?.resolutions?.some(entry => entry.action === 'not_published') || false)

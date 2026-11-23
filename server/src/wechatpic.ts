@@ -6,11 +6,11 @@ import { getCaptionBody } from '../../shared/render-workbench'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { decryptPublisherSecret, encryptPublisherSecret, loadPublisherKey } from './publisher-session'
 import { STICKER_IMAGE_MAX_BYTES, type StickerDraft, type StickerImage, type WechatStickerCredentials, type WechatStickerDriver } from './wechatpic-api'
 
-const TTL = 5 * 60_000
 const MAX_IMAGES = 20
 const MAX_BODY_CHARS = 20_000
 /** 永久图片素材仅支持 JPG / PNG（10 MB）。 */
@@ -22,6 +22,7 @@ export class WechatpicService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<WechatpicAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(
@@ -30,6 +31,7 @@ export class WechatpicService {
     private readonly driver: WechatStickerDriver,
   ) {
     this.key = loadPublisherKey(config.dataDir, 'wechatpic')
+    this.actions = new PlatformActionGuard(database, 'wechatpic')
   }
 
   private idle(userId: string): void {
@@ -61,11 +63,12 @@ export class WechatpicService {
     })
   }
 
-  async account(userId: string): Promise<WechatpicAccount> {
+  async account(userId: string, force = false): Promise<WechatpicAccount> {
     const current = this.database.getWechatpicAccount(userId)
     if (!current) return { status: 'disconnected', name: null, appId: null, checkedAt: null }
     const view = { status: current.status, name: current.name, appId: current.appId, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<WechatpicAccount> => {
       try {
@@ -210,6 +213,7 @@ export class WechatpicService {
       const idempotencyKey = hash.digest('hex')
       const previous = this.database.findWechatpicPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createWechatpicPublication(userId, { renderId: input.renderId, title: sticker.title, mode: 'draft', idempotencyKey })
       this.database.updateWechatpicPublication(userId, publication.id, { status: 'running', message: '正在上传贴图图片并创建草稿' })
       const task = this.run(userId, publication.id, credentials, sticker)

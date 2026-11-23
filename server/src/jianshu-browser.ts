@@ -5,6 +5,7 @@ import type { JianshuPublication } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { ApiError } from './errors'
 
 export interface JianshuIdentity { accountId: string; name: string }
@@ -112,8 +113,11 @@ export function replaceJianshuImages(html: string, replacements: Map<string, str
 
 export class PlaywrightJianshuDriver implements JianshuDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
 
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const executablePath = publisherExecutablePath('jianshu')
       if (!executablePath) throw new ApiError(503, 'jianshu_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
@@ -124,7 +128,12 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
     }
     const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1440, height: 1000 } })
     context.setDefaultTimeout(20_000)
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   private async profile(context: BrowserContext, cookies: string): Promise<JianshuIdentity> {
@@ -164,7 +173,7 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
       await this.notebooks(context)
       const identity = await this.profile(context, cookie)
       return { state: await context.storageState(), identity }
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async checkSession(state: PublisherStorageState) {
@@ -176,7 +185,7 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'jianshu_check_failed', '简书连接检查未完成，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async checkPublication(state: PublisherStorageState, remoteId: string, title: string, slug?: string | null) {
@@ -196,7 +205,7 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'jianshu_check_failed', '简书发布结果核实未完成，请稍后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async deleteDraft(state: PublisherStorageState, remoteId: string) {
@@ -215,7 +224,7 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'jianshu_delete_failed', '简书删除草稿未完成，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   private async uploadToken(context: BrowserContext, image: PublisherImage): Promise<{ token: string; key: string }> {
@@ -336,10 +345,11 @@ export class PlaywrightJianshuDriver implements JianshuDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw uncertain('简书发布过程中网络或页面异常，结果未确认；请先到简书草稿箱核实，避免重复发布')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     const pending = this.browser
     this.browser = null
     if (pending) await (await pending).close().catch(() => {})

@@ -72,9 +72,9 @@ export default function V2exPublishPage() {
   const uncertain = publications.some(item => item.renderId === selectedId && item.status === 'uncertain')
   const ready = account?.status === 'connected' && !!article && !!nodeName.trim() && !busy && !recordLoading && !uncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
-    const results = await Promise.allSettled([api.v2ex.account(), api.renders.list(), api.v2ex.listPublications(), api.v2ex.nodes()])
+    const results = await Promise.allSettled([api.v2ex.account(force ? { refresh: true } : undefined), api.renders.list(), api.v2ex.listPublications(), api.v2ex.nodes()])
     if (!mounted.current) return
     const [a, r, p, n] = results
     if (a.status === 'fulfilled') setAccount(a.value.account)
@@ -252,7 +252,7 @@ export default function V2exPublishPage() {
           <h1>把内容发布到 V2EX</h1>
           <p>生成 V2EX 主题 Markdown，选择节点后通过浏览器会话发布公开主题；也可复制内容手动发布。</p>
         </div>
-        <button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}>
+        <button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh(true)}>
           <RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态
         </button>
       </header>

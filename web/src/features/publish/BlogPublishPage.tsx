@@ -46,9 +46,9 @@ export default function BlogPublishPage() {
   const uncertain = uncertainItems.length > 0
   const ready = account?.status === 'connected' && !!article && !busy && !recordLoading && !uncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
-    const results = await Promise.allSettled([api.blog.account(), api.renders.list(), api.blog.listPublications()])
+    const results = await Promise.allSettled([api.blog.account(force ? { refresh: true } : undefined), api.renders.list(), api.blog.listPublications()])
     if (!mounted.current) return
     const [a, r, p] = results
     if (a.status === 'fulfilled') {
@@ -166,7 +166,7 @@ export default function BlogPublishPage() {
   }
 
   return <div className="publish-page blog-publish-page">
-    <header className="publish-heading"><div><span className="publish-eyebrow"><Globe2 size={14} />发布中心 · 个人博客</span><h1>把内容发布到个人博客</h1><p>连接 Halo 个人博客，选择文章排版，保存草稿或直接公开发布。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
+    <header className="publish-heading"><div><span className="publish-eyebrow"><Globe2 size={14} />发布中心 · 个人博客</span><h1>把内容发布到个人博客</h1><p>连接 Halo 个人博客，选择文章排版，保存草稿或直接公开发布。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh(true)}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
     <section className="publish-account" aria-label="个人博客账号">
       <span className="publish-account-icon">博</span><div className="publish-account-copy"><h2>{account?.name || (account?.baseUrl ? '个人博客' : '尚未连接个人博客')}</h2><p>{account?.status === 'connected' ? `已连接 ${account.baseUrl}，令牌加密保存在本机服务中。` : account?.status === 'expired' ? '连接已失效，请重新输入博客地址和令牌。' : '使用 Halo 个人令牌连接，无需提供管理员密码。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div>

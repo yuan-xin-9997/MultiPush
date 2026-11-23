@@ -91,11 +91,21 @@ describe('Zhihu account lifecycle and publishing', () => {
     expect(database.getZhihuAccount(alice.id)).toBeNull()
   })
 
-  it('handles expired credentials as a platform 409 without logging the user out of MultiPush', async () => {
+  it('serves cached account status and only checks the platform when forced', async () => {
+    const { service, driver, alice, seed } = setup()
+    seed(alice.id, '2020-01-01T00:00:00.000Z')
+    expect(await service.account(alice.id)).toMatchObject({ status: 'connected' })
+    expect(driver.checkSession).not.toHaveBeenCalled()
+    expect(await service.account(alice.id, true)).toMatchObject({ status: 'connected' })
+    expect(driver.checkSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks the account expired when the publish flow reports an expired session', async () => {
     const { service, driver, alice, seed, article } = setup()
     seed(); const render = article()
-    driver.checkSession.mockRejectedValue(new ApiError(409, 'zhihu_session_expired', '请重新登录知乎'))
-    await expect(service.publish(alice.id, { renderId: render.id, mode: 'draft' })).rejects.toMatchObject({ status: 409 })
+    driver.publish.mockRejectedValueOnce(new ApiError(409, 'zhihu_session_expired', '请重新登录知乎'))
+    const publication = await service.publish(alice.id, { renderId: render.id, mode: 'draft' })
+    expect((await finished(service, alice.id, publication.id)).status).toBe('failed')
     expect(await service.account(alice.id)).toMatchObject({ status: 'expired' })
   })
 
@@ -162,6 +172,7 @@ describe('Zhihu account lifecycle and publishing', () => {
     const formal = await service.publish(alice.id, { ...input, mode: 'publish' })
     expect(formal.id).not.toBe(publication.id)
     await finished(service, alice.id, formal.id)
+    expect(driver.checkSession).not.toHaveBeenCalled()
   })
 
   it('does not access another user’s media or obsolete/deleted content', async () => {

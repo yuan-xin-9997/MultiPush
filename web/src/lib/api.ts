@@ -388,7 +388,7 @@ export const api = {
   },
 
   wechat: {
-    account: () => request<{ account: WechatAccount }>('/api/wechat/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: WechatAccount }>(`/api/wechat/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: WechatLogin }>('/api/wechat/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: WechatLogin }>(`/api/wechat/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/wechat/account', { method: 'DELETE' }),
@@ -399,7 +399,7 @@ export const api = {
   },
 
   wechatpic: {
-    account: () => request<{ account: WechatpicAccount }>('/api/wechatpic/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: WechatpicAccount }>(`/api/wechatpic/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     connect: (input: WechatpicConnectInput) => request<{ account: WechatpicAccount }>('/api/wechatpic/connect', { method: 'POST', body: JSON.stringify(input) }),
     disconnect: () => request<{ ok: true }>('/api/wechatpic/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: WechatpicPublication[] }>('/api/wechatpic/publications', { cache: 'no-store' }),
@@ -410,7 +410,7 @@ export const api = {
 
   zhihu: {
     resolve: (id: string, input: ZhihuResolveInput) => request<{ publication: ZhihuPublication }>(`/api/zhihu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: ZhihuAccount }>('/api/zhihu/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: ZhihuAccount }>(`/api/zhihu/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: ZhihuLogin }>('/api/zhihu/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: ZhihuLogin }>(`/api/zhihu/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/zhihu/account', { method: 'DELETE' }),
@@ -420,7 +420,7 @@ export const api = {
   },
   toutiao: {
     resolve: (id: string, input: ToutiaoResolveInput) => request<{ publication: ToutiaoPublication }>(`/api/toutiao/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: ToutiaoAccount }>('/api/toutiao/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: ToutiaoAccount }>(`/api/toutiao/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: ToutiaoLogin }>('/api/toutiao/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: ToutiaoLogin }>(`/api/toutiao/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/toutiao/account', { method: 'DELETE' }),
@@ -430,7 +430,7 @@ export const api = {
   },
   baijiahao: {
     resolve: (id: string, input: BaijiahaoResolveInput) => request<{ publication: BaijiahaoPublication }>(`/api/baijiahao/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: BaijiahaoAccount }>('/api/baijiahao/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: BaijiahaoAccount }>(`/api/baijiahao/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: BaijiahaoLogin }>('/api/baijiahao/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: BaijiahaoLogin }>(`/api/baijiahao/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/baijiahao/account', { method: 'DELETE' }),
@@ -440,7 +440,7 @@ export const api = {
   },
   douban: {
     resolve: (id: string, input: DoubanResolveInput) => request<{ publication: DoubanPublication }>(`/api/douban/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: DoubanAccount }>('/api/douban/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: DoubanAccount }>(`/api/douban/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: DoubanLogin }>('/api/douban/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: DoubanLogin }>(`/api/douban/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/douban/account', { method: 'DELETE' }),
@@ -450,7 +450,7 @@ export const api = {
   },
   juejin: {
     resolve: (id: string, input: JuejinResolveInput) => request<{ publication: JuejinPublication }>(`/api/juejin/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: JuejinAccount }>('/api/juejin/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: JuejinAccount }>(`/api/juejin/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: JuejinLogin }>('/api/juejin/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: JuejinLogin }>(`/api/juejin/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/juejin/account', { method: 'DELETE' }),
@@ -460,7 +460,7 @@ export const api = {
   },
   csdn: {
     resolve: (id: string, input: CsdnResolveInput) => request<{ publication: CsdnPublication }>(`/api/csdn/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: CsdnAccount }>('/api/csdn/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: CsdnAccount }>(`/api/csdn/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: CsdnLogin }>('/api/csdn/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: CsdnLogin }>(`/api/csdn/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/csdn/account', { method: 'DELETE' }),
@@ -470,7 +470,7 @@ export const api = {
   },
   jianshu: {
     resolve: (id: string, input: JianshuResolveInput) => request<{ publication: JianshuPublication }>(`/api/jianshu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: JianshuAccount }>('/api/jianshu/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: JianshuAccount }>(`/api/jianshu/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     connect: (input: JianshuConnectInput) => request<{ account: JianshuAccount }>('/api/jianshu/connect', { method: 'POST', body: JSON.stringify(input) }),
     disconnect: () => request<{ ok: true }>('/api/jianshu/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: JianshuPublication[] }>('/api/jianshu/publications', { cache: 'no-store' }),
@@ -478,7 +478,7 @@ export const api = {
     deletePublication: (id: string) => request<PublicationDeletion>(`/api/jianshu/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   bilibili: {
-    account: () => request<{ account: BilibiliAccount }>('/api/bilibili/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: BilibiliAccount }>(`/api/bilibili/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: BilibiliLogin }>('/api/bilibili/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: BilibiliLogin }>(`/api/bilibili/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/bilibili/account', { method: 'DELETE' }),
@@ -492,7 +492,7 @@ export const api = {
 
   v2ex: {
     resolve: (id: string, input: V2exResolveInput) => request<{ publication: V2exPublication }>(`/api/v2ex/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: V2exAccount }>('/api/v2ex/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: V2exAccount }>(`/api/v2ex/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     connect: (input: V2exConnectInput) => request<{ account: V2exAccount }>('/api/v2ex/connect', { method: 'POST', body: JSON.stringify(input) }),
     disconnect: () => request<{ ok: true }>('/api/v2ex/account', { method: 'DELETE' }),
     nodes: () => request<{ nodes: V2exNode[] }>('/api/v2ex/nodes', { cache: 'no-store' }),
@@ -502,7 +502,7 @@ export const api = {
   },
   weibo: {
     resolve: (id: string, input: WeiboResolveInput) => request<{ publication: WeiboPublication }>(`/api/weibo/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: WeiboAccount }>('/api/weibo/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: WeiboAccount }>(`/api/weibo/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: WeiboLogin }>('/api/weibo/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: WeiboLogin }>(`/api/weibo/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/weibo/account', { method: 'DELETE' }),
@@ -512,7 +512,7 @@ export const api = {
   },
   xiaohongshu: {
     resolve: (id: string, input: XhsResolveInput) => request<{ publication: XhsPublication }>(`/api/xiaohongshu/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: XhsAccount }>('/api/xiaohongshu/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: XhsAccount }>(`/api/xiaohongshu/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: XhsLogin }>('/api/xiaohongshu/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: XhsLogin }>(`/api/xiaohongshu/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/xiaohongshu/account', { method: 'DELETE' }),
@@ -522,7 +522,7 @@ export const api = {
   },
   douyin: {
     resolve: (id: string, input: DouyinResolveInput) => request<{ publication: DouyinPublication }>(`/api/douyin/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: DouyinAccount }>('/api/douyin/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: DouyinAccount }>(`/api/douyin/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: DouyinLogin }>('/api/douyin/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: DouyinLogin }>(`/api/douyin/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/douyin/account', { method: 'DELETE' }),
@@ -532,7 +532,7 @@ export const api = {
   },
   sspai: {
     resolve: (id: string, input: SspaiResolveInput) => request<{ publication: SspaiPublication }>(`/api/sspai/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: SspaiAccount }>('/api/sspai/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: SspaiAccount }>(`/api/sspai/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     startLogin: () => request<{ login: SspaiLogin }>('/api/sspai/login', { method: 'POST' }),
     loginStatus: (id: string) => request<{ login: SspaiLogin }>(`/api/sspai/login/${encodeURIComponent(id)}`, { cache: 'no-store' }),
     disconnect: () => request<{ ok: true }>('/api/sspai/account', { method: 'DELETE' }),
@@ -542,7 +542,7 @@ export const api = {
   },
   blog: {
     resolve: (id: string, input: BlogResolveInput) => request<{ publication: BlogPublication }>(`/api/blog/publications/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify(input) }),
-    account: () => request<{ account: BlogAccount }>('/api/blog/account', { cache: 'no-store' }),
+    account: (options?: { refresh?: boolean }) => request<{ account: BlogAccount }>(`/api/blog/account${options?.refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
     connect: (input: BlogConnectInput) => request<{ account: BlogAccount }>('/api/blog/connect', { method: 'POST', body: JSON.stringify(input) }),
     disconnect: () => request<{ ok: true }>('/api/blog/account', { method: 'DELETE' }),
     listPublications: () => request<{ publications: BlogPublication[] }>('/api/blog/publications', { cache: 'no-store' }),

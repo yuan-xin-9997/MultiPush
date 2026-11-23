@@ -6,13 +6,13 @@ import type { BlogAccount, BlogConnectInput, BlogPublication, BlogPublishInput, 
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { decryptPublisherSecret, encryptPublisherSecret, loadPublisherKey } from './publisher-session'
 import { downloadPublisherImage, publisherImage, type PublisherImage } from './publisher-image'
 import { blogImagePath, prepareBlogContent, verifyBlogContent } from './blog-content'
 import { HaloBlogDriver, canonicalBlogBaseUrl, type BlogArticle, type BlogCredentials, type BlogDriver } from './blog-halo'
 
-const TTL = 5 * 60_000
 const MAX_IMAGES = 200
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const now = () => new Date().toISOString()
@@ -22,6 +22,7 @@ export class BlogService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<BlogAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(
@@ -31,6 +32,7 @@ export class BlogService {
     private readonly canonicalize: (input: string) => Promise<string> = canonicalBlogBaseUrl,
   ) {
     this.key = loadPublisherKey(config.dataDir, 'blog')
+    this.actions = new PlatformActionGuard(database, 'blog')
   }
 
   private idle(userId: string): void {
@@ -63,11 +65,12 @@ export class BlogService {
     })
   }
 
-  async account(userId: string): Promise<BlogAccount> {
+  async account(userId: string, force = false): Promise<BlogAccount> {
     const current = this.database.getBlogAccount(userId)
     if (!current) return { status: 'disconnected', name: null, baseUrl: null, checkedAt: null }
     const view = { status: current.status, name: current.name, baseUrl: current.baseUrl, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<BlogAccount> => {
       try {
@@ -247,6 +250,7 @@ export class BlogService {
       for (const src of article.external) hash.update(src)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findBlogPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createBlogPublication(userId, { renderId: input.renderId, title: article.title, mode: input.mode, idempotencyKey })
       this.database.updateBlogPublication(userId, publication.id, { status: 'running', message: '正在准备个人博客正文及图片' })
       const task = this.run(userId, publication.id, credentials, article, input.mode, previous?.remoteId || undefined, previous?.resolutions?.some(entry => entry.action === 'not_published') || false)

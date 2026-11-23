@@ -4,6 +4,7 @@ import type { PublicationDeletion, ToutiaoAccount, ToutiaoLogin, ToutiaoPublicat
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
+import { PlatformActionGuard } from './platform-actions'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import type { ToutiaoArticle, ToutiaoDriver, ToutiaoIdentity, ToutiaoLoginAttempt } from './toutiao-browser'
 
@@ -29,10 +30,12 @@ export class ToutiaoService {
   private readonly active = new Set<string>()
   private readonly jobs = new Map<string, Promise<void>>()
   private readonly checks = new Map<string, Promise<ToutiaoAccount>>()
+  private readonly actions: PlatformActionGuard
   private closed = false
 
   constructor(private readonly database: Database, private readonly config: AppConfig, private readonly driver: ToutiaoDriver) {
     this.key = loadPublisherKey(config.dataDir, 'toutiao')
+    this.actions = new PlatformActionGuard(database, 'toutiao')
   }
 
   private idle(userId: string): void {
@@ -54,11 +57,12 @@ export class ToutiaoService {
     if (!this.closed) this.database.saveToutiaoAccount(userId, { encryptedSession: encryptPublisherSession(state, this.key, userId), ...identity, status: 'connected', checkedAt: now() })
   }
 
-  async account(userId: string): Promise<ToutiaoAccount> {
+  async account(userId: string, force = false): Promise<ToutiaoAccount> {
     const current = this.database.getToutiaoAccount(userId)
     if (!current) return { status: 'disconnected', name: null, checkedAt: null }
     const view = { status: current.status, name: current.name, checkedAt: current.checkedAt }
-    if (current.status === 'expired' || this.active.has(userId) || Date.now() - Date.parse(current.checkedAt) < TTL) return view
+    if (!force || current.status === 'expired' || this.active.has(userId)) return view
+    if (!this.actions.allowSessionCheck(userId)) return view
     if (this.checks.has(userId)) return this.checks.get(userId)!
     const check = (async (): Promise<ToutiaoAccount> => {
       try {
@@ -92,6 +96,7 @@ export class ToutiaoService {
     this.idle(userId)
     const pending = [...this.logins.values()].find(entry => entry.userId === userId && entry.preparing)
     if (pending) return pending.value
+    this.actions.assertLogin(userId)
     for (const [id, entry] of this.logins) {
       if (entry.userId === userId) { clearTimeout(entry.timer); this.logins.delete(id); void entry.attempt?.close().catch(() => {}) }
     }
@@ -243,12 +248,15 @@ export class ToutiaoService {
     let handedOff = false
     try {
       if (this.database.hasUncertainToutiaoPublication(userId)) throw new ApiError(409, 'toutiao_result_uncertain', '请先核实所有结果待确认的头条任务，再提交新的发布')
-      const checked = await this.driver.checkSession(this.state(userId))
-      this.save(userId, checked.state, checked.identity)
+      const state = this.state(userId)
+      const account = this.database.getToutiaoAccount(userId)
+      if (!account) throw new ApiError(409, 'toutiao_session_expired', '请先在系统中扫码登录今日头条')
+      const checked = { state, identity: { accountId: account.accountId, name: account.name || '今日头条用户' } }
       const article = await this.article(userId, input)
-      const hash = createHash('sha256').update(JSON.stringify({ account: checked.identity.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: article.mode }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: article.mode }))
       const idempotencyKey = hash.digest('hex'), previous = this.database.findToutiaoPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
+      this.actions.assertPublish(userId)
       const publication = previous ?? this.database.createToutiaoPublication(userId, { renderId: input.renderId, title: article.title, mode: article.mode, idempotencyKey })
       this.database.updateToutiaoPublication(userId, publication.id, { status: 'running', message: '正在准备今日头条正文' })
       const task = this.run(userId, publication.id, checked.state, article, checked.identity)

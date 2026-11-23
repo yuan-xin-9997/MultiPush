@@ -4,6 +4,7 @@ import type { ZhihuPublication } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
+import { PublisherContextCache } from './publisher-context-cache'
 import { ApiError } from './errors'
 import { prepareZhihuContent, zhihuEditorContent, verifyZhihuContent, zhihuImageUrl } from './zhihu-content'
 
@@ -50,8 +51,11 @@ export function parseZhihuPublishedId(value: unknown): string | null {
 
 export class PlaywrightZhihuDriver implements ZhihuDriver {
   private browser: Promise<Browser> | null = null
+  private readonly contexts = new PublisherContextCache()
 
   private async context(state?: PublisherStorageState): Promise<BrowserContext> {
+    const key = state ? this.contexts.key(state) : null
+    if (key) { const cached = this.contexts.get(key); if (cached) return cached }
     if (!this.browser) {
       const executablePath = publisherExecutablePath('zhihu')
       if (!executablePath) throw new ApiError(503, 'zhihu_browser_unavailable', '服务器未安装可用的 Chrome / Chromium 浏览器')
@@ -62,7 +66,12 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     }
     const context = await (await this.browser).newContext({ storageState: state, locale: 'zh-CN', viewport: { width: 1280, height: 1000 } })
     context.setDefaultTimeout(15_000)
+    if (key) this.contexts.set(key, context)
     return context
+  }
+
+  private async releaseContext(context: BrowserContext): Promise<void> {
+    await this.contexts.release(context)
   }
 
   private async identity(context: BrowserContext): Promise<ZhihuIdentity> {
@@ -75,7 +84,7 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
   async beginLogin(): Promise<ZhihuLoginAttempt> {
     const context = await this.context(), page = await context.newPage()
     let closed = false, qrCode: string | null = null
-    const close = async () => { if (!closed) { closed = true; await context.close().catch(() => {}) } }
+    const close = async () => { if (!closed) { closed = true; await this.releaseContext(context) } }
     const deadline = Date.now() + 5 * 60_000
     try {
       const response = await page.goto(`${HOME}signin`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
@@ -120,7 +129,7 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'zhihu_check_failed', '知乎连接检查未完成，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async checkPublication(state: PublisherStorageState, remoteId: string, title: string) {
@@ -150,7 +159,7 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'zhihu_check_failed', '重新核实知乎结果未完成，请稍后重试或人工核实')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async deleteDraft(state: PublisherStorageState, remoteId: string) {
@@ -181,7 +190,7 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'zhihu_draft_delete_failed', '删除知乎草稿未完成，请稍后重试或到知乎后台手动删除')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: Parameters<ZhihuDriver['publish']>[3], resumeDraftId?: string) {
@@ -273,10 +282,11 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
       }
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'zhihu_preparation_failed', remoteId ? '知乎操作中断，已保留草稿，请在知乎后台检查' : '知乎准备步骤失败，尚未提交文章，请检查网络后重试')
-    } finally { await context.close().catch(() => {}) }
+    } finally { await this.releaseContext(context) }
   }
 
   async close(): Promise<void> {
+    await this.contexts.close()
     const browser = this.browser
     this.browser = null
     if (browser) await browser.then(value => value.close()).catch(() => {})

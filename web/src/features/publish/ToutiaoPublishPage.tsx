@@ -54,9 +54,9 @@ export default function ToutiaoPublishPage() {
   const uncertain = publications.some(item => item.renderId === selectedId && item.status === 'uncertain')
   const ready = account?.status === 'connected' && !!article && !busy && !recordLoading && !uncertain
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     setRefreshing(true)
-    const results = await Promise.allSettled([api.toutiao.account(), api.renders.list(), api.toutiao.listPublications()])
+    const results = await Promise.allSettled([api.toutiao.account(force ? { refresh: true } : undefined), api.renders.list(), api.toutiao.listPublications()])
     if (!mounted.current) return
     const [a, r, p] = results
     if (a.status === 'fulfilled') setAccount(a.value.account)
@@ -163,7 +163,7 @@ export default function ToutiaoPublishPage() {
   }
 
   return <div className="publish-page toutiao-publish-page">
-    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 今日头条</span><h1>把内容发布到今日头条</h1><p>连接今日头条账号，选择今日头条排版，一键发布图文文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh()}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
+    <header className="publish-heading"><div><span className="publish-eyebrow"><Send size={14} />发布中心 · 今日头条</span><h1>把内容发布到今日头条</h1><p>连接今日头条账号，选择今日头条排版，一键发布图文文章。</p></div><button type="button" className="btn" disabled={refreshing || busy} onClick={() => void refresh(true)}><RefreshCw size={15} className={refreshing ? 'spin' : undefined} />刷新状态</button></header>
     {error ? <div className="publish-error" role="alert">{error}<button type="button" className="btn btn-sm" onClick={() => setError('')}>关闭提示</button></div> : null}
     <section className="publish-account" aria-label="今日头条账号">
       <span className="publish-account-icon">头</span><div className="publish-account-copy"><h2>{account?.name || '今日头条账号'}</h2><p>{account?.status === 'connected' ? '登录状态已加密保存，下次访问和服务重启后自动复用；失效时重新扫码或使用手机验证码。' : account?.status === 'expired' ? '登录状态已失效，请重新扫码或使用手机验证码连接。' : '使用今日头条 App 扫码登录，或使用手机验证码连接。'}</p>{account?.checkedAt ? <small>最近检查：{formatDateTime(account.checkedAt)}</small> : null}</div>
