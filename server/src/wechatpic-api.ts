@@ -46,6 +46,20 @@ export const STICKER_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 
 type Json = Record<string, unknown>
 
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/**
+ * WeChat's draft API stores HTML. A plain-text body with blank lines is
+ * rendered as visible empty paragraphs in the official editor, so convert
+ * paragraphs into compact <p> blocks (single line breaks become <br>).
+ */
+export function wechatpicBodyHtml(body: string): string {
+  const blocks = body.replace(/\r\n/g, '\n').trim().split(/\n{2,}/).map((block) => block.trim()).filter(Boolean)
+  return blocks.map((block) => `<p>${escapeHtml(block).replace(/\n/g, '<br>')}</p>`).join('')
+}
+
 function object(value: unknown): Json {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {}
 }
@@ -160,7 +174,7 @@ export class WechatStickerApiClient {
       articles: [{
         article_type: 'newspic',
         title: draft.title,
-        content: draft.body,
+        content: wechatpicBodyHtml(draft.body),
         need_open_comment: 0,
         image_info: { image_list: draft.mediaIds.map((image_media_id) => ({ image_media_id })) },
       }],
