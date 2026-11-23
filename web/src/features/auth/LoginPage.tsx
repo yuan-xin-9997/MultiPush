@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, CircleAlert, Eye, EyeOff, LoaderCircle, LockKeyhole, UserRound } from 'lucide-react'
+import { ArrowRight, CircleAlert, Eye, EyeOff, LoaderCircle, LockKeyhole, ShieldCheck, UserRound } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useServerInfo } from '@/contexts/ServerContext'
 import { ApiError } from '@/lib/api'
@@ -26,7 +26,7 @@ function fieldErrorFromApi(error: unknown): LoginErrors {
 }
 
 export default function LoginPage() {
-  const { login } = useAuth()
+  const { login, verifyTwoFactor } = useAuth()
   const { desktopMode } = useServerInfo()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -38,6 +38,9 @@ export default function LoginPage() {
   const [serverError, setServerError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [challenge, setChallenge] = useState<string | null>(null)
+  const [twoFactorCode, setTwoFactorCode] = useState('')
+  const [verifying, setVerifying] = useState(false)
 
   function updateField(key: keyof LoginForm, value: string) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -58,7 +61,13 @@ export default function LoginPage() {
 
     setSubmitting(true)
     try {
-      await login({ account, password: form.password })
+      const result = await login({ account, password: form.password })
+      if ('challenge' in result) {
+        setChallenge(result.challenge)
+        setTwoFactorCode('')
+        setServerError(null)
+        return
+      }
       navigate(safeRedirect(redirect), { replace: true })
     } catch (error) {
       setErrors(fieldErrorFromApi(error))
@@ -68,12 +77,31 @@ export default function LoginPage() {
     }
   }
 
+  async function handleVerify(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!challenge || verifying) return
+    if (twoFactorCode.trim().length < 6) {
+      setServerError('请输入 6 位动态验证码或恢复码')
+      return
+    }
+    setVerifying(true)
+    setServerError(null)
+    try {
+      await verifyTwoFactor(challenge, twoFactorCode.trim())
+      navigate(safeRedirect(redirect), { replace: true })
+    } catch (error) {
+      setServerError(getErrorMessage(error, '验证码不正确或已失效'))
+    } finally {
+      setVerifying(false)
+    }
+  }
+
   return (
     <AuthLayout>
       <div className="auth-form-head">
-        <span className="auth-form-eyebrow">欢迎回来</span>
-        <h1>登录 MultiPush</h1>
-        <p>继续你的内容创作，把一篇稿子带到每个平台。</p>
+        <span className="auth-form-eyebrow">{challenge ? '两步验证' : '欢迎回来'}</span>
+        <h1>{challenge ? '输入动态验证码' : '登录 MultiPush'}</h1>
+        <p>{challenge ? '打开身份验证器 App，输入当前 6 位验证码；也可以使用一枚恢复码。' : '继续你的内容创作，把一篇稿子带到每个平台。'}</p>
       </div>
 
       {serverError ? (
@@ -83,6 +111,38 @@ export default function LoginPage() {
         </div>
       ) : null}
 
+      {challenge ? (
+        <form className="auth-form" onSubmit={handleVerify} noValidate>
+          <div className="field">
+            <label className="label" htmlFor="login-totp">动态验证码 / 恢复码</label>
+            <div className="auth-input-wrap">
+              <ShieldCheck size={16} />
+              <input
+                id="login-totp"
+                className="input"
+                type="text"
+                name="totp"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+                placeholder="6 位数字或 XXXX-XXXX"
+                value={twoFactorCode}
+                onChange={(event) => setTwoFactorCode(event.target.value)}
+                maxLength={32}
+              />
+            </div>
+            <p className="hint">验证码每 30 秒更新一次。恢复码使用后立即失效。</p>
+          </div>
+          <button type="submit" className="btn btn-primary btn-block auth-submit" disabled={verifying}>
+            {verifying ? <LoaderCircle size={17} className="spin" /> : null}
+            {verifying ? '正在验证…' : '验证并登录'}
+            {!verifying ? <ArrowRight size={16} /> : null}
+          </button>
+          <button type="button" className="btn btn-block" onClick={() => { setChallenge(null); setTwoFactorCode(''); setServerError(null) }}>
+            返回重新输入密码
+          </button>
+        </form>
+      ) : (
       <form className="auth-form" onSubmit={handleSubmit} noValidate>
         <div className="field">
           <label className="label" htmlFor="login-account">
@@ -152,11 +212,12 @@ export default function LoginPage() {
           {!submitting ? <ArrowRight size={16} /> : null}
         </button>
       </form>
+      )}
 
-      {!desktopMode ? <p className="auth-switch"><Link to="/forgot-password">忘记密码？</Link></p> : null}
-      <p className="auth-switch">
+      {!challenge && !desktopMode ? <p className="auth-switch"><Link to="/forgot-password">忘记密码？</Link></p> : null}
+      {!challenge ? <p className="auth-switch">
         还没有账号？<Link to={registerHref}>立即注册</Link>
-      </p>
+      </p> : null}
 
       <p className="auth-form-footnote">
         {desktopMode

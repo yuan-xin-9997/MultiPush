@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BlogService } from '../src/blog'
 import { blogAbsoluteUrl, blogSlug, prepareBlogContent, verifyBlogContent } from '../src/blog-content'
-import { HaloBlogDriver, normalizeBlogBaseUrl, type BlogDriver } from '../src/blog-halo'
+import { HaloBlogDriver, canonicalBlogBaseUrl, normalizeBlogBaseUrl, type BlogDriver } from '../src/blog-halo'
 import { loadConfig } from '../src/config'
 import { openDatabase, type Database } from '../src/db'
 import { ApiError } from '../src/errors'
@@ -214,5 +214,21 @@ describe('Halo browserless draft deletion', () => {
       await expect(new HaloBlogDriver().deleteDraft(credentials, 'post-3')).rejects.toMatchObject({ code: 'blog_delete_published' })
       await expect(new HaloBlogDriver().deleteDraft(credentials, 'missing')).resolves.toMatchObject({ message: expect.stringContaining('已不存在') })
     } finally { vi.unstubAllGlobals() }
+  })
+})
+
+
+describe('Halo SSRF guard', () => {
+  it('rejects loopback and private blog addresses', async () => {
+    await expect(canonicalBlogBaseUrl('http://127.0.0.1:34080')).rejects.toMatchObject({ code: 'blog_url_blocked' })
+    await expect(new HaloBlogDriver().checkSession({ baseUrl: 'http://127.0.0.1:1', token: 'token' }))
+      .rejects.toMatchObject({ code: 'blog_url_blocked' })
+    await expect(new HaloBlogDriver().checkSession({ baseUrl: 'http://192.168.0.111:34080', token: 'token' }))
+      .rejects.toMatchObject({ code: 'blog_url_blocked' })
+  })
+
+  it('allows private addresses only with the explicit local override', async () => {
+    await expect(new HaloBlogDriver(true).checkSession({ baseUrl: 'http://127.0.0.1:1', token: 'token' }))
+      .rejects.not.toMatchObject({ code: 'blog_url_blocked' })
   })
 })

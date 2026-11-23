@@ -54,6 +54,18 @@ export const loginSchema = z.object({
   password: z.string().min(1, '请输入密码').max(128, '密码过长'),
 })
 
+export const twoFactorCodeSchema = z.object({ code: z.string().trim().min(6, '请输入验证码').max(32, '验证码过长') }).strict()
+
+export const twoFactorVerifySchema = z.object({
+  challenge: z.string().trim().min(20, '登录凭证无效').max(4096, '登录凭证过长'),
+  code: z.string().trim().min(6, '请输入验证码').max(32, '验证码过长'),
+}).strict()
+
+export const twoFactorPasswordSchema = z.object({
+  password: z.string().min(1, '请输入当前密码').max(128, '密码过长'),
+  code: z.string().trim().min(6, '请输入验证码').max(32, '验证码过长'),
+}).strict()
+
 export const updateProfileSchema = z.object({
   displayName: displayNameSchema.optional(),
   avatarUrl: z.string().trim().max(2048, '头像地址过长').nullable().optional(),

@@ -239,6 +239,29 @@ export interface AuthResponse {
   user: User
 }
 
+/** Returned by /auth/login when the account has TOTP enabled. */
+export interface TwoFactorChallenge {
+  twoFactorRequired: true
+  challenge: string
+  expiresAt: string
+}
+
+export type LoginResponse = AuthResponse | TwoFactorChallenge
+
+export interface TwoFactorStatus {
+  enabled: boolean
+  recoveryCodesLeft: number
+}
+
+export interface TwoFactorSetup {
+  secret: string
+  otpauthUrl: string
+}
+
+export interface TwoFactorEnableResult {
+  recoveryCodes: string[]
+}
+
 export interface RegisterInput {
   code: string
   username: string
@@ -1327,6 +1350,8 @@ export interface AiSettings {
   keys?: number
   /** True when the server configured a cross-provider fallback chain. */
   fallback?: boolean
+  /** False when this account may not use the server-wide provider pool. */
+  serverPoolAvailable?: boolean
 }
 
 export interface AiSettingsInput {
@@ -1529,6 +1554,26 @@ export interface AiProviderView {
   /** When false, only the first enabled key is used (no multi-key rotation). */
   highAvailability: boolean
   keys: AiProviderKeyView[]
+}
+
+export interface AiUsageUser {
+  userId: string
+  username: string
+  displayName: string
+  requests: number
+  success: number
+  failed: number
+  tokensIn: number
+  tokensOut: number
+  lastAt: string | null
+}
+
+export interface AiUsageReport {
+  days: number
+  since: string
+  until: string
+  totals: { requests: number; success: number; failed: number; tokensIn: number; tokensOut: number }
+  users: AiUsageUser[]
 }
 
 export interface AiProviderCooldownSettings {

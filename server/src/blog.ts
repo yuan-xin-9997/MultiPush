@@ -28,8 +28,8 @@ export class BlogService {
   constructor(
     private readonly database: Database,
     private readonly config: AppConfig,
-    private readonly driver: BlogDriver = new HaloBlogDriver(),
-    private readonly canonicalize: (input: string) => Promise<string> = canonicalBlogBaseUrl,
+    private readonly driver: BlogDriver = new HaloBlogDriver(config.allowPrivateNetwork),
+    private readonly canonicalize: (input: string) => Promise<string> = (input) => canonicalBlogBaseUrl(input, config.allowPrivateNetwork),
   ) {
     this.key = loadPublisherKey(config.dataDir, 'blog')
     this.actions = new PlatformActionGuard(database, 'blog')

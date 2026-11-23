@@ -49,6 +49,31 @@ export function verifyToken(token: string, secret: string): TokenPayload | null 
   }
 }
 
+export const TWO_FACTOR_CHALLENGE_TTL = '5m'
+
+/** Short-lived token issued after a correct password when TOTP is enabled. */
+export function signTwoFactorChallenge(userId: string, secret: string, version = 0): string {
+  return jwt.sign({ purpose: '2fa', version }, secret, {
+    algorithm: 'HS256',
+    subject: userId,
+    audience: 'multipush-2fa',
+    expiresIn: TWO_FACTOR_CHALLENGE_TTL,
+  })
+}
+
+export function verifyTwoFactorChallenge(token: string, secret: string): TokenPayload | null {
+  try {
+    const decoded = jwt.verify(token, secret, { algorithms: ['HS256'], audience: 'multipush-2fa' })
+    if (typeof decoded === 'string' || !decoded.sub || decoded.purpose !== '2fa') return null
+    return {
+      version: typeof decoded.version === 'number' ? decoded.version : 0,
+      userId: String(decoded.sub),
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Express middleware: verify the bearer token and attach the current user. */
 export function createRequireAuth(database: Database, secret: string): RequestHandler {
   return (req, _res, next) => {

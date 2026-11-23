@@ -504,7 +504,8 @@ export class AiService {
 
   settings(userId: string): AiSettings {
     const record = this.database.getAiSettings(userId)
-    const poolProviders = this.config.aiProviders?.providers.length ?? 0
+    const serverPoolAvailable = this.canUseServerPool(userId)
+    const poolProviders = serverPoolAvailable ? this.config.aiProviders?.providers.length ?? 0 : 0
     const poolKeys = this.config.aiProviders?.providers.reduce((total, provider) => {
       const enabled = provider.keys.filter(key => key.enabled)
       return total + (provider.highAvailability ? enabled.length : Math.min(1, enabled.length))
@@ -512,9 +513,9 @@ export class AiService {
     if (record) {
       const providers = poolProviders + 1
       const keys = poolKeys + 1
-      return { configured: true, baseUrl: record.baseUrl, model: record.model, temperature: record.temperature, hasApiKey: true, source: 'user', label: '账号自定义配置', providers, keys, fallback: providers > 1 }
+      return { configured: true, baseUrl: record.baseUrl, model: record.model, temperature: record.temperature, hasApiKey: true, source: 'user', label: '账号自定义配置', providers, keys, fallback: providers > 1, serverPoolAvailable }
     }
-    const provider = this.config.aiProviders?.providers[0]
+    const provider = serverPoolAvailable ? this.config.aiProviders?.providers[0] : undefined
     if (provider) {
       const first = provider.keys.find(key => key.enabled)
       return {
@@ -528,11 +529,12 @@ export class AiService {
         providers: poolProviders,
         keys: poolKeys,
         fallback: poolProviders > 1,
+        serverPoolAvailable,
       }
     }
-    const defaults = this.config.aiDefaults
-    if (defaults) return { configured: true, baseUrl: defaults.baseUrl, model: defaults.model, temperature: 0.7, hasApiKey: true, source: 'server', label: defaults.label, providers: 1, keys: 1, fallback: false }
-    return { configured: false, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', temperature: 0.7, hasApiKey: false, providers: 0, keys: 0, fallback: false }
+    const defaults = serverPoolAvailable ? this.config.aiDefaults : null
+    if (defaults) return { configured: true, baseUrl: defaults.baseUrl, model: defaults.model, temperature: 0.7, hasApiKey: true, source: 'server', label: defaults.label, providers: 1, keys: 1, fallback: false, serverPoolAvailable }
+    return { configured: false, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', temperature: 0.7, hasApiKey: false, providers: 0, keys: 0, fallback: false, serverPoolAvailable }
   }
 
   saveSettings(userId: string, input: AiSettingsInput): AiSettings {
@@ -547,7 +549,7 @@ export class AiService {
     if (!apiKey && !current) {
       // Reusing the server key is only safe when the user is editing the same
       // endpoint. Otherwise a custom base URL would receive the server secret.
-      const defaults = this.config.aiDefaults
+      const defaults = this.canUseServerPool(userId) ? this.config.aiDefaults : null
       let sameEndpoint = false
       if (defaults?.baseUrl) {
         try { sameEndpoint = normalizeAiBaseUrl(defaults.baseUrl) === baseUrl } catch { sameEndpoint = false }
@@ -585,8 +587,36 @@ export class AiService {
     }
   }
 
+  /** Admins (is_admin flag or MULTIPUSH_ADMIN_USERNAMES) may use the server pool. */
+  private isAdminUser(userId: string): boolean {
+    const user = this.database.findUserById(userId)
+    if (!user) return false
+    if (user.isAdmin) return true
+    if (this.config.settingsAdmins.includes('*')) return true
+    return this.config.settingsAdmins.includes(user.username.toLowerCase())
+  }
+
+  private canUseServerPool(userId: string): boolean {
+    return this.config.aiPoolAccess === 'all' || this.isAdminUser(userId)
+  }
+
+  /** Daily cap for non-admin server-pool usage. 0 disables the cap. */
+  private assertPoolQuota(userId: string): void {
+    const limit = this.config.aiPoolDailyLimit
+    if (limit <= 0) return
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    const used = this.database.countAiProviderRequestsSince(userId, start.toISOString())
+    if (used >= limit) {
+      throw new ApiError(429, 'ai_pool_quota', `今日服务器大模型额度已用完（${limit} 次），请明天再试或配置自己的 API Key`)
+    }
+  }
+
   async testSettings(userId: string): Promise<{ ok: true; message: string; model: string; routing: AiRoutingInfo }> {
     const preferred = this.userPreferred(userId)
+    const allowServerPool = this.canUseServerPool(userId)
+    if (!preferred && !allowServerPool) throw new ApiError(403, 'ai_pool_forbidden', '服务器大模型仅管理员可用，请先配置自己的 API Key')
+    if (allowServerPool && !preferred && !this.isAdminUser(userId)) this.assertPoolQuota(userId)
     const result = await this.gateway.complete({
       userId,
       sessionId: `test-${userId.slice(0, 8)}`,
@@ -597,6 +627,7 @@ export class AiService {
       temperature: preferred?.temperature ?? 0.7,
       maxTokens: 16,
       preferred,
+      allowServerPool,
     })
     return { ok: true, message: result.content || '连接成功', model: result.routing.model, routing: result.routing }
   }
@@ -606,11 +637,11 @@ export class AiService {
     // A corrupt account key must not block the management page; the server
     // pool remains visible and the user can re-save the key.
     try { preferred = this.userPreferred(userId) } catch { preferred = null }
-    return this.gateway.status(userId, preferred)
+    return this.gateway.status(userId, preferred, this.canUseServerPool(userId))
   }
 
   async probeGateway(userId: string, providerId?: string): Promise<AiProbeResult[]> {
-    return this.gateway.probe(userId, this.userPreferred(userId), providerId)
+    return this.gateway.probe(userId, this.userPreferred(userId), providerId, this.canUseServerPool(userId))
   }
 
   private canManageProviderPool(userId: string): boolean {
@@ -749,6 +780,11 @@ export class AiService {
     if (text.length > 20_000) throw new ApiError(400, 'ai_message_too_long', '单条消息最多 20000 个字符')
     if (!text && !attachments.length) throw new ApiError(400, 'ai_message_empty', '请输入消息或先上传附件')
     const preferred = this.userPreferred(userId)
+    const allowServerPool = this.canUseServerPool(userId)
+    if (!preferred && !allowServerPool) {
+      throw new ApiError(403, 'ai_pool_forbidden', '服务器大模型仅管理员可用，请到「设置 → 大模型」配置自己的 API Key')
+    }
+    if (allowServerPool && !preferred && !this.isAdminUser(userId)) this.assertPoolQuota(userId)
     const storedText = text || (attachments.length ? `（消息包含 ${attachments.length} 个附件）` : '')
     this.database.createAiMessage(userId, sessionId, { role: 'user', content: storedText, attachments: attachments.length ? attachments : undefined })
     this.database.updateAiSession(userId, sessionId, session.title === '新会话' ? { title: (text || attachments[0]?.name || '新会话').slice(0, 36) } : { touch: true })
@@ -770,6 +806,7 @@ export class AiService {
         tools: AI_TOOLS,
         temperature: preferred?.temperature ?? 0.7,
         preferred,
+        allowServerPool,
       })
       routing = response.routing
       turnAttempts += response.routing.attempts

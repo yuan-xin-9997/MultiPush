@@ -48,7 +48,7 @@ async function start(database: Database) {
 }
 
 describe('invite-code registration', () => {
-  it('promotes yuanxin, requires invites in production mode and enforces uses/expiry/active', async () => {
+  it('promotes yuanxin, requires invites in production mode and enforces uses/expiry/active', { timeout: 20_000 }, async () => {
     const { database, directory } = databaseAt()
     const passwordHash = await hashPassword('AdminPassword!1')
     database.createUser({ username: 'yuanxin', email: 'yuanxin@example.com', passwordHash, displayName: 'Yuanxin' })

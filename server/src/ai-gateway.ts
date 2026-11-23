@@ -12,6 +12,7 @@ import type {
 import type { AppConfig } from './config'
 import type { AiKeyStateRecord, AiProviderStateRecord, Database } from './db'
 import { ApiError } from './errors'
+import { NetworkGuardError, guardedRequest } from './network-guard'
 import {
   DEFAULT_PROVIDER_COOLDOWNS,
   maskApiKey,
@@ -58,6 +59,8 @@ export interface GatewayCompletionInput {
   temperature: number
   maxTokens?: number
   preferred?: PreferredAiProvider | null
+  /** False for accounts that may not fall back to the server-wide provider pool. */
+  allowServerPool?: boolean
 }
 
 export interface GatewayCompletionResult {
@@ -428,7 +431,7 @@ export class AiGateway {
   }
 
   /** Build the effective chain: the user's own setting first, then server pool. */
-  private buildChain(userId: string, preferred?: PreferredAiProvider | null, allEnabledKeys = false): ChainProvider[] {
+  private buildChain(userId: string, preferred?: PreferredAiProvider | null, allEnabledKeys = false, allowServerPool = true): ChainProvider[] {
     const chain: ChainProvider[] = []
     if (preferred?.apiKey && preferred.baseUrl && preferred.model) {
       const apiKey = preferred.apiKey.trim()
@@ -449,7 +452,7 @@ export class AiGateway {
         }],
       })
     }
-    for (const provider of this.providers) {
+    if (allowServerPool) for (const provider of this.providers) {
       chain.push({
         id: provider.id,
         label: provider.label,
@@ -701,9 +704,9 @@ export class AiGateway {
     if (/opencode\.ai\/inference\/go/i.test(candidate.key.baseUrl)) {
       headers['x-opencode-session'] = `multipush-${input.sessionId || 'default'}`
     }
-    let response: Response
+    let response
     try {
-      response = await fetch(chatEndpoint(candidate.key.baseUrl), {
+      response = await guardedRequest(chatEndpoint(candidate.key.baseUrl), {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -714,27 +717,32 @@ export class AiGateway {
           ...(input.tools?.length ? { tools: input.tools, tool_choice: 'auto' } : {}),
           ...(input.maxTokens ? { max_tokens: input.maxTokens } : {}),
         }),
-        signal: AbortSignal.timeout(timeoutMs),
+      }, {
+        allowPrivate: this.appConfig.allowPrivateNetwork,
+        timeoutMs,
+        maxBytes: 8 * 1024 * 1024,
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : '网络错误'
+      const blocked = error instanceof NetworkGuardError && error.code === 'blocked'
+      const message = blocked ? '接口地址不能指向本机、内网或保留地址' : error instanceof Error ? error.message : '网络错误'
       return {
         ok: false,
         durationMs: this.now() - startedAt,
         failure: { kind: 'transient', code: 'network_error', message: `无法连接大模型接口：${this.redact(message, input.preferred)}`, httpStatus: null, retryAfterMs: null },
       }
     }
-    if (!response.ok) {
-      const text = await response.text().catch(() => '')
+    if (response.status < 200 || response.status >= 300) {
+      const text = response.body.toString('utf8')
+      const retryAfter = response.headers['retry-after']
       return {
         ok: false,
         durationMs: this.now() - startedAt,
-        failure: this.classifyHttpFailure(response.status, text, response.headers.get('retry-after')),
+        failure: this.classifyHttpFailure(response.status, text, Array.isArray(retryAfter) ? retryAfter[0] : retryAfter ?? null),
       }
     }
     let payload: Record<string, unknown>
     try {
-      payload = object(await response.json())
+      payload = object(JSON.parse(response.body.toString('utf8')))
     } catch (error) {
       return {
         ok: false,
@@ -938,7 +946,7 @@ export class AiGateway {
   }
 
   async complete(input: GatewayCompletionInput): Promise<GatewayCompletionResult> {
-    const chain = this.buildChain(input.userId, input.preferred)
+    const chain = this.buildChain(input.userId, input.preferred, false, input.allowServerPool !== false)
     if (!chain.length) throw new ApiError(409, 'ai_not_configured', '请先在 AI 创作页配置大模型接口和 API Key')
     const requestedModel = input.preferred?.model || chain[0].defaultModel
     const sourceProviderId = chain[0].id
@@ -1046,13 +1054,13 @@ export class AiGateway {
     throw new ApiError(status, 'ai_all_providers_failed', `所有大模型提供商均不可用（共尝试 ${attempts} 次）。最后一次原因：${first.message}${summary ? `；失败摘要：${summary}` : ''}`)
   }
 
-  private chainWithPreferred(userId: string, preferred?: PreferredAiProvider | null, allEnabledKeys = false): ChainProvider[] {
-    return this.buildChain(userId, preferred, allEnabledKeys)
+  private chainWithPreferred(userId: string, preferred?: PreferredAiProvider | null, allEnabledKeys = false, allowServerPool = true): ChainProvider[] {
+    return this.buildChain(userId, preferred, allEnabledKeys, allowServerPool)
   }
 
   /** Fetch a status snapshot for the management page. Never includes raw keys. */
-  status(userId: string, preferred?: PreferredAiProvider | null): AiGatewayStatus {
-    const chain = this.chainWithPreferred(userId, preferred)
+  status(userId: string, preferred?: PreferredAiProvider | null, allowServerPool = true): AiGatewayStatus {
+    const chain = this.chainWithPreferred(userId, preferred, false, allowServerPool)
     const providers: AiGatewayProviderStatus[] = chain.map((provider) => {
       const state = this.providerState(provider.id)
       return {
@@ -1116,7 +1124,7 @@ export class AiGateway {
   }
 
   /** Explicit connectivity test: one minimal request per key, bypassing cooldown. */
-  async probe(userId: string, preferred?: PreferredAiProvider | null, providerId?: string): Promise<AiProbeResult[]> {
+  async probe(userId: string, preferred?: PreferredAiProvider | null, providerId?: string, allowServerPool = true): Promise<AiProbeResult[]> {
     if (this.probeInFlight) throw new ApiError(409, 'ai_probe_busy', '已有探活任务正在执行，请稍后重试')
     const now = this.now()
     const throttleKey = userId || 'anonymous'
@@ -1128,7 +1136,7 @@ export class AiGateway {
     try {
       // Explicit testing covers every enabled key, even when the provider's
       // high-availability toggle currently only uses the first key.
-      const chain = this.chainWithPreferred(userId, preferred, true).filter(provider => !providerId || provider.id === providerId)
+      const chain = this.chainWithPreferred(userId, preferred, true, allowServerPool).filter(provider => !providerId || provider.id === providerId)
       const results: AiProbeResult[] = []
       for (const provider of chain) {
         let providerSucceeded = false

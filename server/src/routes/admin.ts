@@ -1,11 +1,13 @@
 import { randomInt } from 'node:crypto'
 import { Router, type RequestHandler } from 'express'
+import { z } from 'zod'
 import type { Database } from '../db'
 import { ApiError, asyncHandler } from '../errors'
 import { currentUser } from '../auth'
 import { createInviteCodeSchema, parseInput, updateInviteCodeSchema } from '../validation'
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+const usageQuerySchema = z.object({ days: z.coerce.number().int().min(1).max(90).optional() }).strict()
 
 function generateCode(): string {
   let code = ''
@@ -18,11 +20,26 @@ export function createAdminRouter(database: Database, requireAuth: RequestHandle
   router.use(requireAuth)
   router.use((req, _res, next) => {
     if (!currentUser(req).isAdmin) {
-      next(new ApiError(403, 'admin_required', '只有管理员可以管理邀请码'))
+      next(new ApiError(403, 'admin_required', '只有管理员可以访问该接口'))
       return
     }
     next()
   })
+
+  router.get('/ai-usage', asyncHandler((req, res) => {
+    const { days = 7 } = parseInput(usageQuerySchema, req.query)
+    const until = new Date()
+    const since = new Date(until.getTime() - days * 24 * 60 * 60 * 1000)
+    const users = database.listAiUsageByUser(since.toISOString())
+    const totals = users.reduce((sum, user) => ({
+      requests: sum.requests + user.requests,
+      success: sum.success + user.success,
+      failed: sum.failed + user.failed,
+      tokensIn: sum.tokensIn + user.tokensIn,
+      tokensOut: sum.tokensOut + user.tokensOut,
+    }), { requests: 0, success: 0, failed: 0, tokensIn: 0, tokensOut: 0 })
+    res.json({ report: { days, since: since.toISOString(), until: until.toISOString(), totals, users } })
+  }))
 
   router.get('/invite-codes', asyncHandler((_req, res) => {
     res.json({ invites: database.listInviteCodes() })

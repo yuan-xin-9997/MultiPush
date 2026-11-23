@@ -1,14 +1,15 @@
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Bot, ShieldCheck, Ticket, UserRound } from 'lucide-react'
+import { Activity, Bot, ShieldCheck, Ticket, UserRound } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import AccountSettings from './AccountSettings'
 import InviteCodesSettings from './InviteCodesSettings'
 import AiModelSettings from './AiModelSettings'
 import ProviderSettings from './ProviderSettings'
+import AiUsageSettings from './AiUsageSettings'
 import './settings.css'
 
-type TabId = 'account' | 'ai' | 'providers' | 'invites'
+type TabId = 'account' | 'ai' | 'providers' | 'invites' | 'usage'
 
 type SettingsTab = { id: TabId; label: string; description: string; icon: typeof UserRound }
 
@@ -18,10 +19,13 @@ const BASE_TABS: SettingsTab[] = [
   { id: 'providers', label: '大模型高可用', description: '提供商池、Key 与回退', icon: ShieldCheck },
 ]
 
-const ADMIN_TAB: SettingsTab = { id: 'invites', label: '邀请码', description: '注册邀请码与使用限制', icon: Ticket }
+const ADMIN_TABS: SettingsTab[] = [
+  { id: 'invites', label: '邀请码', description: '注册邀请码与使用限制', icon: Ticket },
+  { id: 'usage', label: 'AI 用量', description: '按账号统计大模型消耗', icon: Activity },
+]
 
 function normalizeTab(value: string | null, admin: boolean): TabId {
-  if (value === 'invites' && admin) return 'invites'
+  if (admin && (value === 'invites' || value === 'usage')) return value
   return value === 'ai' || value === 'providers' ? value : 'account'
 }
 
@@ -29,7 +33,7 @@ export default function SettingsPage() {
   const { user } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const admin = user?.isAdmin === true
-  const tabs = useMemo(() => admin ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS, [admin])
+  const tabs = useMemo(() => admin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS, [admin])
   const active = useMemo(() => normalizeTab(searchParams.get('tab'), admin), [searchParams, admin])
   const current = tabs.find(tab => tab.id === active) ?? tabs[0]
 
@@ -65,6 +69,7 @@ export default function SettingsPage() {
           {active === 'ai' ? <AiModelSettings onOpenProviders={() => selectTab('providers')} /> : null}
           {active === 'providers' ? <ProviderSettings /> : null}
           {active === 'invites' && admin ? <InviteCodesSettings /> : null}
+          {active === 'usage' && admin ? <AiUsageSettings /> : null}
         </main>
       </div>
     </div>

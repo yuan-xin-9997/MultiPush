@@ -6,7 +6,8 @@ interface AuthContextValue {
   user: User | null
   token: string | null
   loading: boolean
-  login: (input: LoginInput) => Promise<User>
+  login: (input: LoginInput) => Promise<{ user: User } | { challenge: string }>
+  verifyTwoFactor: (challenge: string, code: string) => Promise<User>
   register: (input: RegisterInput) => Promise<User>
   logout: () => void
   refreshUser: () => Promise<User | null>
@@ -76,6 +77,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (input: LoginInput) => {
       const result = await api.auth.login(input)
+      if ('twoFactorRequired' in result) return { challenge: result.challenge }
+      applySession(result.token, result.user)
+      return { user: result.user }
+    },
+    [applySession],
+  )
+
+  const verifyTwoFactor = useCallback(
+    async (challenge: string, code: string) => {
+      const result = await api.auth.verifyTwoFactor(challenge, code)
       applySession(result.token, result.user)
       return result.user
     },
@@ -96,8 +107,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySession])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, token, loading, login, register, logout, refreshUser, setUser }),
-    [user, token, loading, login, register, logout, refreshUser],
+    () => ({ user, token, loading, login, verifyTwoFactor, register, logout, refreshUser, setUser }),
+    [user, token, loading, login, verifyTwoFactor, register, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

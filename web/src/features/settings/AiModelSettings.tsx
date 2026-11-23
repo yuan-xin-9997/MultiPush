@@ -87,7 +87,7 @@ export default function AiModelSettings({ onOpenProviders }: AiModelSettingsProp
     <div className="settings-sections">
       <section className="settings-card">
         <header className="settings-card-head">
-          <div><h2>账号自定义大模型</h2><p>仅对当前账号生效，优先于服务器提供商池；留空时直接使用服务器池。</p></div>
+          <div><h2>账号自定义大模型</h2><p>仅对当前账号生效，优先于服务器提供商池；服务器池仅管理员可用，普通账号需要配置自己的 API Key。</p></div>
           <Sparkles size={18} />
         </header>
 
@@ -104,7 +104,7 @@ export default function AiModelSettings({ onOpenProviders }: AiModelSettingsProp
                   {settings.keys ? ` · ${settings.providers ?? 1} 个提供商 / ${settings.keys} 个 Key` : ''}
                   {settings.fallback ? ' · 自动回退已启用' : ''}
                 </span>
-              ) : <span>还没有任何可用的大模型配置</span>}
+              ) : <span>{settings?.serverPoolAvailable === false ? '服务器池仅管理员可用，请配置自己的 API Key' : '还没有任何可用的大模型配置'}</span>}
             </div>
 
             <div className="settings-preset">

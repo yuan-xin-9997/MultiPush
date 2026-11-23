@@ -3,7 +3,17 @@ import { Router } from 'express'
 import type { RequestHandler } from 'express'
 import type { AuthResponse, User } from '../../../shared/types'
 import type { AppConfig } from '../config'
-import { hashPassword, signToken, verifyPassword, currentUser } from '../auth'
+import {
+  hashPassword,
+  signToken,
+  signTwoFactorChallenge,
+  verifyPassword,
+  verifyTwoFactorChallenge,
+  currentUser,
+} from '../auth'
+import { TwoFactorService } from '../two-factor'
+import { clientIp } from '../request-ip'
+import { ACCOUNT_LIMITER, IP_LIMITER, TWO_FACTOR_LIMITER, accountKey, ipKey } from '../login-guard'
 import { InviteCodeError, type Database } from '../db'
 import { ApiError, asyncHandler, notFound, unauthorized } from '../errors'
 import {
@@ -13,6 +23,9 @@ import {
   loginSchema,
   parseInput,
   registerSchema,
+  twoFactorCodeSchema,
+  twoFactorPasswordSchema,
+  twoFactorVerifySchema,
   updateProfileSchema,
 } from '../validation'
 
@@ -33,9 +46,21 @@ function authResponse(user: User, secret: string, version: number): AuthResponse
   return { token: signToken(user, secret, version), user }
 }
 
+function assertNotRateLimited(
+  limiter: { check: (key: string) => { allowed: boolean; retryAfterSeconds: number } },
+  key: string,
+  res: import('express').Response,
+): void {
+  const decision = limiter.check(key)
+  if (decision.allowed) return
+  res.setHeader('Retry-After', String(decision.retryAfterSeconds))
+  throw new ApiError(429, 'too_many_attempts', `尝试次数过多，请 ${Math.max(1, Math.ceil(decision.retryAfterSeconds / 60))} 分钟后再试`)
+}
+
 export function createAuthRouter(database: Database, config: AppConfig, requireAuth: RequestHandler): Router {
   const router = Router()
   const verification = new EmailVerification(database, config.jwtSecret)
+  const twoFactor = new TwoFactorService(database, config)
   const sendLimits = new Map<string, { count: number; start: number }>()
   router.get('/registration-config', (_req, res) => {
     res.json({ inviteRequired: config.inviteCodeRequired === true })
@@ -49,7 +74,7 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
     }
     const now = Date.now()
     for (const [key, entry] of sendLimits) if (now - entry.start >= 3600000) sendLimits.delete(key)
-    const key = req.ip || 'unknown'
+    const key = clientIp(req)
     const limit = sendLimits.get(key) || { count: 0, start: now }
     if (limit.count >= 10) throw new ApiError(429, 'mail_rate_limited', '发送过于频繁，请稍后重试')
     limit.count++
@@ -145,19 +170,98 @@ export function createAuthRouter(database: Database, config: AppConfig, requireA
     '/login',
     asyncHandler(async (req, res) => {
       const input = parseInput(loginSchema, req.body)
+      const accountBucket = accountKey(input.account)
+      const clientBucket = ipKey(clientIp(req))
+      assertNotRateLimited(ACCOUNT_LIMITER, accountBucket, res)
+      assertNotRateLimited(IP_LIMITER, clientBucket, res)
       const user = database.findUserByAccount(input.account)
-      if (!user) {
+      const version = user ? database.authVersion(user.id) : 0
+      const valid = user ? await verifyPassword(input.password, user.passwordHash) : false
+      if (!user || !valid || version !== database.authVersion(user.id)) {
+        ACCOUNT_LIMITER.fail(accountBucket)
+        IP_LIMITER.fail(clientBucket)
         throw new ApiError(401, 'invalid_credentials', '账号或密码错误')
       }
-      const version = database.authVersion(user.id)
-      const valid = await verifyPassword(input.password, user.passwordHash)
-      if (!valid || version !== database.authVersion(user.id)) {
-        throw new ApiError(401, 'invalid_credentials', '账号或密码错误')
+      ACCOUNT_LIMITER.reset(accountBucket)
+      if (twoFactor.isEnabled(user.id)) {
+        res.json({
+          twoFactorRequired: true,
+          challenge: signTwoFactorChallenge(user.id, config.jwtSecret, version),
+          expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+        })
+        return
       }
       const { passwordHash: _passwordHash, ...publicUser } = user
       res.json(authResponse(publicUser, config.jwtSecret, version))
     }),
   )
+
+  router.post(
+    '/2fa/verify',
+    asyncHandler(async (req, res) => {
+      const input = parseInput(twoFactorVerifySchema, req.body)
+      const clientBucket = ipKey(clientIp(req))
+      assertNotRateLimited(IP_LIMITER, clientBucket, res)
+      const payload = verifyTwoFactorChallenge(input.challenge, config.jwtSecret)
+      if (!payload) throw new ApiError(401, 'two_factor_challenge_invalid', '登录凭证已失效，请重新输入密码')
+      const user = database.findUserById(payload.userId)
+      if (!user || payload.version !== database.authVersion(user.id)) {
+        throw new ApiError(401, 'two_factor_challenge_invalid', '登录凭证已失效，请重新输入密码')
+      }
+      const userBucket = `2fa:${user.id}`
+      assertNotRateLimited(TWO_FACTOR_LIMITER, userBucket, res)
+      if (!twoFactor.verify(user.id, input.code)) {
+        TWO_FACTOR_LIMITER.fail(userBucket)
+        IP_LIMITER.fail(clientBucket)
+        throw new ApiError(401, 'two_factor_code_invalid', '验证码不正确或已失效')
+      }
+      TWO_FACTOR_LIMITER.reset(userBucket)
+      res.json(authResponse(user, config.jwtSecret, payload.version))
+    }),
+  )
+
+  router.get('/2fa', requireAuth, (req, res) => {
+    res.json({ twoFactor: twoFactor.status(currentUser(req).id), serverTime: new Date().toISOString() })
+  })
+
+  router.post('/2fa/setup', requireAuth, (req, res) => {
+    const user = currentUser(req)
+    res.json({ setup: twoFactor.setup(user.id, user.username) })
+  })
+
+  router.post('/2fa/enable', requireAuth, asyncHandler((req, res) => {
+    const user = currentUser(req)
+    const { code } = parseInput(twoFactorCodeSchema, req.body)
+    const result = twoFactor.enable(user.id, code)
+    res.json({ twoFactor: twoFactor.status(user.id), recoveryCodes: result.recoveryCodes })
+  }))
+
+  router.post('/2fa/disable', requireAuth, asyncHandler(async (req, res) => {
+    const user = currentUser(req)
+    const input = parseInput(twoFactorPasswordSchema, req.body)
+    const stored = database.findUserWithPasswordById(user.id)
+    if (!stored || !(await verifyPassword(input.password, stored.passwordHash))) {
+      throw new ApiError(400, 'invalid_password', '当前密码不正确')
+    }
+    if (!twoFactor.verify(user.id, input.code)) {
+      throw new ApiError(400, 'two_factor_code_invalid', '验证码不正确或已失效')
+    }
+    twoFactor.disable(user.id)
+    res.json({ twoFactor: twoFactor.status(user.id) })
+  }))
+
+  router.post('/2fa/recovery-codes', requireAuth, asyncHandler(async (req, res) => {
+    const user = currentUser(req)
+    const input = parseInput(twoFactorPasswordSchema, req.body)
+    const stored = database.findUserWithPasswordById(user.id)
+    if (!stored || !(await verifyPassword(input.password, stored.passwordHash))) {
+      throw new ApiError(400, 'invalid_password', '当前密码不正确')
+    }
+    if (!twoFactor.verify(user.id, input.code)) {
+      throw new ApiError(400, 'two_factor_code_invalid', '验证码不正确或已失效')
+    }
+    res.json({ recoveryCodes: twoFactor.regenerateRecoveryCodes(user.id) })
+  }))
 
   router.get(
     '/me',

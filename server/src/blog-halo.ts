@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto'
 import { load } from 'cheerio'
 import { ApiError } from './errors'
+import { NetworkGuardError, guardedRequest } from './network-guard'
 import { blogEditorContent, blogImagePath, blogSlug, verifyBlogContent } from './blog-content'
 import type { PublisherImage } from './publisher-image'
 import type { BlogPublication } from '../../shared/types'
@@ -87,10 +89,15 @@ export function normalizeBlogBaseUrl(input: string): string {
  * yuan-xin.top -> www.yuan-xin.top. Cross-host redirects drop the Authorization
  * header, so the connection must use the final origin directly.
  */
-export async function canonicalBlogBaseUrl(input: string): Promise<string> {
+export async function canonicalBlogBaseUrl(input: string, allowPrivate = false): Promise<string> {
   const normalized = normalizeBlogBaseUrl(input)
   try {
-    const response = await fetch(`${normalized}/`, { redirect: 'follow', headers: { Accept: 'text/html' }, signal: AbortSignal.timeout(15_000) })
+    const response = await guardedRequest(`${normalized}/`, { headers: { Accept: 'text/html' } }, {
+      allowPrivate,
+      maxRedirects: 3,
+      timeoutMs: 15_000,
+      maxBytes: 512 * 1024,
+    })
     const final = new URL(response.url)
     if (!['http:', 'https:'].includes(final.protocol) || final.username || final.password) return normalized
     const original = new URL(normalized)
@@ -98,7 +105,10 @@ export async function canonicalBlogBaseUrl(input: string): Promise<string> {
     const finalPath = final.pathname.replace(/\/+$/, '')
     if (finalPath && finalPath !== original.pathname.replace(/\/+$/, '')) return normalized
     return normalizeBlogBaseUrl(`${final.origin}${finalPath}`)
-  } catch {
+  } catch (error) {
+    if (error instanceof NetworkGuardError && error.code === 'blocked') {
+      throw new ApiError(400, 'blog_url_blocked', '个人博客地址必须是公网 HTTP/HTTPS 地址，不能指向本机或内网')
+    }
     return normalized
   }
 }
@@ -107,31 +117,51 @@ export class HaloClient {
   readonly baseUrl: string
   private readonly token: string
 
-  constructor(credentials: BlogCredentials) {
+  constructor(credentials: BlogCredentials, private readonly allowPrivate = false) {
     this.baseUrl = normalizeBlogBaseUrl(credentials.baseUrl)
     this.token = credentials.token.trim()
     if (!this.token) throw new ApiError(400, 'blog_token_invalid', '请输入 Halo 个人令牌')
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const headers = new Headers(init.headers)
-    headers.set('Authorization', `Bearer ${this.token}`)
-    headers.set('Accept', 'application/json')
-    if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-    let response: Response
+  private async request<T>(
+    path: string,
+    init: { method?: string; headers?: Record<string, string>; body?: string | Buffer } = {},
+  ): Promise<T> {
+    const headers: Record<string, string> = { ...(init.headers ?? {}) }
+    headers.Authorization = `Bearer ${this.token}`
+    headers.Accept = 'application/json'
+    if (init.body && !Object.keys(headers).some(key => key.toLowerCase() === 'content-type')) {
+      headers['Content-Type'] = 'application/json'
+    }
+    let response
     try {
-      response = await fetch(`${this.baseUrl}${path}`, { ...init, headers, signal: AbortSignal.timeout(30_000) })
+      response = await guardedRequest(`${this.baseUrl}${path}`, {
+        method: init.method ?? 'GET',
+        headers,
+        body: init.body,
+      }, {
+        allowPrivate: this.allowPrivate,
+        timeoutMs: 30_000,
+        maxBytes: 8 * 1024 * 1024,
+      })
     } catch (error) {
+      if (error instanceof NetworkGuardError) {
+        if (error.code === 'blocked') throw new ApiError(400, 'blog_url_blocked', '个人博客地址不能指向本机、内网或保留地址')
+        if (error.code === 'timeout') throw new ApiError(502, 'blog_unreachable', '连接个人博客超时，请稍后重试')
+        throw new ApiError(502, 'blog_unreachable', `无法连接个人博客：${error.message}`)
+      }
       throw new ApiError(502, 'blog_unreachable', `无法连接个人博客：${error instanceof Error ? error.message : '网络错误'}`)
     }
     if (response.status === 401 || response.status === 403) throw new ApiError(409, 'blog_auth_failed', '个人博客令牌无效或权限不足，请重新连接')
     if (response.status === 404) throw new ApiError(404, 'blog_not_found', '个人博客接口不存在或文章已删除')
     if (response.status === 204) return undefined as T
-    if (!/json/i.test(response.headers.get('content-type') || '')) throw new ApiError(502, 'blog_bad_response', '个人博客返回了非接口页面，请确认地址指向 Halo 2.x 站点且未被重定向到登录页')
-    const text = await response.text()
+    const contentType = response.headers['content-type']
+    const contentTypeText = Array.isArray(contentType) ? contentType.join(';') : contentType ?? ''
+    if (!/json/i.test(contentTypeText)) throw new ApiError(502, 'blog_bad_response', '个人博客返回了非接口页面，请确认地址指向 Halo 2.x 站点且未被重定向到登录页')
+    const text = response.body.toString('utf8')
     let payload: unknown = null
     try { payload = text ? JSON.parse(text) : null } catch { payload = null }
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       const detail = typeof object(payload).detail === 'string' ? object(payload).detail : typeof object(payload).title === 'string' ? object(payload).title : ''
       throw new ApiError(502, 'blog_rejected', `个人博客请求失败${detail ? `：${detail}` : `（HTTP ${response.status}）`}`)
     }
@@ -186,9 +216,15 @@ export class HaloClient {
   }
 
   async uploadAttachment(image: PublisherImage): Promise<{ name: string; permalink: string }> {
-    const form = new FormData()
-    form.append('file', new Blob([image.buffer], { type: image.mimeType }), image.name)
-    const attachment = await this.request<HaloAttachment>('/apis/console.api.storage.halo.run/v1alpha1/attachments/-/upload', { method: 'POST', body: form })
+    const boundary = `----multipush${randomUUID().replace(/-/g, '')}`
+    const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"${image.name.replace(/[\"\r\n]/g, '_')}\"\r\nContent-Type: ${image.mimeType}\r\n\r\n`, 'utf8')
+    const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8')
+    const body = Buffer.concat([head, image.buffer, tail])
+    const attachment = await this.request<HaloAttachment>('/apis/console.api.storage.halo.run/v1alpha1/attachments/-/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body,
+    })
     let current = attachment
     let permalink = current?.status?.permalink || current?.metadata?.annotations?.['storage.halo.run/uri'] || ''
     if (!current?.metadata?.name) throw new ApiError(502, 'blog_attachment_failed', '个人博客没有返回有效附件信息，已停止发布')
@@ -233,9 +269,11 @@ export interface BlogDriver {
 }
 
 export class HaloBlogDriver implements BlogDriver {
+  constructor(private readonly allowPrivate = false) {}
+
   async checkSession(credentials: BlogCredentials): Promise<{ identity: BlogIdentity }> {
     try {
-      const user = await new HaloClient(credentials).currentUser()
+      const user = await new HaloClient(credentials, this.allowPrivate).currentUser()
       return { identity: { accountId: user.metadata.name, name: user.spec?.displayName?.trim() || user.metadata.name } }
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) throw new ApiError(400, 'blog_url_invalid', '该地址不是可访问的 Halo 2.x 站点，请检查博客地址')
@@ -245,7 +283,7 @@ export class HaloBlogDriver implements BlogDriver {
   }
 
   async checkPublication(credentials: BlogCredentials, remoteId: string, title: string) {
-    const client = new HaloClient(credentials)
+    const client = new HaloClient(credentials, this.allowPrivate)
     let post: HaloPost
     try {
       post = await client.getPost(remoteId)
@@ -262,7 +300,7 @@ export class HaloBlogDriver implements BlogDriver {
   }
 
   async deleteDraft(credentials: BlogCredentials, remoteId: string) {
-    const client = new HaloClient(credentials)
+    const client = new HaloClient(credentials, this.allowPrivate)
     let post: HaloPost
     try {
       post = await client.getPost(remoteId)
@@ -286,7 +324,7 @@ export class HaloBlogDriver implements BlogDriver {
   }
 
   async publish(credentials: BlogCredentials, article: BlogArticle, mode: 'draft' | 'publish', progress: Parameters<BlogDriver['publish']>[3], resumeId?: string) {
-    const client = new HaloClient(credentials)
+    const client = new HaloClient(credentials, this.allowPrivate)
     let remoteId = resumeId || ''
     try {
       await client.currentUser()

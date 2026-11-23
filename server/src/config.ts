@@ -30,6 +30,14 @@ export interface AppConfig {
   aiProvidersWarning: string | null
   /** Usernames allowed to edit the server-wide provider pool in production. */
   settingsAdmins: string[]
+  /** Who may fall back to the server-wide AI provider pool. */
+  aiPoolAccess: 'admin' | 'all'
+  /** Per-user daily request limit for server-pool usage; 0 disables the limit. */
+  aiPoolDailyLimit: number
+  /** Allow user-supplied URLs to reach loopback/private addresses (local modes only). */
+  allowPrivateNetwork: boolean
+  /** Express trust proxy setting; production defaults to loopback (cloudflared/nginx). */
+  trustProxy: boolean | number | string
   /** Registration requires a valid invite code (production unless explicitly bypassed). */
   inviteCodeRequired: boolean
   version: string
@@ -47,6 +55,10 @@ export interface ConfigOverrides {
   aiDefaults?: AiDefaultConfig | null
   aiProviders?: AiProvidersConfig | null
   settingsAdmins?: string[]
+  aiPoolAccess?: 'admin' | 'all'
+  aiPoolDailyLimit?: number
+  allowPrivateNetwork?: boolean
+  trustProxy?: boolean | number | string
   inviteCodeBypass?: boolean
 }
 
@@ -159,6 +171,27 @@ function splitLegacyKeys(primary: string | null): string[] {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))]
 }
 
+
+function parseAiPoolAccess(value: string | null, fallback: 'admin' | 'all'): 'admin' | 'all' {
+  const normalized = value?.trim().toLowerCase()
+  return normalized === 'all' || normalized === 'admin' ? normalized : fallback
+}
+
+function parseNonNegativeInt(value: string | null, fallback: number): number {
+  if (!value) return fallback
+  const parsed = Number.parseInt(value, 10)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+function parseTrustProxy(value: string | null, production: boolean): boolean | number | string {
+  if (value === undefined || value === null || value === '') return production ? 'loopback' : false
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'false' || normalized === '0') return false
+  if (normalized === 'true') return true
+  if (/^\d+$/.test(normalized)) return Number(normalized)
+  return value.trim()
+}
+
 export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
   const cwd = process.cwd()
   const nodeEnv = overrides.nodeEnv ?? trimmedEnv('NODE_ENV') ?? 'development'
@@ -236,6 +269,10 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
       .split(/[\s,;]+/)
       .map(name => name.trim().toLowerCase())
       .filter(Boolean),
+    aiPoolAccess: overrides.aiPoolAccess ?? parseAiPoolAccess(trimmedEnv('AI_POOL_ACCESS'), nodeEnv === 'production' ? 'admin' : 'all'),
+    aiPoolDailyLimit: overrides.aiPoolDailyLimit ?? parseNonNegativeInt(trimmedEnv('AI_POOL_DAILY_LIMIT'), 0),
+    allowPrivateNetwork: overrides.allowPrivateNetwork ?? (trimmedEnv('MULTIPUSH_ALLOW_PRIVATE_NETWORK') === '1' || desktopMode || nodeEnv !== 'production'),
+    trustProxy: overrides.trustProxy ?? parseTrustProxy(trimmedEnv('TRUST_PROXY'), nodeEnv === 'production'),
     inviteCodeRequired: nodeEnv === 'production' && !inviteCodeBypass,
     version: typeof packageJson.version === 'string' ? packageJson.version : '1.0.0',
   }

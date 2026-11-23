@@ -16,6 +16,7 @@ import type {
   ContentListResult,
   ContentSummary,
   LoginInput,
+  LoginResponse,
   MediaAsset,
   MediaFolder,
   MediaKind,
@@ -120,6 +121,9 @@ import type {
   AiSessionDetail,
   AiSettings,
   AiSettingsInput,
+  AiUsageReport,
+  TwoFactorSetup,
+  TwoFactorStatus,
   BatchJob,
   BatchPublishInput,
   BatchRenderInput,
@@ -254,7 +258,26 @@ export const api = {
       request<AuthResponse>('/api/auth/register', { method: 'POST', body: JSON.stringify(input) }),
     registrationConfig: () => request<RegistrationConfig>('/api/auth/registration-config'),
     login: (input: LoginInput) =>
-      request<AuthResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify(input) }),
+      request<LoginResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify(input) }),
+    verifyTwoFactor: (challenge: string, code: string) =>
+      request<AuthResponse>('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ challenge, code }) }),
+    twoFactorStatus: () => request<{ twoFactor: TwoFactorStatus }>('/api/auth/2fa'),
+    setupTwoFactor: () => request<{ setup: TwoFactorSetup }>('/api/auth/2fa/setup', { method: 'POST' }),
+    enableTwoFactor: (code: string) =>
+      request<{ twoFactor: TwoFactorStatus; recoveryCodes: string[] }>('/api/auth/2fa/enable', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      }),
+    disableTwoFactor: (password: string, code: string) =>
+      request<{ twoFactor: TwoFactorStatus }>('/api/auth/2fa/disable', {
+        method: 'POST',
+        body: JSON.stringify({ password, code }),
+      }),
+    regenerateRecoveryCodes: (password: string, code: string) =>
+      request<{ recoveryCodes: string[] }>('/api/auth/2fa/recovery-codes', {
+        method: 'POST',
+        body: JSON.stringify({ password, code }),
+      }),
     me: () => request<{ user: User }>('/api/auth/me'),
     updateProfile: (input: { displayName?: string; avatarUrl?: string | null }) =>
       request<{ user: User }>('/api/auth/me', { method: 'PATCH', body: JSON.stringify(input) }),
@@ -263,6 +286,7 @@ export const api = {
   },
 
   admin: {
+    aiUsage: (days = 7) => request<{ report: AiUsageReport }>(`/api/admin/ai-usage?days=${days}`),
     inviteCodes: {
       list: () => request<{ invites: InviteCode[] }>('/api/admin/invite-codes'),
       create: (input: InviteCodeInput) =>

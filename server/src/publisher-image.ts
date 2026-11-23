@@ -1,28 +1,12 @@
 import dns from 'node:dns/promises'
 import http from 'node:http'
 import https from 'node:https'
-import { BlockList, isIP } from 'node:net'
+import { isIP } from 'node:net'
 import { ApiError } from './errors'
+import { isPublicAddress } from './network-guard'
 export interface PublisherImage { name: string; mimeType: string; buffer: Buffer }
 
 const MAX_BYTES = 10 * 1024 * 1024
-const blocked = new BlockList()
-for (const [address, prefix] of [
-  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
-  ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
-  ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24],
-  ['224.0.0.0', 3],
-] as const) blocked.addSubnet(address, prefix, 'ipv4')
-for (const [address, prefix] of [['2001::', 23], ['2001:db8::', 32], ['2002::', 16], ['3fff::', 20]] as const) {
-  blocked.addSubnet(address, prefix, 'ipv6')
-}
-const globalV6 = new BlockList()
-globalV6.addSubnet('2000::', 3, 'ipv6')
-
-function publicAddress(address: string): boolean {
-  return isIP(address) === 4 ? !blocked.check(address, 'ipv4')
-    : isIP(address) === 6 && globalV6.check(address, 'ipv6') && !blocked.check(address, 'ipv6')
-}
 
 export function publisherImage(buffer: Buffer, webp = false): PublisherImage {
   if (!buffer.length || buffer.length > MAX_BYTES) throw new Error('图片为空或超过 10 MB')
@@ -49,13 +33,13 @@ export async function downloadPublisherImage(src: string, platform: 'wechat' | '
       const hostname = url.hostname.replace(/^\[|\]$/g, '')
       if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
         || (url.port && url.port !== (url.protocol === 'https:' ? '443' : '80'))
-        || (isIP(hostname) && !publicAddress(hostname))) throw new Error('图片地址必须是公网 HTTP/HTTPS 地址')
+        || (isIP(hostname) && !isPublicAddress(hostname))) throw new Error('图片地址必须是公网 HTTP/HTTPS 地址')
       const result = await new Promise<Buffer | URL>((resolve, reject) => {
         const request = (url.protocol === 'https:' ? https : http).get(url, {
           signal,
           lookup: (host, options, callback) => {
             void dns.lookup(host, { all: true }).then((addresses) => {
-              if (!addresses.length || addresses.some(({ address }) => !publicAddress(address))) {
+              if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
                 callback(new Error('图片域名不能指向内网地址'), '', 4)
               } else if (options.all) callback(null, addresses)
               else callback(null, addresses[0].address, addresses[0].family)

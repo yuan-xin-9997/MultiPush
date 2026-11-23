@@ -202,6 +202,7 @@ export function createApp(config: AppConfig, database: Database, wechatDriver?: 
   })
   app.locals.smsLogin = smsLogin
   app.disable('x-powered-by')
+  app.set('trust proxy', config.trustProxy)
   app.use(securityHeaders)
   if (config.desktopMode) app.use(desktopLoopbackGuard)
 

@@ -51,6 +51,8 @@
 - **统一设置页**：导航新增「设置」，集中管理个人资料/密码、账号级大模型配置和服务器提供商池（提供商、多个 Key、每 Key 接口地址、高可用开关、模型映射、冷却与探活参数）；保存后立即生效，无需重启服务。
 - **批量任务**：内容库多选后支持批量渲染和批量发布；任务在服务端顺序执行并持久保存进度，可查看每篇内容的排版、发布状态和失败原因。
 - **本地桌面版**：Electron 客户端支持 Windows 10+（x64）与 macOS（Intel / Apple Silicon 通用包），内置前端、Node 后端与 SQLite，完全在本机运行；首次启动直接注册本地账号，无需服务器、SMTP 或邮箱验证码。
+- **安全与登录保护**：账号隔离、登录限速、两步验证、SSRF 防护与 AI 额度说明见 [docs/SECURITY.md](docs/SECURITY.md)。
+
 - **图注修复说明**：见 [docs/FIGURE_CAPTION_FIX.md](docs/FIGURE_CAPTION_FIX.md) 与 [CHANGELOG.md](CHANGELOG.md)。
 - **部署**：监听 `0.0.0.0:34080`，Jenkins 每 30 分钟轮询 GitHub，自动停服、构建、部署、启动与健康检查。
 
@@ -128,6 +130,11 @@ npm start
 | `V2EX_BROWSER_PATH` | 自动探测 | V2EX 发布使用的 Chrome / Chromium 路径 |
 | `BILIBILI_BROWSER_PATH` | 自动探测 | B站发布使用的 Chrome / Chromium 路径 |
 | `MULTIPUSH_<PLATFORM>_MIN_PUBLISH_INTERVAL_MS` | 平台默认 | 两次提交的最小间隔（如 `MULTIPUSH_ZHIHU_MIN_PUBLISH_INTERVAL_MS`） |
+| `AI_POOL_ACCESS` | 生产 `admin` | 服务器 AI 池可用范围：`admin` 仅管理员，`all` 所有账号 |
+| `AI_POOL_DAILY_LIMIT` | `0` | 非管理员每天服务器池请求上限，0 为不限额 |
+| `LOGIN_MAX_FAILURES` | `8` | 单账号 15 分钟登录失败上限 |
+| `MULTIPUSH_ALLOW_PRIVATE_NETWORK` | `0` | 是否允许用户 URL 访问内网/本机（仅本地调试） |
+| `TRUST_PROXY` | 生产 `loopback` | 反向代理场景的客户端 IP 解析方式 |
 | `MULTIPUSH_<PLATFORM>_DAILY_PUBLISH_LIMIT` | 平台默认 | 滚动 24 小时最多提交篇数 |
 | `MULTIPUSH_<PLATFORM>_LOGIN_COOLDOWN_MS` | 平台默认 | 两次登录尝试的最小间隔 |
 | `MULTIPUSH_<PLATFORM>_SESSION_CHECK_COOLDOWN_MS` | `60000` | 两次手动「刷新状态」的最小间隔 |

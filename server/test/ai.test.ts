@@ -32,7 +32,7 @@ function response(data: unknown, status = 200): Response {
 function setup(
   defaults?: { apiKey: string; baseUrl: string; model: string; label: string },
   aiProviders?: AiProvidersConfig,
-  options?: { writePoolFile?: unknown; nodeEnv?: string; settingsAdmins?: string[] },
+  options?: { writePoolFile?: unknown; nodeEnv?: string; settingsAdmins?: string[]; aiPoolDailyLimit?: number; aiPoolAccess?: 'admin' | 'all' },
 ) {
   const directory = mkdtempSync(path.join(tmpdir(), 'multipush-ai-'))
   if (options?.writePoolFile) {
@@ -45,6 +45,8 @@ function setup(
     ...(defaults ? { aiDefaults: defaults } : {}),
     ...(aiProviders ? { aiProviders } : {}),
     ...(options?.settingsAdmins ? { settingsAdmins: options.settingsAdmins } : {}),
+    ...(options?.aiPoolDailyLimit !== undefined ? { aiPoolDailyLimit: options.aiPoolDailyLimit } : {}),
+    ...(options?.aiPoolAccess ? { aiPoolAccess: options.aiPoolAccess } : {}),
   })
   const database = openDatabase(':memory:')
   const user = database.createUser({ username: 'alice', email: 'alice@example.com', displayName: 'Alice', passwordHash: 'hash' })
@@ -583,5 +585,40 @@ describe('provider pool settings integration', () => {
     const pool = parseAiProvidersConfig(poolFile)
     const { user, service } = setup(undefined, pool)
     expect(service.providerPool(user.id)).toMatchObject({ editable: false, source: 'override' })
+  })
+})
+
+
+describe('AI server pool access', () => {
+  const pool = () => parseAiProvidersConfig({
+    providers: [{
+      id: 'pool', label: 'Pool', baseUrl: 'https://pool.example/v1', defaultModel: 'pool-model', models: ['pool-model'],
+      keys: [{ id: 'k1', label: 'K1', apiKey: 'sk-pool-key-12345678' }],
+    }],
+  })
+
+  it('blocks non-admin accounts from the server pool in production', async () => {
+    const { user, service, session } = setup(undefined, pool(), { nodeEnv: 'production' })
+    expect(service.settings(user.id)).toMatchObject({ configured: false, serverPoolAvailable: false })
+    await expect(service.chat(user.id, session.id, { message: 'hi' })).rejects.toMatchObject({ code: 'ai_pool_forbidden' })
+  })
+
+  it('allows configured admins and reports server-pool usage', async () => {
+    const { database, user, service, session } = setup(undefined, pool(), { nodeEnv: 'production', settingsAdmins: ['alice'] })
+    expect(service.settings(user.id)).toMatchObject({ configured: true, source: 'server', serverPoolAvailable: true })
+    vi.stubGlobal('fetch', vi.fn(async () => response({ choices: [{ message: { role: 'assistant', content: 'OK' } }] })))
+    const result = await service.chat(user.id, session.id, { message: 'hi' })
+    expect(result.reply.content).toBe('OK')
+    const usage = database.listAiUsageByUser(new Date(Date.now() - 60_000).toISOString())
+    expect(usage[0]).toMatchObject({ username: 'alice', requests: 1 })
+  })
+
+  it('enforces the daily server-pool quota', async () => {
+    const { database, user, service, session } = setup(undefined, pool(), { nodeEnv: 'production', aiPoolAccess: 'all', aiPoolDailyLimit: 1 })
+    database.createAiProviderRequest({
+      userId: user.id, providerId: 'pool', providerLabel: 'Pool', model: 'pool-model', keyId: 'k1', keyLabel: 'K1',
+      keyMasked: 'sk-p…5678', status: 'success', durationMs: 10,
+    })
+    await expect(service.chat(user.id, session.id, { message: 'hi' })).rejects.toMatchObject({ code: 'ai_pool_quota' })
   })
 })

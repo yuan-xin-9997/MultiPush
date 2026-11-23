@@ -8,6 +8,7 @@ import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
 import { PlatformActionGuard } from './platform-actions'
+import { guardedRequest } from './network-guard'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { bilibiliCookies } from './bilibili-cookies'
 import { checkBilibiliVideoStatus, publishBilibiliVideo } from './bilibili-api'
@@ -216,10 +217,16 @@ export class BilibiliService {
             const file = path.join(this.config.uploadsDir, filename)
             if (existsSync(file)) { buffer = await readFile(file); mime = imageMime(filename) }
           } else {
-            const response = await fetch(src, { signal: AbortSignal.timeout(15_000) })
-            if (response.ok) {
-              const array = Buffer.from(await response.arrayBuffer())
-              if (array.length <= MAX_IMAGE_BYTES) { buffer = array; mime = response.headers.get('content-type')?.split(';')[0] || mime }
+            const response = await guardedRequest(src, {}, {
+              allowPrivate: this.config.allowPrivateNetwork,
+              timeoutMs: 15_000,
+              maxBytes: MAX_IMAGE_BYTES,
+            })
+            if (response.status >= 200 && response.status < 300) {
+              const array = response.body
+              const contentType = response.headers['content-type']
+              const contentTypeText = Array.isArray(contentType) ? contentType[0] : contentType
+              if (array.length <= MAX_IMAGE_BYTES) { buffer = array; mime = contentTypeText?.split(';')[0] || mime }
             }
           }
         }

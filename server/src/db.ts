@@ -515,6 +515,14 @@ export type UpdateWechatPublicationValues = Partial<Pick<WechatPublication, 'sta
  * SQLite persistence. Every read/write on user-owned resources takes a userId
  * so cross-tenant access can only ever return null/0 (mapped to HTTP 404).
  */
+export interface TotpRecord {
+  encryptedSecret: string
+  enabled: boolean
+  recoveryHashes: string[]
+  createdAt: string
+  updatedAt: string
+}
+
 export type InviteCodeFailure = 'missing' | 'invalid' | 'expired' | 'exhausted' | 'inactive'
 export class InviteCodeError extends Error {
   constructor(readonly reason: InviteCodeFailure) { super(reason) }
@@ -552,6 +560,14 @@ export class Database {
         display_name TEXT NOT NULL,
         avatar_url TEXT,
         is_admin INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS user_totp (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_secret TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        recovery_hashes TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -1327,7 +1343,7 @@ export class Database {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_bilibili_resolutions_publication ON bilibili_publication_resolutions(publication_id, created_at DESC);
-      PRAGMA user_version = 26;
+      PRAGMA user_version = 27;
     `)
     this.ensureContentSyncColumns()
     this.ensureVideoColumns()
@@ -1758,6 +1774,42 @@ export class Database {
         ON CONFLICT(user_id) DO UPDATE SET version = version + 1`, [userId])
       return changed
     })
+  }
+
+  getTotp(userId: string): TotpRecord | null {
+    const row = this.get('SELECT * FROM user_totp WHERE user_id = ?', [userId])
+    if (!row) return null
+    let recoveryHashes: string[] = []
+    try {
+      const parsed = JSON.parse(text(row.recovery_hashes))
+      if (Array.isArray(parsed)) recoveryHashes = parsed.filter((item): item is string => typeof item === 'string')
+    } catch { /* treat corrupt data as no recovery codes */ }
+    return {
+      encryptedSecret: text(row.encrypted_secret),
+      enabled: numberValue(row.enabled) === 1,
+      recoveryHashes,
+      createdAt: text(row.created_at),
+      updatedAt: text(row.updated_at),
+    }
+  }
+
+  saveTotp(userId: string, values: { encryptedSecret: string; enabled: boolean; recoveryHashes: string[] }): TotpRecord {
+    const now = nowIso()
+    this.run(`INSERT INTO user_totp (user_id, encrypted_secret, enabled, recovery_hashes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        encrypted_secret = excluded.encrypted_secret,
+        enabled = excluded.enabled,
+        recovery_hashes = excluded.recovery_hashes,
+        updated_at = excluded.updated_at`,
+      [userId, values.encryptedSecret, values.enabled ? 1 : 0, JSON.stringify(values.recoveryHashes), now, now])
+    const saved = this.getTotp(userId)
+    if (!saved) throw new Error('Failed to save TOTP settings')
+    return saved
+  }
+
+  deleteTotp(userId: string): void {
+    this.run('DELETE FROM user_totp WHERE user_id = ?', [userId])
   }
 
   saveEmailCode(scope: string, digest: string, now: number): boolean {
@@ -3943,6 +3995,50 @@ export class Database {
     const row = this.get('SELECT * FROM ai_provider_requests WHERE id = ? AND user_id = ?', [id, values.userId])
     if (!row) throw new Error('Failed to create AI provider request')
     return this.mapAiProviderRequest(row)
+  }
+
+  /** Number of recorded provider attempts for a user since an ISO timestamp. */
+  countAiProviderRequestsSince(userId: string, since: string): number {
+    const row = this.get('SELECT COUNT(*) AS total FROM ai_provider_requests WHERE user_id = ? AND created_at >= ?', [userId, since])
+    return numberValue(row?.total)
+  }
+
+  /** Per-user request aggregates for the admin usage panel. */
+  listAiUsageByUser(since: string): Array<{
+    userId: string
+    username: string
+    displayName: string
+    requests: number
+    success: number
+    failed: number
+    tokensIn: number
+    tokensOut: number
+    lastAt: string | null
+  }> {
+    return this.all(`SELECT r.user_id,
+        COALESCE(u.username, r.user_id) AS username,
+        COALESCE(u.display_name, r.user_id) AS display_name,
+        COUNT(*) AS requests,
+        SUM(CASE WHEN r.status = 'success' THEN 1 ELSE 0 END) AS success,
+        SUM(CASE WHEN r.status = 'failed' THEN 1 ELSE 0 END) AS failed,
+        COALESCE(SUM(r.tokens_in), 0) AS tokens_in,
+        COALESCE(SUM(r.tokens_out), 0) AS tokens_out,
+        MAX(r.created_at) AS last_at
+      FROM ai_provider_requests r
+      LEFT JOIN users u ON u.id = r.user_id
+      WHERE r.created_at >= ?
+      GROUP BY r.user_id
+      ORDER BY requests DESC, last_at DESC`, [since]).map(row => ({
+      userId: text(row.user_id),
+      username: text(row.username),
+      displayName: text(row.display_name),
+      requests: numberValue(row.requests),
+      success: numberValue(row.success),
+      failed: numberValue(row.failed),
+      tokensIn: numberValue(row.tokens_in),
+      tokensOut: numberValue(row.tokens_out),
+      lastAt: nullableText(row.last_at),
+    }))
   }
 
   listAiProviderRequests(userId: string, limit = 50): AiProviderRequest[] {
