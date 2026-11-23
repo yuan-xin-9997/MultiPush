@@ -1,6 +1,7 @@
 export interface BilibiliUploadedImage {
   url: string
   name?: string
+  alt?: string
 }
 
 function escapeAttribute(value: string): string {
@@ -15,7 +16,7 @@ export function replaceBilibiliImageMarkers(html: string, images: BilibiliUpload
     const image = images[index]
     if (!image) return marker
     replaced += 1
-    const alt = escapeAttribute(image.name || `正文图片 ${index + 1}`)
+    const alt = escapeAttribute(image.alt || image.name || `正文图片 ${index + 1}`)
     return marker.includes('data-multipush-block="0"')
       ? `<img src="${escapeAttribute(image.url)}" alt="${alt}">`
       : `<figure><img src="${escapeAttribute(image.url)}" alt="${alt}"></figure>`

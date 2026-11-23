@@ -227,14 +227,23 @@ export class BilibiliService {
           const imageIndex = images.length
           const $image = $(element)
           const $parent = $image.parent()
-          const inFigure = $image.closest('figure').length > 0
+          const $figure = $image.closest('figure')
+          const inFigure = $figure.length > 0
+          const $caption = $figure.find('figcaption').first()
+          const captionText = $caption.text().trim()
+          const alt = captionText || $image.attr('alt')?.trim() || ''
           const isImageOnlyParagraph = $parent.is('p') && !$parent.text().trim()
+          // Bilibili uses the image alt as its visible caption. Move a figure
+          // caption into alt and remove the figcaption; otherwise the editor
+          // renders both an image caption and a duplicate paragraph.
+          if (alt) $image.attr('alt', alt)
+          if ($caption.length) $caption.remove()
           // Image-only paragraphs can safely become a block figure. Images
           // inside a figure or a text paragraph remain inline wrappers so the
           // surrounding text/caption stays intact.
           const block = !inFigure && !$parent.is('p')
           const marker = `<span data-multipush-image="${imageIndex}" data-multipush-block="${block || isImageOnlyParagraph ? '1' : '0'}"></span>`
-          images.push({ name: `image-${index + 1}`, mime, buffer })
+          images.push({ name: `image-${index + 1}`, mime, buffer, alt })
           if (isImageOnlyParagraph) $parent.replaceWith(marker)
           else $image.replaceWith(marker)
         }

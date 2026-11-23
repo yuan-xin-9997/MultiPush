@@ -12,14 +12,14 @@ describe('Bilibili article image markers', () => {
 
   it('replaces markers in place and preserves existing figure wrappers', () => {
     const result = replaceBilibiliImageMarkers(html, [
-      { url: 'https://i0.hdslb.com/a.png', name: '图一' },
+      { url: 'https://i0.hdslb.com/a.png', name: '图一', alt: '图片说明一' },
       { url: 'https://i0.hdslb.com/b.png', name: '图二' },
     ])
     expect(result.replaced).toBe(2)
     expect(result.html.indexOf('开头')).toBeLessThan(result.html.indexOf('https://i0.hdslb.com/a.png'))
     expect(result.html.indexOf('https://i0.hdslb.com/a.png')).toBeLessThan(result.html.indexOf('图注'))
     expect(result.html.indexOf('图注')).toBeLessThan(result.html.indexOf('中间'))
-    expect(result.html).toContain('<img src="https://i0.hdslb.com/a.png" alt="图一">')
+    expect(result.html).toContain('<img src="https://i0.hdslb.com/a.png" alt="图片说明一">')
     expect(result.html).toContain('<figure><img src="https://i0.hdslb.com/b.png" alt="图二"></figure>')
     expect(result.html).not.toContain('data-multipush-image')
   })
