@@ -5,6 +5,7 @@ import { qrReady } from './qr-capture'
 import { ApiError } from './errors'
 import { wbiSign } from './bilibili-api'
 import { pasteHtml, writeClipboardImage } from './browser-clipboard'
+import { replaceBilibiliImageMarkers, stripBilibiliImageMarkers } from './bilibili-image-markers'
 
 export interface BilibiliIdentity { accountId: string; name: string }
 export interface BilibiliArticleImage { name: string; mime: string; buffer: Buffer }
@@ -54,9 +55,6 @@ const PASTE = process.platform === 'darwin' ? 'Meta+V' : 'Control+V'
 const IMAGE_UPLOAD = 'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs'
 const IMAGE_NODE_SELECTOR = 'img'
 
-function escapeAttribute(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
 
 function stateCookie(state: PublisherStorageState, name: string): string {
   return state.cookies.find((cookie) => cookie.name === name)?.value ?? ''
@@ -348,7 +346,7 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
       const imageNotes: string[] = []
       let imageCount = 0
       let uploadFailure = ''
-      let imageHtml = ''
+      let bodyHtml = article.html
       if (images.length) {
         const uploaded: string[] = []
         try {
@@ -366,7 +364,13 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
           imageNotes.push(uploadFailure)
         }
         if (uploaded.length === images.length) {
-          imageHtml = uploaded.map((url, index) => `<figure><img src="${escapeAttribute(url)}" alt="正文图片 ${index + 1}"></figure>`).join('')
+          const replaced = replaceBilibiliImageMarkers(article.html, uploaded.map((url, index) => ({ url, name: images[index]?.name })))
+          bodyHtml = replaced.html
+          if (replaced.replaced !== images.length) {
+            throw new ApiError(502, 'bilibili_article_editor', `正文图片占位符不完整：期望 ${images.length} 个，实际替换 ${replaced.replaced} 个`)
+          }
+        } else {
+          bodyHtml = stripBilibiliImageMarkers(article.html)
         }
       }
 
@@ -382,7 +386,7 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
       const editor = frame.locator('.tiptap.ProseMirror[contenteditable="true"]').first()
       progress('正在写入 B 站图文正文')
       await editor.click()
-      const pasted = await frame.evaluate(pasteHtml, { html: `${article.html}${imageHtml}`, plain: article.plain, replace: true })
+      const pasted = await frame.evaluate(pasteHtml, { html: bodyHtml, plain: article.plain, replace: true })
       if (!pasted?.ok) throw new ApiError(502, 'bilibili_article_editor', '未找到 B 站正文编辑区，无法写入正文')
       await page.waitForTimeout(2500)
       if (!(await editor.innerText()).includes(article.plain.slice(0, 18))) {
@@ -393,7 +397,7 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
       }
 
       if (images.length) {
-        if (imageHtml) {
+        if (!uploadFailure) {
           imageCount = await waitForImageCount(editor, images.length, 20_000)
           if (imageCount < images.length) {
             throw new ApiError(502, 'bilibili_article_editor', `正文图片写入不完整：期望 ${images.length} 张，实际 ${imageCount} 张；${await editorDiagnostics(editor, page)}；${imageNotes.join('；')}`)

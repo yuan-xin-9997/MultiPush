@@ -220,7 +220,19 @@ export class BilibiliService {
           }
         }
         if (buffer && buffer.length > 0 && buffer.length <= MAX_IMAGE_BYTES) {
+          const imageIndex = images.length
+          const $image = $(element)
+          const $parent = $image.parent()
+          const inFigure = $image.closest('figure').length > 0
+          const isImageOnlyParagraph = $parent.is('p') && !$parent.text().trim()
+          // Image-only paragraphs can safely become a block figure. Images
+          // inside a figure or a text paragraph remain inline wrappers so the
+          // surrounding text/caption stays intact.
+          const block = !inFigure && !$parent.is('p')
+          const marker = `<span data-multipush-image="${imageIndex}" data-multipush-block="${block || isImageOnlyParagraph ? '1' : '0'}"></span>`
           images.push({ name: `image-${index + 1}`, mime, buffer })
+          if (isImageOnlyParagraph) $parent.replaceWith(marker)
+          else $image.replaceWith(marker)
         }
       } catch {
         // Skip unreachable images; the editor text is still saved.
