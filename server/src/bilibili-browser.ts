@@ -9,7 +9,7 @@ import { compactEditorHtml } from './publisher-html'
 import { replaceBilibiliImageMarkers, stripBilibiliImageMarkers } from './bilibili-image-markers'
 
 export interface BilibiliIdentity { accountId: string; name: string }
-export interface BilibiliArticleImage { name: string; mime: string; buffer: Buffer }
+export interface BilibiliArticleImage { name: string; mime: string; buffer: Buffer; alt?: string }
 export interface BilibiliArticleInput {
   title: string
   /** HTML with <img> removed; images are pasted separately as native editor images. */
@@ -365,7 +365,7 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
           imageNotes.push(uploadFailure)
         }
         if (uploaded.length === images.length) {
-          const replaced = replaceBilibiliImageMarkers(article.html, uploaded.map((url, index) => ({ url, name: images[index]?.name })))
+          const replaced = replaceBilibiliImageMarkers(article.html, uploaded.map((url, index) => ({ url, name: images[index]?.name, alt: images[index]?.alt })))
           bodyHtml = replaced.html
           if (replaced.replaced !== images.length) {
             throw new ApiError(502, 'bilibili_article_editor', `正文图片占位符不完整：期望 ${images.length} 个，实际替换 ${replaced.replaced} 个`)
