@@ -202,6 +202,7 @@ describe('Bilibili service', () => {
   it('publishes an article through the driver and persists the publication', async () => {
     const { database, config } = setup()
     const user = database.createUser({ username: 'bili_article', email: 'bili-article@example.com', passwordHash: 'hash', displayName: 'UP' })
+    writeFileSync(path.join(config.uploadsDir, 'a.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7XkAAAAASUVORK5CYII=', 'base64'))
     const created = database.createContent(user.id, { ...content(), bookId: null })
     const detail = { ...content(), id: created.id }
     const [result] = await renderPlatforms({ content: detail, platforms: ['bilibili'], options: { includeTags: true }, authorName: 'UP', baseUrl: 'http://localhost' })
@@ -216,6 +217,8 @@ describe('Bilibili service', () => {
     expect(settled.remoteId).toBe('123')
     expect(driver.articleCalls).toHaveLength(1)
     expect(driver.articleCalls[0].title.length).toBeLessThanOrEqual(40)
+    expect(driver.articleCalls[0].html).toContain('data-multipush-image="0"')
+    expect(driver.articleCalls[0].html.indexOf('小节')).toBeLessThan(driver.articleCalls[0].html.indexOf('data-multipush-image'))
     service.close()
   })
 })
