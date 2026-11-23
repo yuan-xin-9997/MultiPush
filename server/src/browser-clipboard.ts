@@ -31,3 +31,16 @@ export async function writeClipboardImage({ b64, mime }) {
   await navigator.clipboard.write([new ClipboardItem({ [mime]: new Blob([bytes], { type: mime }) })])
   return true
 }
+
+/**
+ * Use the editor's own Tiptap command instead of simulating a paste when
+ * available. This keeps the document state in sync and avoids the editor
+ * turning formatting newlines into empty paragraphs.
+ */
+export async function setEditorContent({ html }) {
+  const element = document.querySelector('.tiptap.ProseMirror[contenteditable="true"]')
+  const editor = element?.editor
+  if (!editor || typeof editor.setContent !== 'function') return { ok: false }
+  editor.setContent(html, true)
+  return { ok: true }
+}

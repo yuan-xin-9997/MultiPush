@@ -4,7 +4,8 @@ import { publisherExecutablePath } from './wechat-browser'
 import { qrReady } from './qr-capture'
 import { ApiError } from './errors'
 import { wbiSign } from './bilibili-api'
-import { pasteHtml, writeClipboardImage } from './browser-clipboard'
+import { pasteHtml, setEditorContent, writeClipboardImage } from './browser-clipboard'
+import { compactEditorHtml } from './publisher-html'
 import { replaceBilibiliImageMarkers, stripBilibiliImageMarkers } from './bilibili-image-markers'
 
 export interface BilibiliIdentity { accountId: string; name: string }
@@ -385,9 +386,13 @@ export class PlaywrightBilibiliDriver implements BilibiliDriver {
       await titleInput.fill(article.title)
       const editor = frame.locator('.tiptap.ProseMirror[contenteditable="true"]').first()
       progress('正在写入 B 站图文正文')
-      await editor.click()
-      const pasted = await frame.evaluate(pasteHtml, { html: bodyHtml, plain: article.plain, replace: true })
-      if (!pasted?.ok) throw new ApiError(502, 'bilibili_article_editor', '未找到 B 站正文编辑区，无法写入正文')
+      const contentHtml = compactEditorHtml(bodyHtml)
+      const applied = await frame.evaluate(setEditorContent, { html: contentHtml })
+      if (!applied?.ok) {
+        await editor.click()
+        const pasted = await frame.evaluate(pasteHtml, { html: contentHtml, plain: article.plain, replace: true })
+        if (!pasted?.ok) throw new ApiError(502, 'bilibili_article_editor', '未找到 B 站正文编辑区，无法写入正文')
+      }
       await page.waitForTimeout(2500)
       if (!(await editor.innerText()).includes(article.plain.slice(0, 18))) {
         await editor.click()
