@@ -10,7 +10,7 @@ import { renderPlatforms } from '../src/renderers'
 import { adjustPlatformRender } from '../src/render-adjustment'
 import { ApiError } from '../src/errors'
 import { WechatpicService } from '../src/wechatpic'
-import { WechatStickerApiDriver, type WechatStickerDriver } from '../src/wechatpic-api'
+import { WechatStickerApiDriver, wechatpicBodyHtml, type WechatStickerDriver } from '../src/wechatpic-api'
 import { loadConfig } from '../src/config'
 import { openDatabase, type Database } from '../src/db'
 import { decryptPublisherSecret, encryptPublisherSecret, loadPublisherKey } from '../src/publisher-session'
@@ -182,6 +182,12 @@ describe('wechatpic validation', () => {
 })
 
 describe('WechatStickerApiDriver', () => {
+  it('formats the body as compact paragraphs without blank-line placeholders', () => {
+    expect(wechatpicBodyHtml('第一段\n\n第二段\n\n\n第三段')).toBe('<p>第一段</p><p>第二段</p><p>第三段</p>')
+    expect(wechatpicBodyHtml('第一行\n第二行\n\n下一段')).toBe('<p>第一行<br>第二行</p><p>下一段</p>')
+  })
+
+
   it('fails the connection when the token endpoint rejects the credentials', async () => {
     const fetchMock = vi.fn(async (url: string | URL) => {
       assert.ok(String(url).includes('/token?'), 'the driver must fetch a token before anything else')
