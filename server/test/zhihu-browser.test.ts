@@ -11,7 +11,7 @@ const response = (data: unknown, status = 200) => ({ status: () => status, ok: (
 
 afterEach(async () => { for (const driver of drivers.splice(0)) await driver.close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
-function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publishTimeout?: boolean; draftId?: string; existing?: boolean; existingSpacing?: boolean; checkState?: 'published' | 'draft' | 'reviewing'; foreignAuthor?: boolean } = {}) {
+function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publishTimeout?: boolean; publishNoResponse?: boolean; draftId?: string; existing?: boolean; existingSpacing?: boolean; checkState?: 'published' | 'draft' | 'reviewing'; foreignAuthor?: boolean } = {}) {
   const draftId = options.draftId || '123'
   let saved: Record<string, unknown> = { id: draftId, state: 'draft' }, publishListener: (value: unknown) => void = () => {}
   let deleted = false
@@ -23,7 +23,8 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
   })
   const patch = vi.fn(async (_url: string, value: { data: Record<string, unknown> }) => { saved = { ...saved, ...value.data }; return response({}) })
   const get = vi.fn(async (url: string) => {
-    if (url.endsWith('/me')) return response({ id: 'account', name: '作者' })
+    if (url.endsWith('/me')) return response({ id: 'account', name: '作者', url_token: 'author' })
+    if (options.publishNoResponse && url.includes('/api/v4/members/author/articles')) return response({ data: [{ id: '456', title: '测试文章', author: { id: 'account' }, updated: Math.floor(Date.now() / 1000) }] })
     if (url === `https://zhuanlan.zhihu.com/api/articles/${draftId}/draft` && !deleted || saved.state === 'published' && url === `https://zhuanlan.zhihu.com/api/articles/${saved.id}`) return response({ ...saved, ...(options.mismatch ? { content: '<p>丢失的内容</p>' } : {}) })
     return response({ error: { code: 4041 } }, 404)
   })
@@ -33,8 +34,8 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
   })
   const click = vi.fn(async () => {
     if (options.publishTimeout) throw Error('timeout with secret-cookie')
-    saved = { ...saved, id: '456', state: 'published' }
-    publishListener({ request: () => ({ method: () => 'POST' }), url: () => 'https://www.zhihu.com/api/v4/content/publish', json: async () => ({ code: 0, data: { result: JSON.stringify({ publish: { id: '456' } }) } }) })
+    saved = { ...saved, id: '456', state: 'published', title: article.title, content: zhihuEditorContent(article.html.replace('https://external.test/image.png', 'https://pic4.zhimg.com/uploaded.png')) }
+    if (!options.publishNoResponse) publishListener({ request: () => ({ method: () => 'POST' }), url: () => 'https://www.zhihu.com/api/v4/content/publish', json: async () => ({ code: 0, data: { result: JSON.stringify({ publish: { id: '456' } }) } }) })
   })
   const page = { goto: vi.fn(), url: () => 'https://zhuanlan.zhihu.com/p/123/edit', on: (_event: string, listener: typeof publishListener) => { publishListener = listener }, getByRole: () => ({ first: () => ({ click }) }), waitForTimeout: vi.fn() }
   const context = { setDefaultTimeout: vi.fn(), storageState: async () => state, cookies: async () => [{ name: '_xsrf', value: 'test-xsrf' }], close: vi.fn(async () => {}), newPage: async () => page, request: { post, patch, get, delete: remove } }
@@ -129,6 +130,13 @@ describe('Zhihu browser publishing', () => {
     expect(await driver.publish(state, article, 'publish', vi.fn())).toMatchObject({ status: 'published', remoteId: '456', url: 'https://zhuanlan.zhihu.com/p/456' })
     expect(click).toHaveBeenCalledTimes(1)
     expect(get.mock.calls.map(call => call[0])).toContain('https://zhuanlan.zhihu.com/api/articles/456')
+  })
+
+  it('finds the newly published article by title when the publish response never arrives', async () => {
+    vi.stubEnv('ZHIHU_PUBLISH_RESPONSE_TIMEOUT_MS', '0')
+    vi.stubEnv('ZHIHU_CONFIRM_TIMEOUT_MS', '1000')
+    const { driver, article } = fixture({ publishNoResponse: true })
+    expect(await driver.publish(state, article, 'publish', vi.fn())).toMatchObject({ status: 'published', remoteId: '456', url: 'https://zhuanlan.zhihu.com/p/456' })
   })
 
   it.each([{ createTimeout: true }, { publishTimeout: true }])('treats timed-out writes as uncertain and never leaks credentials: %j', async options => {

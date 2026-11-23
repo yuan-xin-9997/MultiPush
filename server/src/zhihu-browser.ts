@@ -162,6 +162,30 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     } finally { await this.releaseContext(context) }
   }
 
+  private async findPublishedByTitle(context: BrowserContext, accountId: string, title: string, since: number): Promise<{ id: string; url: string } | null> {
+    try {
+      const me = await zhihuResponse(await context.request.get(`${HOME}api/v4/me`, { headers: { 'x-requested-with': 'fetch', Referer: HOME }, timeout: 15_000 }), '检查知乎账号')
+      const urlToken = typeof me.url_token === 'string' ? me.url_token : ''
+      if (!urlToken) return null
+      const response = await context.request.get(`${HOME}api/v4/members/${encodeURIComponent(urlToken)}/articles?limit=20&offset=0`, {
+        headers: { 'x-requested-with': 'fetch', Referer: `${HOME}people/${encodeURIComponent(urlToken)}/articles` },
+        timeout: 20_000,
+      })
+      if (!response.ok()) return null
+      const body = await response.json().catch(() => null) as { data?: Array<Record<string, unknown>> } | null
+      const articles = Array.isArray(body?.data) ? body.data : []
+      const match = articles
+        .filter(item => item.title === title && String(object(item.author).id) === accountId)
+        .sort((left, right) => Number(right.updated || right.created || 0) - Number(left.updated || left.created || 0))[0]
+      if (!match || typeof match.id !== 'string' && typeof match.id !== 'number') return null
+      const time = Number(match.updated || match.created || 0)
+      if (time > 0 && time < since - 300) return null
+      return { id: String(match.id), url: `${COLUMN}p/${match.id}` }
+    } catch {
+      return null
+    }
+  }
+
   async deleteDraft(state: PublisherStorageState, remoteId: string) {
     if (!/^\d+$/.test(remoteId)) throw new ApiError(400, 'zhihu_draft_invalid', '知乎草稿编号无效')
     const context = await this.context(state)
@@ -258,10 +282,12 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
       })
       // Once any publish action may have been submitted, never replay it after a timeout.
       publishSubmitted = true
+      const startedAt = Math.floor(Date.now() / 1000)
       await page.getByRole('button', { name: /^发布(?:文章)?$/ }).first().click({ timeout: 20_000 })
-      const deadline = Date.now() + 45_000
+      const responseTimeout = Math.max(0, Number(process.env.ZHIHU_PUBLISH_RESPONSE_TIMEOUT_MS ?? 45_000))
+      const responseDeadline = Date.now() + responseTimeout
       let confirmed = false
-      while (Date.now() < deadline && !publishedId && !rejected) {
+      while (Date.now() < responseDeadline && !publishedId && !rejected) {
         if (!confirmed) {
           const panel = page.locator('[role="dialog"], .PublishPanel').last()
           const button = panel.getByRole('button', { name: /^(?:确认发布|发布|确定)$/ }).last()
@@ -270,7 +296,23 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
         await page.waitForTimeout(500)
       }
       if (rejected) throw new ApiError(502, 'zhihu_publish_rejected', '知乎未确认发布成功，请打开草稿检查账号权限及发布设置')
-      if (!publishedId) throw new ApiError(502, 'zhihu_publish_unverified', '知乎发布结果未能确认，请核对知乎后台，避免重复发布')
+      if (!publishedId) {
+        const identity = await this.identity(context)
+        const confirmTimeout = Math.max(0, Number(process.env.ZHIHU_CONFIRM_TIMEOUT_MS ?? 120_000))
+        const confirmationDeadline = Date.now() + confirmTimeout
+        while (Date.now() < confirmationDeadline && !publishedId && !rejected) {
+          const remaining = Math.max(0, Math.ceil((confirmationDeadline - Date.now()) / 1000))
+          progress({ message: `知乎已收到发布请求，正在自动确认文章是否公开（最多再等 ${remaining} 秒）` })
+          const found = await this.findPublishedByTitle(context, identity.accountId, article.title, startedAt)
+          if (found) {
+            publishedId = found.id
+            progress({ message: '已找到知乎文章，正在核对正文与公开状态' })
+            break
+          }
+          await page.waitForTimeout(5000)
+        }
+      }
+      if (!publishedId) throw new ApiError(502, 'zhihu_publish_unverified', '知乎发布结果在等待约 2 分钟后仍未能确认，请核对知乎后台，避免重复发布')
       const published = await read(publishedId, 'published')
       if (String(published.id) !== publishedId || published.title !== article.title || !['published', 'PUBLISHED'].includes(String(published.state)) && published.is_published !== true) throw new ApiError(502, 'zhihu_publish_unverified', '知乎尚未确认文章公开状态，请到知乎后台核实')
       verifyZhihuContent(content, String(published.content || ''))
