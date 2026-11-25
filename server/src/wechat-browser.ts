@@ -354,6 +354,8 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
     }
     let lastStatus = ''
     let riskSaved = false
+    let scannedAt = 0
+    let lastSessionProbe = 0
     return {
       close,
       poll: async () => {
@@ -390,6 +392,23 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
         const currentQr = await qrImage(page, LOGIN_QR)
         if (currentQr) qrCode = currentQr.image
         const scanned = isWechatLoginScanned(text)
+        if (scanned && !scannedAt) scannedAt = Date.now()
+        // Some WeChat login flows set the session cookies after the phone
+        // confirmation but leave the QR page on "choose an account" forever.
+        // Probe a fresh request in the same context; if it is already logged
+        // in, complete the UI without waiting for the page to redirect.
+        if (scanned && scannedAt && Date.now() - scannedAt > 8_000 && Date.now() - lastSessionProbe > 8_000) {
+          lastSessionProbe = Date.now()
+          try {
+            const probe = await context.request.get(HOME, { timeout: 15_000 })
+            const info = parseWechatPage(await probe.text(), probe.url())
+            if (info) {
+              lastStatus = 'connected'
+              console.log(`[wechat] login connected after post-scan probe name=${info.name}`)
+              return { status: 'connected', qrCode: null, message: '微信公众号已登录', state: await context.storageState(), name: info.name }
+            }
+          } catch { /* Fall through to the normal scanned state. */ }
+        }
         // Post-scan states: the panel distinguishes "confirm on the phone"
         // from "choose an account" from "no account bound to this WeChat".
         if (/没有可登录账号/.test(text)) {
