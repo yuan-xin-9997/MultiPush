@@ -399,15 +399,21 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
         // in, complete the UI without waiting for the page to redirect.
         if (scanned && scannedAt && Date.now() - scannedAt > 8_000 && Date.now() - lastSessionProbe > 8_000) {
           lastSessionProbe = Date.now()
+          let info = null as ReturnType<typeof parseWechatPage>
           try {
             const probe = await context.request.get(HOME, { timeout: 15_000 })
-            const info = parseWechatPage(await probe.text(), probe.url())
-            if (info) {
-              lastStatus = 'connected'
-              console.log(`[wechat] login connected after post-scan probe name=${info.name}`)
-              return { status: 'connected', qrCode: null, message: '微信公众号已登录', state: await context.storageState(), name: info.name }
-            }
-          } catch { /* Fall through to the normal scanned state. */ }
+            info = parseWechatPage(await probe.text(), probe.url())
+          } catch { /* Fall through to a real page probe. */ }
+          if (!info) {
+            const probePage = await context.newPage()
+            try { info = await sessionInfo(probePage) } catch { /* still waiting for account selection */ }
+            finally { await probePage.close().catch(() => {}) }
+          }
+          if (info) {
+            lastStatus = 'connected'
+            console.log(`[wechat] login connected after post-scan probe name=${info.name}`)
+            return { status: 'connected', qrCode: null, message: '微信公众号已登录', state: await context.storageState(), name: info.name }
+          }
         }
         // Post-scan states: the panel distinguishes "confirm on the phone"
         // from "choose an account" from "no account bound to this WeChat".
