@@ -312,7 +312,14 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
         executablePath: path,
         headless: true,
         chromiumSandbox: process.env.WECHAT_BROWSER_NO_SANDBOX !== '1',
-        args: ['--disable-dev-shm-usage'],
+        args: [
+          '--disable-dev-shm-usage',
+          // Keep the WeChat login page's timers alive while it waits for the
+          // account-selection confirmation from the phone.
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+        ],
       }).then(browser => {
         browser.on('disconnected', () => { this.browser = null })
         return browser
@@ -392,6 +399,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
         const currentQr = await qrImage(page, LOGIN_QR)
         if (currentQr) qrCode = currentQr.image
         const scanned = isWechatLoginScanned(text)
+        if (scanned) await page.bringToFront().catch(() => {})
         if (scanned && !scannedAt) scannedAt = Date.now()
         // Some WeChat login flows set the session cookies after the phone
         // confirmation but leave the QR page on "choose an account" forever.
