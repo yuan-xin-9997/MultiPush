@@ -631,6 +631,13 @@ export default function GalleryPage() {
     markDirty()
   }
 
+  function startImageDrag(index: number, event: DragEvent<HTMLElement>) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', String(index))
+    setDraggingIndex(index)
+    setDropIndex(index)
+  }
+
   function removeImage(index: number) {
     const current = imagesRef.current
     const removed = current[index]
@@ -944,7 +951,7 @@ export default function GalleryPage() {
                   图片
                   <span className="gallery-count">{images.length}</span>
                 </h2>
-                <p>按顺序排好，拖动手柄或使用箭头调整；星标决定封面。</p>
+                <p>按顺序排好，直接拖动图片或手柄调整顺序；也可以使用箭头；星标决定封面。</p>
               </div>
               <div className="gallery-section-actions">
                 <button
@@ -997,11 +1004,20 @@ export default function GalleryPage() {
                 {images.map((image, index) => (
                   <article
                     key={image.id}
+                    draggable
+                    onDragStart={(event) => {
+                      if ((event.target as HTMLElement).closest('button, input, textarea, select, a')) return
+                      startImageDrag(index, event)
+                    }}
                     className={cn(
                       'gallery-image-card',
                       dropIndex === index && draggingIndex !== null && draggingIndex !== index && 'is-drop-target',
                       draggingIndex === index && 'is-dragging',
                     )}
+                    onDragEnd={() => {
+                      setDraggingIndex(null)
+                      setDropIndex(null)
+                    }}
                     onDragOver={(event) => {
                       if (draggingIndex === null) return
                       event.preventDefault()
@@ -1020,6 +1036,7 @@ export default function GalleryPage() {
                       <img
                         src={absoluteUrl(image.src)}
                         alt={imageAlt(image, index)}
+                        draggable={false}
                         loading="lazy"
                         onLoad={(event) => registerImageMeta(image, event.currentTarget)}
                         onError={() => setImageMeta((current) => ({
@@ -1027,7 +1044,10 @@ export default function GalleryPage() {
                           [image.id]: { ...current[image.id], sizeLoaded: true },
                         }))}
                       />
-                      <span className="gallery-image-index">{index + 1}</span>
+                      <span className="gallery-image-index">
+                        <GripVertical size={11} />
+                        {index + 1}
+                      </span>
                       {selectedCover === image.src ? (
                         <span className="gallery-cover-flag">
                           <Star size={11} fill="currentColor" />
@@ -1039,12 +1059,7 @@ export default function GalleryPage() {
                           type="button"
                           className="gallery-image-tool gallery-drag-handle"
                           draggable
-                          onDragStart={(event: DragEvent<HTMLButtonElement>) => {
-                            event.dataTransfer.effectAllowed = 'move'
-                            event.dataTransfer.setData('text/plain', String(index))
-                            setDraggingIndex(index)
-                            setDropIndex(index)
-                          }}
+                          onDragStart={(event: DragEvent<HTMLButtonElement>) => startImageDrag(index, event)}
                           onDragEnd={() => {
                             setDraggingIndex(null)
                             setDropIndex(null)
