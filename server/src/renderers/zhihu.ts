@@ -9,6 +9,7 @@ import {
   buildMeta,
   buildPlatformWarnings,
   buildStyledArticle,
+  escapeHtml,
   htmlToMarkdown,
   prepareContent,
   safeFilename,
@@ -16,6 +17,40 @@ import {
 } from './common'
 
 const ZHIHU_THEME = '#1772f6'
+
+const ZHIHU_PIN_IMAGE_MAX = 9
+const ZHIHU_PIN_TEXT_MAX = 1000
+
+/** Zhihu 想法: short text + optional title + up to nine images. */
+function renderZhihuPin(prepared: ReturnType<typeof prepareContent>, info: ReturnType<typeof getPlatformInfo>): PlatformRender {
+  const title = truncateToChars(prepared.rawTitle, info.limits.titleMax ?? 100).trim()
+  const body = truncateToChars(prepared.plainText.trim(), ZHIHU_PIN_TEXT_MAX).trim()
+  const images = prepared.media.images.slice(0, ZHIHU_PIN_IMAGE_MAX)
+  const warnings = buildPlatformWarnings(prepared)
+  if (prepared.media.images.length > ZHIHU_PIN_IMAGE_MAX) warnings.push(`知乎想法最多支持 ${ZHIHU_PIN_IMAGE_MAX} 张图片，已按正文顺序取前 ${ZHIHU_PIN_IMAGE_MAX} 张。`)
+  if (!body) warnings.push('知乎想法正文为空，发布前请补充配文。')
+  const paragraphs = body.split(/\n{2,}/).map((block) => `<p>${escapeHtml(block).replace(/\n/g, '<br>')}</p>`).join('')
+  const imageHtml = images.map((src) => `<figure><img src="${escapeHtml(src)}" alt=""></figure>`).join('')
+  const html = `<div data-mp-zhihu-pin="1">${paragraphs}${imageHtml}</div>`
+  const text = [title, body].filter(Boolean).join('\n\n')
+  return {
+    platform: 'zhihu',
+    title,
+    html,
+    markdown: null,
+    text,
+    previewMode: 'pin',
+    themeColor: ZHIHU_THEME,
+    meta: { ...buildMeta(prepared), imageCount: images.length },
+    cards: [],
+    assets: prepared.media.assets.filter((asset) => asset.kind === 'image' && images.includes(asset.url)),
+    videos: [],
+    warnings: Array.from(new Set(warnings)),
+    downloads: [{ filename: `${safeFilename(title)}-知乎想法.txt`, mimeType: 'text/plain;charset=utf-8', kind: 'text', content: text }],
+    generatedAt: prepared.generatedAt,
+    captionBody: body,
+  }
+}
 
 const ZHIHU_STYLES: Record<string, string> = {
   p: 'font-size:16px;line-height:1.85;color:#121212;margin:0 0 18px;letter-spacing:0.2px;word-break:break-word;',
@@ -67,6 +102,7 @@ const ZHIHU_TOC = {
 export async function renderZhihu(input: RenderInput, context?: RendererContext): Promise<PlatformRender> {
   const info = getPlatformInfo('zhihu')
   const prepared = prepareContent(input, context, info)
+  if (input.content.kind === 'gallery') return renderZhihuPin(prepared, info)
   const title = truncateToChars(prepared.rawTitle, info.limits.titleMax ?? 100)
   const tableCount = load(prepared.html, null, false)('table').length
   const warnings = buildPlatformWarnings(prepared, tableCount

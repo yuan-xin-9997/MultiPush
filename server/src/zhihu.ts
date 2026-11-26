@@ -11,7 +11,7 @@ import { UPLOAD_FILENAME_PATTERN } from './upload'
 import { decryptPublisherSession, encryptPublisherSession, loadPublisherKey, type PublisherStorageState } from './publisher-session'
 import { downloadPublisherImage, publisherImage, type PublisherImage } from './publisher-image'
 import { prepareZhihuContent, zhihuImageUrl } from './zhihu-content'
-import type { ZhihuArticle, ZhihuDriver, ZhihuIdentity, ZhihuLoginAttempt } from './zhihu-browser'
+import type { ZhihuArticle, ZhihuDriver, ZhihuIdentity, ZhihuLoginAttempt, ZhihuPin } from './zhihu-browser'
 
 const TTL = 5 * 60_000
 const now = () => new Date().toISOString()
@@ -205,6 +205,31 @@ export class ZhihuService {
     if (account) this.database.saveZhihuAccount(userId, { ...account, encryptedSession: encryptPublisherSession(state, this.key, userId), status: 'connected', checkedAt: now() })
   }
 
+  private async pinArticle(userId: string, input: ZhihuPublishInput, baseUrl?: string): Promise<ZhihuPin> {
+    const record = this.database.getRender(userId, input.renderId), render = record?.results.find(result => result.platform === 'zhihu')
+    if (!record || !render || render.previewMode !== 'pin') throw notFound('知乎想法排版记录不存在，请先生成想法排版')
+    const title = render.title.trim()
+    if (!title || Array.from(title).length > 100) throw new ApiError(400, 'zhihu_title_invalid', '知乎想法标题需要 1–100 个字')
+    const text = (render.captionBody || render.text || '').trim()
+    if (!text) throw new ApiError(400, 'zhihu_pin_body_empty', '知乎想法正文不能为空')
+    if (Array.from(text).length > 1000) throw new ApiError(400, 'zhihu_pin_body_too_long', '知乎想法正文最多 1000 字')
+    const sources = render.assets.filter(asset => asset.kind === 'image').map(asset => asset.url).slice(0, 9)
+    const images = new Map<string, PublisherImage>()
+    for (const src of sources) {
+      const url = new URL(src, this.config.publicBaseUrl || baseUrl || 'https://multipush.invalid')
+      const origin = this.config.publicBaseUrl || baseUrl
+      const owned = url.origin === 'https://multipush.invalid' || (!!origin && url.origin === new URL(origin).origin)
+      if (owned && url.pathname.startsWith('/uploads/')) {
+        const media = this.database.getMediaByFilename(userId, url.pathname.slice('/uploads/'.length))
+        if (!media) throw notFound('知乎想法图片不存在或无权访问')
+        images.set(src, await this.image(userId, media.id))
+      } else if (['http:', 'https:'].includes(url.protocol)) {
+        images.set(src, await downloadPublisherImage(src, 'zhihu'))
+      } else throw new ApiError(400, 'zhihu_image_invalid', '知乎想法包含无效图片地址')
+    }
+    return { title, text, images }
+  }
+
   list(userId: string): ZhihuPublication[] { return this.database.listZhihuPublications(userId) }
   get(userId: string, id: string): ZhihuPublication {
     const value = this.database.getZhihuPublication(userId, id)
@@ -287,17 +312,21 @@ export class ZhihuService {
       const state = this.state(userId)
       const account = this.database.getZhihuAccount(userId)
       if (!account) throw new ApiError(409, 'zhihu_session_expired', '请先在系统中扫码登录知乎')
-      const article = await this.article(userId, input, baseUrl)
-      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: input.mode, columnTitle: article.columnTitle ?? null }))
-      if (article.cover) hash.update(article.cover.buffer)
-      for (const [src, image] of article.images) hash.update(src).update(image.buffer)
+      const render = this.database.getRender(userId, input.renderId)
+      const isPin = render?.results.find(result => result.platform === 'zhihu')?.previewMode === 'pin'
+      const article = isPin ? undefined : await this.article(userId, input, baseUrl)
+      const pin = isPin ? await this.pinArticle(userId, input, baseUrl) : undefined
+      const title = article?.title ?? pin!.title
+      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title, html: article?.html ?? null, pinText: pin?.text ?? null, mode: input.mode, columnTitle: article?.columnTitle ?? null }))
+      if (article?.cover) hash.update(article.cover.buffer)
+      for (const [src, image] of article?.images ?? pin?.images ?? []) hash.update(src).update(image.buffer)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findZhihuPublication(userId, idempotencyKey)
       if (previous && previous.status !== 'failed') return previous
       this.actions.assertPublish(userId)
       const checked: Awaited<ReturnType<ZhihuDriver['checkSession']>> = { state, identity: { accountId: account.accountId, name: account.name || '知乎用户' } }
-      const publication = previous ?? this.database.createZhihuPublication(userId, { renderId: input.renderId, title: article.title, mode: input.mode, idempotencyKey })
-      this.database.updateZhihuPublication(userId, publication.id, { status: 'running', message: '正在准备知乎正文及图片' })
-      const task = this.run(userId, publication.id, checked, article, input.mode, previous?.remoteId || undefined, previous?.resolutions?.some(entry => entry.action === 'not_published') || false)
+      const publication = previous ?? this.database.createZhihuPublication(userId, { renderId: input.renderId, title, mode: input.mode, idempotencyKey })
+      this.database.updateZhihuPublication(userId, publication.id, { status: 'running', message: isPin ? '正在准备知乎想法' : '正在准备知乎正文及图片' })
+      const task = this.run(userId, publication.id, checked, article, input.mode, previous?.remoteId || undefined, previous?.resolutions?.some(entry => entry.action === 'not_published') || false, pin)
       this.jobs.set(publication.id, task)
       handedOff = true
       void task.finally(() => { this.jobs.delete(publication.id); this.active.delete(userId) }).catch(() => {})
@@ -313,8 +342,15 @@ export class ZhihuService {
     if (account && error instanceof ApiError && error.code === 'zhihu_session_expired') this.database.saveZhihuAccount(userId, { ...account, status: 'expired', checkedAt: now() })
   }
 
-  private async run(userId: string, id: string, checked: Awaited<ReturnType<ZhihuDriver['checkSession']>>, article: ZhihuArticle & { external: string[] }, mode: 'draft' | 'publish', resumeDraftId?: string, confirmedUnpublished = false): Promise<void> {
+  private async run(userId: string, id: string, checked: Awaited<ReturnType<ZhihuDriver['checkSession']>>, article: ZhihuArticle & { external: string[] } | undefined, mode: 'draft' | 'publish', resumeDraftId?: string, confirmedUnpublished = false, pin?: ZhihuPin): Promise<void> {
     try {
+      if (pin) {
+        const result = await this.driver.publishPin(checked.state, pin, mode, progress => { this.database.updateZhihuPublication(userId, id, progress) })
+        this.save(userId, result.state, checked.identity)
+        this.database.updateZhihuPublication(userId, id, result)
+        return
+      }
+      if (!article) throw new ApiError(400, 'zhihu_render_invalid', '知乎排版记录缺少正文')
       if (resumeDraftId) {
         const result = await this.driver.checkPublication(checked.state, resumeDraftId, article.title)
         this.save(userId, result.state, checked.identity)

@@ -18,7 +18,7 @@ export type ContentKind = 'article' | 'gallery' | 'video'
 
 export type MediaKind = 'image' | 'video' | 'document'
 
-export type RenderPreviewMode = 'article' | 'cards' | 'video' | 'vertical'
+export type RenderPreviewMode = 'article' | 'cards' | 'video' | 'vertical' | 'pin'
 
 export interface PlatformInfo {
   id: PlatformId

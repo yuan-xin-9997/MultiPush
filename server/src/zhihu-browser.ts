@@ -10,6 +10,7 @@ import { prepareZhihuContent, zhihuEditorContent, verifyZhihuContent, zhihuImage
 
 export interface ZhihuIdentity { accountId: string; name: string }
 export interface ZhihuArticle { title: string; html: string; images: Map<string, PublisherImage>; cover?: PublisherImage; columnTitle?: string }
+export interface ZhihuPin { title: string; text: string; images: Map<string, PublisherImage> }
 export interface ZhihuLoginAttempt {
   poll(): Promise<{ status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'; qrCode: string | null; message: string; state?: PublisherStorageState; identity?: ZhihuIdentity }>
   close(): Promise<void>
@@ -18,6 +19,7 @@ export interface ZhihuDriver {
   beginLogin(): Promise<ZhihuLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: ZhihuIdentity }>
   listColumns(state: PublisherStorageState): Promise<{ state: PublisherStorageState; columns: ZhihuColumn[] }>
+  publishPin(state: PublisherStorageState, pin: ZhihuPin, mode: 'draft' | 'publish', progress: (value: Partial<Pick<ZhihuPublication, 'message' | 'remoteId' | 'url'>>) => void): Promise<{ state: PublisherStorageState; status: 'published'; remoteId: string; url: string; message: string }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'draft' | 'missing' | 'unknown'; url: string | null; message: string }>
   publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: (value: Partial<Pick<ZhihuPublication, 'message' | 'remoteId' | 'url'>>) => void, resumeDraftId?: string): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   deleteDraft(state: PublisherStorageState, remoteId: string): Promise<{ state: PublisherStorageState; message: string }>
@@ -210,6 +212,56 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     } catch {
       return null
     }
+  }
+
+  async publishPin(state: PublisherStorageState, pin: ZhihuPin, mode: 'draft' | 'publish', progress: Parameters<ZhihuDriver['publishPin']>[3]) {
+    if (mode !== 'publish') throw new ApiError(400, 'zhihu_pin_mode', '知乎想法目前只支持直接发布，不支持保存草稿')
+    const context = await this.context(state)
+    let submitted = false
+    try {
+      await this.identity(context)
+      const page = await context.newPage()
+      let publishedId = ''
+      page.on('response', response => {
+        if (response.request().method() !== 'POST' || !response.url().includes('/api/v4/content/publish')) return
+        void response.json().then((body) => {
+          const data = object(object(body).data)
+          const candidate = data.id ?? data.pin_id ?? data.content_id ?? object(data.pin).id
+          if (candidate !== undefined && /^\d+$/.test(String(candidate))) publishedId = String(candidate)
+        }).catch(() => {})
+      })
+      await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      await page.waitForTimeout(3500)
+      await page.getByText('发想法', { exact: true }).last().click({ timeout: 15_000 })
+      await page.locator('textarea[placeholder="标题"]').first().waitFor({ timeout: 10_000 })
+      if (pin.title) await page.locator('textarea[placeholder="标题"]').first().fill(pin.title)
+      const editor = page.locator('.public-DraftEditor-content[contenteditable="true"]').first()
+      await editor.click()
+      await page.keyboard.insertText(pin.text)
+      if (pin.images.size) {
+        progress({ message: '正在上传知乎想法图片' })
+        const files = [...pin.images.values()].map((image) => ({ name: image.name, mimeType: image.mimeType, buffer: image.buffer }))
+        await page.locator('input[type="file"]').last().setInputFiles(files)
+        await page.waitForTimeout(Math.min(12_000, 1500 * files.length + 2000))
+      }
+      progress({ message: '正在提交知乎想法' })
+      submitted = true
+      await page.getByRole('button', { name: '发布', exact: true }).last().click({ timeout: 15_000 })
+      const deadline = Date.now() + 45_000
+      while (Date.now() < deadline && !publishedId) await page.waitForTimeout(500)
+      if (!publishedId) {
+        const match = /\/pin\/(\d+)/.exec(page.url())
+        if (match) publishedId = match[1]
+      }
+      if (!publishedId) throw new ApiError(502, 'zhihu_pin_unverified', '知乎想法发布结果未能确认，请打开知乎主页核对')
+      return { state: await context.storageState(), status: 'published' as const, remoteId: publishedId, url: `${HOME}pin/${publishedId}`, message: '已发布知乎想法' }
+    } catch (error) {
+      if (submitted && !(error instanceof ApiError && ['zhihu_pin_unverified', 'zhihu_pin_mode'].includes(error.code))) {
+        throw new ApiError(502, 'zhihu_result_uncertain', '知乎想法发布请求已提交，但结果未能确认，请到知乎主页核对')
+      }
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'zhihu_pin_failed', '知乎想法发布未完成，请稍后重试')
+    } finally { await this.releaseContext(context) }
   }
 
   async deleteDraft(state: PublisherStorageState, remoteId: string) {
