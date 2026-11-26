@@ -334,6 +334,7 @@
 }
 
 .gallery-image-card {
+  cursor: grab;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -349,6 +350,7 @@
 }
 
 .gallery-image-card.is-dragging {
+  cursor: grabbing;
   opacity: 0.55;
 }
 
@@ -392,10 +394,12 @@
 }
 
 .gallery-image-index {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   position: absolute;
   top: 7px;
   left: 7px;
-  display: grid;
   min-width: 22px;
   height: 22px;
   place-items: center;
