@@ -41,7 +41,7 @@ export function createBooksRouter(database: Database): Router {
         description: input.description,
         color: input.color,
       })
-      if (!book) throw notFound('知识库不存在')
+      if (!book) throw notFound('合集不存在')
       res.json({ book })
     }),
   )
@@ -51,7 +51,7 @@ export function createBooksRouter(database: Database): Router {
     asyncHandler((req, res) => {
       const user = currentUser(req)
       const removed = database.deleteBook(user.id, req.params.id)
-      if (!removed) throw notFound('知识库不存在')
+      if (!removed) throw notFound('合集不存在')
       res.json({ ok: true })
     }),
   )

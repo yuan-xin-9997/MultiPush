@@ -1400,7 +1400,7 @@ export default function EditorPage() {
             </div>
 
             <div className="editor-info-section">
-              <span className="editor-info-label">所属知识库</span>
+              <span className="editor-info-label">所属合集</span>
               <select
                 className="select editor-book-select"
                 value={bookId}

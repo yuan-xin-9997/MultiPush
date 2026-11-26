@@ -76,7 +76,7 @@ export const changePasswordSchema = z.object({
   newPassword: passwordSchema,
 })
 
-const bookNameSchema = z.string().trim().min(1, '请输入知识库名称').max(80, '知识库名称最多 80 个字符')
+const bookNameSchema = z.string().trim().min(1, '请输入合集名称').max(80, '合集名称最多 80 个字符')
 const bookDescriptionSchema = z.string().trim().max(500, '描述最多 500 个字符')
 const bookColorSchema = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, '颜色格式应为 #RRGGBB')
 
@@ -100,7 +100,7 @@ const contentTagsSchema = z.array(z.string().max(200))
 export const contentInputSchema = z.object({
   title: z.string().max(500, '标题最多 500 个字符').optional(),
   kind: z.enum(['article', 'gallery', 'video']).optional(),
-  bookId: z.string().trim().min(1, '知识库 ID 不能为空').max(100).nullable().optional(),
+  bookId: z.string().trim().min(1, '合集 ID 不能为空').max(100).nullable().optional(),
   contentJson: contentJsonSchema.optional(),
   contentHtml: z.string().optional(),
   excerpt: z.string().max(5000, '摘要最多 5000 个字符').optional(),

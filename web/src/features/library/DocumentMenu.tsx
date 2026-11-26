@@ -83,7 +83,7 @@ export default function DocumentMenu({ item, mode, actions, className }: Documen
           },
           {
             key: 'move',
-            label: '移动知识库',
+            label: '移动到合集',
             icon: <FolderInput size={16} />,
             onSelect: () => actions.move(item),
           },

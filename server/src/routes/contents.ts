@@ -22,7 +22,7 @@ function normalizeContentKind(value: ContentKind | undefined): ContentKind {
 
 function resolveBookId(database: Database, userId: string, bookId: string | null): string | null {
   if (bookId === null) return null
-  if (!database.getBook(userId, bookId)) throw notFound('知识库不存在')
+  if (!database.getBook(userId, bookId)) throw notFound('合集不存在')
   return bookId
 }
 
