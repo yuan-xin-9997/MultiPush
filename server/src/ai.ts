@@ -170,7 +170,7 @@ function renderOptions(value: unknown): RenderOptions {
 const SYSTEM_PROMPT = `你是 MultiPush 的 AI 创作助手。MultiPush 是一个多平台内容创作、排版与发布系统。
 
 你的能力：
-- 读取用户的内容库、知识库、素材、渲染记录、平台连接状态和发布记录；
+- 读取用户的内容库、合集、素材、渲染记录、平台连接状态和发布记录；
 - 新建或修改文章与图文（以图片为主的内容类型，适配公众号贴图、抖音图文、小红书）；管理视频内容（视频为主、带标题和正文的内容类型）；
 - 通过剪辑时间线操控视频内容：查看片段、调整顺序、修剪片段起止点（单位：秒）、增删片段，并触发服务端 ffmpeg 导出成片；
 - 为文章生成微信公众号、小红书、知乎、微博、今日头条、百家号、豆瓣、掘金、CSDN、简书、抖音、少数派和个人博客排版；
@@ -199,7 +199,7 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_system_overview',
-      description: '读取当前用户的系统概览：知识库、内容、素材、渲染记录数量，各平台连接状态和最近内容。开始任务前可先调用。',
+      description: '读取当前用户的系统概览：合集、内容、素材、渲染记录数量，各平台连接状态和最近内容。开始任务前可先调用。',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
   },
@@ -207,7 +207,7 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'list_books',
-      description: '列出当前用户的知识库（分组）。',
+      description: '列出当前用户的合集（分组）。',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
   },
@@ -215,12 +215,12 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'list_contents',
-      description: '分页查询当前用户的内容库。可按关键词、知识库、收藏、回收站或内容类型筛选。',
+      description: '分页查询当前用户的内容库。可按关键词、合集、收藏、回收站或内容类型筛选。',
       parameters: {
         type: 'object',
         properties: {
           query: { type: 'string', description: '搜索标题、摘要、标签或正文的关键词' },
-          bookId: { type: 'string', description: '知识库 ID' },
+          bookId: { type: 'string', description: '合集 ID' },
           favorite: { type: 'boolean', description: '只看收藏' },
           trash: { type: 'boolean', description: '只看回收站' },
           kind: { type: 'string', enum: ['article', 'gallery', 'video'], description: '按类型筛选：article 文章，gallery 图文，video 视频内容' },
@@ -235,7 +235,7 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_content',
-      description: '读取一篇内容的完整标题、HTML、纯文本、标签、知识库和封面。',
+      description: '读取一篇内容的完整标题、HTML、纯文本、标签、合集和封面。',
       parameters: { type: 'object', properties: { contentId: { type: 'string' } }, required: ['contentId'], additionalProperties: false },
     },
   },
@@ -253,7 +253,7 @@ export const AI_TOOLS: ToolDefinition[] = [
           mediaIds: { type: 'array', items: { type: 'string' }, description: '素材 ID 列表：article/gallery 时为按顺序插入正文末尾的图片（第一张默认作为封面），video 时为按顺序初始化剪辑时间线的视频' },
           excerpt: { type: 'string', description: '摘要，可选；不传则自动生成' },
           tags: { type: 'array', items: { type: 'string' }, description: '标签，最多 10 个' },
-          bookId: { type: 'string', description: '知识库 ID，可选' },
+          bookId: { type: 'string', description: '合集 ID，可选' },
           coverImage: { type: 'string', description: '封面图片 URL，可选' },
           status: { type: 'string', enum: ['draft', 'ready'], description: '内容状态' },
         },
@@ -266,7 +266,7 @@ export const AI_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'update_content',
-      description: '修改已有文章的标题、正文、标签、摘要、状态或所属知识库，也可为图文追加素材图片。只传需要修改的字段。',
+      description: '修改已有文章的标题、正文、标签、摘要、状态或所属合集，也可为图文追加素材图片。只传需要修改的字段。',
       parameters: {
         type: 'object',
         properties: {
@@ -276,7 +276,7 @@ export const AI_TOOLS: ToolDefinition[] = [
           mediaIds: { type: 'array', items: { type: 'string' }, description: '图片素材 ID，按顺序追加到图文正文末尾（第一张同时作为封面，除非已有封面）' },
           excerpt: { type: 'string' },
           tags: { type: 'array', items: { type: 'string' } },
-          bookId: { type: 'string', description: '知识库 ID；传空字符串表示未分组' },
+          bookId: { type: 'string', description: '合集 ID；传空字符串表示未分组' },
           status: { type: 'string', enum: ['draft', 'ready'] },
         },
         required: ['contentId'],
@@ -1074,7 +1074,7 @@ export class AiService {
     const title = stringArg(args, 'title', true)!
     const html = cleanHtml(stringArg(args, 'html', true)!)
     const bookId = stringArg(args, 'bookId') ?? null
-    if (bookId && !this.database.getBook(userId, bookId)) throw notFound('知识库不存在')
+    if (bookId && !this.database.getBook(userId, bookId)) throw notFound('合集不存在')
     const tags = normalizeTags(stringArrayArg(args, 'tags'))
     const kind = args.kind === 'video' ? 'video' as const : args.kind === 'gallery' ? 'gallery' as const : 'article' as const
     const mediaIds = stringArrayArg(args, 'mediaIds')
@@ -1122,7 +1122,7 @@ export class AiService {
     const excerpt = stringArg(args, 'excerpt') ?? current.excerpt
     const metrics = deriveContentMetrics({ contentHtml: html, contentJson: current.contentJson, excerpt })
     const bookId = args.bookId !== undefined ? (stringArg(args, 'bookId') || null) : current.bookId
-    if (bookId && !this.database.getBook(userId, bookId)) throw notFound('知识库不存在')
+    if (bookId && !this.database.getBook(userId, bookId)) throw notFound('合集不存在')
     const updated = this.database.updateContent(userId, contentId, {
       title: args.title !== undefined ? defaultContentTitle(stringArg(args, 'title')!) : current.title,
       kind: current.kind,

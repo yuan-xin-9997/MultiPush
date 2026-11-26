@@ -90,11 +90,11 @@ export default function BookSidebar({
 
     const trimmed = name.trim()
     if (!trimmed) {
-      setFormError('请输入知识库名称')
+      setFormError('请输入合集名称')
       return
     }
     if (trimmed.length > 40) {
-      setFormError('知识库名称最多 40 个字符')
+      setFormError('合集名称最多 40 个字符')
       return
     }
 
@@ -108,7 +108,7 @@ export default function BookSidebar({
           color,
         })
         setDialog(null)
-        toast.success('知识库已创建')
+        toast.success('合集已创建')
         onChanged()
         onClose()
         navigate(`/library/book/${result.book.id}`)
@@ -119,11 +119,11 @@ export default function BookSidebar({
           color,
         })
         setDialog(null)
-        toast.success('知识库已更新')
+        toast.success('合集已更新')
         onChanged()
       }
     } catch (error) {
-      const message = getErrorMessage(error, '保存知识库失败')
+      const message = getErrorMessage(error, '保存合集失败')
       setFormError(message)
       toast.error(message)
     } finally {
@@ -137,12 +137,12 @@ export default function BookSidebar({
     try {
       await api.books.remove(deleteTarget.id)
       const wasActive = activeBookId === deleteTarget.id
-      toast.success('知识库已删除，文档已移至未分组')
+      toast.success('合集已删除，文档已移至未分组')
       setDeleteTarget(null)
       onChanged()
       if (wasActive) navigate('/library', { replace: true })
     } catch (error) {
-      toast.error(getErrorMessage(error, '删除知识库失败'))
+      toast.error(getErrorMessage(error, '删除合集失败'))
     } finally {
       setDeleting(false)
     }
@@ -180,13 +180,13 @@ export default function BookSidebar({
           <div className="book-divider" />
 
           <div className="book-section-head">
-            <span>知识库</span>
+            <span>合集</span>
             <button
               type="button"
               className="book-add"
               onClick={openCreate}
-              aria-label="新建知识库"
-              title="新建知识库"
+              aria-label="新建合集"
+              title="新建合集"
             >
               <Plus size={15} />
             </button>
@@ -226,7 +226,7 @@ export default function BookSidebar({
                           type="button"
                           className="book-menu-trigger"
                           aria-label={`${book.name} 操作`}
-                          title="知识库操作"
+                          title="合集操作"
                         >
                           <Ellipsis size={15} />
                         </button>
@@ -241,7 +241,7 @@ export default function BookSidebar({
                         'separator',
                         {
                           key: 'delete',
-                          label: '删除知识库',
+                          label: '删除合集',
                           icon: <Trash2 size={15} />,
                           danger: true,
                           onSelect: () => setDeleteTarget(book),
@@ -270,10 +270,10 @@ export default function BookSidebar({
             {!loading && books.length === 0 ? (
               <div className="book-sidebar-empty">
                 <BookOpen size={20} />
-                <p>还没有知识库</p>
+                <p>还没有合集</p>
                 <button type="button" className="btn btn-sm btn-secondary" onClick={openCreate}>
                   <Plus size={14} />
-                  新建知识库
+                  新建合集
                 </button>
               </div>
             ) : null}
@@ -286,8 +286,8 @@ export default function BookSidebar({
       <Modal
         open={dialog !== null}
         onClose={closeDialog}
-        title={dialog?.type === 'edit' ? '编辑知识库' : '新建知识库'}
-        subtitle={dialog?.type === 'edit' ? '修改名称、描述或标识颜色。' : '用知识库把相关文档归在一起。'}
+        title={dialog?.type === 'edit' ? '编辑合集' : '新建合集'}
+        subtitle={dialog?.type === 'edit' ? '修改名称、描述或标识颜色。' : '用合集把相关文档归在一起。'}
         closeOnBackdrop={!saving}
         showClose={!saving}
         footer={
@@ -297,7 +297,7 @@ export default function BookSidebar({
             </button>
             <button type="submit" form="book-form" className="btn btn-primary" disabled={saving}>
               {saving ? <LoaderCircle size={16} className="spin" /> : null}
-              {saving ? '保存中…' : dialog?.type === 'edit' ? '保存修改' : '创建知识库'}
+              {saving ? '保存中…' : dialog?.type === 'edit' ? '保存修改' : '创建合集'}
             </button>
           </>
         }
@@ -306,7 +306,7 @@ export default function BookSidebar({
           {formError ? <div className="form-error-banner">{formError}</div> : null}
           <div className="field">
             <label className="label" htmlFor="book-name">
-              知识库名称
+              合集名称
             </label>
             <input
               id="book-name"
@@ -333,7 +333,7 @@ export default function BookSidebar({
               className="textarea"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="这个知识库用来收集什么内容？"
+              placeholder="这个合集用来收集什么内容？"
               maxLength={160}
               rows={3}
             />
@@ -341,7 +341,7 @@ export default function BookSidebar({
 
           <div className="field">
             <span className="label">标识颜色</span>
-            <div className="book-color-picker" role="group" aria-label="选择知识库颜色">
+            <div className="book-color-picker" role="group" aria-label="选择合集颜色">
               {BOOK_COLORS.map((option) => (
                 <button
                   key={option}
@@ -362,9 +362,9 @@ export default function BookSidebar({
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="删除知识库"
+        title="删除合集"
         loading={deleting}
-        confirmLabel="删除知识库"
+        confirmLabel="删除合集"
         onClose={() => {
           if (!deleting) setDeleteTarget(null)
         }}
@@ -372,7 +372,7 @@ export default function BookSidebar({
         description={
           deleteTarget ? (
             <>
-              确定要删除知识库 <strong>「{deleteTarget.name}」</strong> 吗？
+              确定要删除合集 <strong>「{deleteTarget.name}」</strong> 吗？
               <br />
               其中的 <strong>{formatNumber(deleteTarget.docCount)} 篇文档</strong> 将移动到「未分组」，不会被删除。
             </>

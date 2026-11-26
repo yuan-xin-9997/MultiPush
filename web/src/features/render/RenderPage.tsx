@@ -2559,7 +2559,7 @@ export default function RenderPage() {
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         title="选择内容"
-        subtitle="按知识库浏览并选择文档，再渲染为多个平台的发布格式"
+        subtitle="按合集浏览并选择文档，再渲染为多个平台的发布格式"
         size="wide"
       >
         <div className="render-picker-search">
@@ -2575,7 +2575,7 @@ export default function RenderPage() {
         </div>
         <div className="render-picker-toolbar">
           <span>
-            {pickerLoading ? '正在加载内容库…' : `${pickerContents.length} 篇内容 · ${pickerGroups.length} 个知识库`}
+            {pickerLoading ? '正在加载内容库…' : `${pickerContents.length} 篇内容 · ${pickerGroups.length} 个合集`}
           </span>
           <div>
             <button
@@ -2596,7 +2596,7 @@ export default function RenderPage() {
             <EmptyState
               icon={<BookOpen size={20} />}
               title={pickerQuery.trim() ? '没有找到内容' : '内容库还是空的'}
-              description={pickerQuery.trim() ? '换个关键词试试，或检查内容是否在其他知识库。' : '先去内容库创建一篇文档，再回来渲染。'}
+              description={pickerQuery.trim() ? '换个关键词试试，或检查内容是否在其他合集。' : '先去内容库创建一篇文档，再回来渲染。'}
               action={
                 <button type="button" className="btn btn-primary" onClick={() => navigate('/library')}>
                   去内容库
@@ -2624,7 +2624,7 @@ export default function RenderPage() {
                   {expanded ? (
                     <div className="render-picker-book-items">
                       {group.items.length === 0 ? (
-                        <p className="render-picker-book-empty">这个知识库还没有内容</p>
+                        <p className="render-picker-book-empty">这个合集还没有内容</p>
                       ) : (
                         group.items.map((content) => (
                           <button

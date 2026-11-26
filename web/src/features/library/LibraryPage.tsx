@@ -144,7 +144,7 @@ export default function LibraryPage() {
       const result = await api.books.list()
       setBooks(result.books)
     } catch (error) {
-      toast.error(getErrorMessage(error, '加载知识库失败'))
+      toast.error(getErrorMessage(error, '加载合集失败'))
     } finally {
       setBooksLoading(false)
     }
@@ -413,7 +413,7 @@ export default function LibraryPage() {
         : mode === 'book'
           ? activeBookId === UNFILED_BOOK_ID
             ? '未分组'
-            : currentBook?.name ?? '知识库'
+            : currentBook?.name ?? '合集'
           : '全部内容'
   const description =
     mode === 'favorites'
@@ -421,7 +421,7 @@ export default function LibraryPage() {
       : isTrash
         ? '删除的文档会先在这里保留，可随时恢复。'
         : mode === 'book'
-          ? currentBook?.description || (activeBookId === UNFILED_BOOK_ID ? '还没有归入知识库的文档。' : '这个知识库还没有描述。')
+          ? currentBook?.description || (activeBookId === UNFILED_BOOK_ID ? '还没有归入合集的文档。' : '这个合集还没有描述。')
           : '所有创作集中在这里，继续写作或渲染到不同平台。'
 
   return (
@@ -708,17 +708,17 @@ export default function LibraryPage() {
                     : mode === 'favorites'
                       ? '还没有收藏文档'
                       : mode === 'book'
-                        ? '这个知识库还是空的'
+                        ? '这个合集还是空的'
                         : '开始你的第一篇创作'
               }
               description={
                 query
-                  ? '换个关键词试试，或检查是否在正确的知识库中。'
+                  ? '换个关键词试试，或检查是否在正确的合集中。'
                   : isTrash
                     ? '删除的文档会先进入回收站，确认无误后再彻底删除。'
                     : mode === 'favorites'
                       ? '在文档卡片右上角点击星标，就能在这里快速找到它。'
-                      : '内容会按知识库归档，也可以直接在这里导入已有文稿。'
+                      : '内容会按合集归档，也可以直接在这里导入已有文稿。'
               }
               action={
                 !isTrash ? (
@@ -761,7 +761,7 @@ export default function LibraryPage() {
               <div className="document-list-head" aria-hidden="true">
                 <span />
                 <span>文档</span>
-                <span>知识库</span>
+                <span>合集</span>
                 <span>标签</span>
                 <span>字数</span>
                 <span>更新时间</span>
@@ -850,7 +850,7 @@ export default function LibraryPage() {
           if (!moving) setMoveTargets([])
         }}
         title="移动文档"
-        subtitle={`将 ${moveTargets.length} 篇文档移动到指定知识库`}
+        subtitle={`将 ${moveTargets.length} 篇文档移动到指定合集`}
         closeOnBackdrop={!moving}
         showClose={!moving}
         footer={
@@ -880,7 +880,7 @@ export default function LibraryPage() {
             />
             <span>
               <strong>未分组</strong>
-              <small>不归入任何知识库</small>
+              <small>不归入任何合集</small>
             </span>
           </label>
           {books.map((book) => (
