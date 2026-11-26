@@ -87,7 +87,7 @@ export default function DocumentRow({ item, mode, selected, actions, onToggleSel
       </div>
 
       <div className="document-row-cell document-row-time" title={formatDateTime(isTrash ? item.deletedAt : item.updatedAt)}>
-        {isTrash ? relativeTime(item.deletedAt) : relativeTime(item.updatedAt)}
+        {isTrash ? relativeTime(item.deletedAt) : item.kind === 'gallery' ? `修改于 ${relativeTime(item.updatedAt)}` : relativeTime(item.updatedAt)}
       </div>
 
       <div className="document-row-actions">
