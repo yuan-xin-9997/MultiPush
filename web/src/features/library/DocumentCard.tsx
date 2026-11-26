@@ -97,7 +97,7 @@ export default function DocumentCard({ item, mode, selected, actions, onToggleSe
           {item.bookName ?? '未分组'}
         </span>
         <span className="document-footer-time" title={formatDateTime(isTrash ? item.deletedAt : item.updatedAt)}>
-          {isTrash ? `删除于 ${relativeTime(item.deletedAt)}` : relativeTime(item.updatedAt)}
+          {isTrash ? `删除于 ${relativeTime(item.deletedAt)}` : item.kind === 'gallery' ? `修改于 ${relativeTime(item.updatedAt)}` : relativeTime(item.updatedAt)}
         </span>
         <span className="document-wordcount">
           {item.kind === 'video'
