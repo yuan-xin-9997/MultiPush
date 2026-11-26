@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'reac
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, CheckCircle2, ExternalLink, FileText, LoaderCircle, LogOut, QrCode, RefreshCw, Send, ShieldCheck, Smartphone, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { MediaAsset, RenderListItem, RenderRecord, ZhihuAccount, ZhihuLogin, ZhihuPublication, ZhihuResolveInput } from '@shared/types'
+import type { MediaAsset, RenderListItem, RenderRecord, ZhihuAccount, ZhihuColumn, ZhihuLogin, ZhihuPublication, ZhihuResolveInput } from '@shared/types'
 import { absoluteUrl, api, ApiError } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { formatDateTime } from '@/lib/utils'
@@ -25,6 +25,9 @@ export default function ZhihuPublishPage() {
   const [recordLoading, setRecordLoading] = useState(false)
   const [cover, setCover] = useState<MediaAsset | null>(null)
   const [publications, setPublications] = useState<ZhihuPublication[]>([])
+  const [columns, setColumns] = useState<ZhihuColumn[]>([])
+  const [columnTitle, setColumnTitle] = useState('')
+  const [columnsLoading, setColumnsLoading] = useState(false)
   const [login, setLogin] = useState<ZhihuLogin | null>(null)
   const [loginOpen, setLoginOpen] = useState(false)
   const [loginBusy, setLoginBusy] = useState(false)
@@ -77,6 +80,16 @@ export default function ZhihuPublishPage() {
   useEffect(() => {
     if (!selectedId && renders.length) setParams({ platform: 'zhihu', renderId: renders[0].id }, { replace: true })
   }, [selectedId, renders, setParams])
+  useEffect(() => {
+    if (account?.status !== 'connected') { setColumns([]); setColumnTitle(''); return }
+    let cancelled = false
+    setColumnsLoading(true)
+    api.zhihu.columns()
+      .then(result => { if (!cancelled) setColumns(result.columns) })
+      .catch(cause => { if (!cancelled) setError(getErrorMessage(cause, '读取知乎专栏失败')) })
+      .finally(() => { if (!cancelled) setColumnsLoading(false) })
+    return () => { cancelled = true }
+  }, [account?.status])
   useEffect(() => {
     let cancelled = false
     setRecord(null); setCover(null)
@@ -151,7 +164,12 @@ export default function ZhihuPublishPage() {
     if (!record || !ready) return
     setSubmitting(true); setError('')
     try {
-      const result = await api.zhihu.publish({ renderId: record.id, mode, ...(cover ? { coverMediaId: cover.id } : {}) })
+      const result = await api.zhihu.publish({
+        renderId: record.id,
+        mode,
+        ...(cover ? { coverMediaId: cover.id } : {}),
+        ...(columnTitle ? { columnTitle } : {}),
+      })
       if (!mounted.current) return
       setPublications(current => [result.publication, ...current.filter(item => item.id !== result.publication.id)])
       setConfirmation(null)
@@ -210,6 +228,25 @@ export default function ZhihuPublishPage() {
       {recordLoading ? <p className="publish-muted"><LoaderCircle size={15} className="spin" />正在读取排版…</p> : article ? <>
         <div className="publish-article-title"><FileText size={16} /><strong>{article.title}</strong><button type="button" className="btn btn-sm" onClick={() => navigate(`/render?renderId=${encodeURIComponent(selectedId)}`)}>检查排版<ArrowRight size={13} /></button></div>
         <div className="publish-cover-field"><label className="publish-field">封面图片（选填）<span className="publish-muted">使用内容封面，或上传 10 MB 以内的图片。</span><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" disabled={busy} onChange={event => void uploadCover(event)} /></label>{cover ? <><img className="publish-cover-preview" src={absoluteUrl(cover.url)} alt="待发布的知乎封面" /><button type="button" className="btn btn-sm" disabled={busy} onClick={() => setCover(null)}>移除封面</button></> : null}</div>
+        <label className="publish-field">
+          发布到专栏
+          <select
+            className="input"
+            value={columnTitle}
+            disabled={busy || columnsLoading}
+            onChange={event => setColumnTitle(event.target.value)}
+          >
+            <option value="">不选择专栏，发布到个人主页「文章」</option>
+            {columns.map(column => (
+              <option key={column.id} value={column.title}>
+                {column.title}（{column.articlesCount} 篇）
+              </option>
+            ))}
+          </select>
+          <span className="publish-muted">
+            {columnsLoading ? '正在读取知乎专栏…' : columns.length ? '选择后文章会收录到对应专栏。' : '当前账号没有可用的知乎专栏，将发布到个人主页「文章」。'}
+          </span>
+        </label>
         <p className="publish-warning">正文图片会自动上传到知乎。系统会核对知乎保存的图片、列表、图注、链接和代码；内容不一致时停止发布，并保留草稿供检查。</p>
         {confirming ? <div className="publish-warning"><p><LoaderCircle size={14} className="spin" />{confirming.message}</p><small>系统会在等待期间自动查询知乎文章；确认到文章后会自动标记为已发布，不需要手动核实。</small></div> : null}
         {uncertain ? <div className="publish-warning"><p>这篇内容有 {uncertainItems.length} 个结果待核实的任务。核实后可在这里确认结果并继续操作。</p><button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(uncertainItems[0])}>核实并继续</button></div> : null}

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { load } from 'cheerio'
-import type { PublicationDeletion, ZhihuAccount, ZhihuLogin, ZhihuPublishInput, ZhihuPublication, ZhihuResolveInput } from '../../shared/types'
+import type { PublicationDeletion, ZhihuAccount, ZhihuColumn, ZhihuLogin, ZhihuPublishInput, ZhihuPublication, ZhihuResolveInput } from '../../shared/types'
 import type { AppConfig } from './config'
 import type { Database } from './db'
 import { ApiError, notFound } from './errors'
@@ -189,7 +189,20 @@ export class ZhihuService {
       } else if (url.protocol === 'data:' || !owned && ['http:', 'https:'].includes(url.protocol)) external.push(src)
       else throw new ApiError(400, 'zhihu_image_invalid', '正文包含无效图片地址，请重新上传')
     }
-    return { title, html, images, external, ...(input.coverMediaId ? { cover: await this.image(userId, input.coverMediaId) } : {}) }
+    return { title, html, images, external, ...(input.columnTitle?.trim() ? { columnTitle: input.columnTitle.trim() } : {}), ...(input.coverMediaId ? { cover: await this.image(userId, input.coverMediaId) } : {}) }
+  }
+
+  async columns(userId: string): Promise<ZhihuColumn[]> {
+    this.idle(userId)
+    const state = this.state(userId)
+    const result = await this.driver.listColumns(state)
+    this.saveColumnsState(userId, result.state)
+    return result.columns
+  }
+
+  private saveColumnsState(userId: string, state: PublisherStorageState): void {
+    const account = this.database.getZhihuAccount(userId)
+    if (account) this.database.saveZhihuAccount(userId, { ...account, encryptedSession: encryptPublisherSession(state, this.key, userId), status: 'connected', checkedAt: now() })
   }
 
   list(userId: string): ZhihuPublication[] { return this.database.listZhihuPublications(userId) }
@@ -275,7 +288,7 @@ export class ZhihuService {
       const account = this.database.getZhihuAccount(userId)
       if (!account) throw new ApiError(409, 'zhihu_session_expired', '请先在系统中扫码登录知乎')
       const article = await this.article(userId, input, baseUrl)
-      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: input.mode }))
+      const hash = createHash('sha256').update(JSON.stringify({ account: account.accountId, contentId: this.database.getRender(userId, input.renderId)?.contentId, title: article.title, html: article.html, mode: input.mode, columnTitle: article.columnTitle ?? null }))
       if (article.cover) hash.update(article.cover.buffer)
       for (const [src, image] of article.images) hash.update(src).update(image.buffer)
       const idempotencyKey = hash.digest('hex'), previous = this.database.findZhihuPublication(userId, idempotencyKey)
