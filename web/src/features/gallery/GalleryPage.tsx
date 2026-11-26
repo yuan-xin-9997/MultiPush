@@ -48,6 +48,7 @@ interface GalleryImage {
 interface GalleryDraft {
   images: GalleryImage[]
   body: string
+  coverManual?: boolean
 }
 
 interface GalleryImageMeta {
@@ -128,6 +129,7 @@ function galleryFromDoc(value: unknown): GalleryDraft | null {
 
   const images: GalleryImage[] = []
   const body: string[] = []
+  const coverManual = typeof doc.coverManual === 'boolean' ? doc.coverManual : undefined
   for (const raw of doc.content) {
     if (!raw || typeof raw !== 'object') continue
     const node = raw as Record<string, unknown>
@@ -160,7 +162,7 @@ function galleryFromDoc(value: unknown): GalleryDraft | null {
     const text = nodeText(node).replace(/\s+/g, ' ').trim()
     if (text) body.push(text)
   }
-  return { images, body: body.join('\n') }
+  return { images, body: body.join('\n'), coverManual }
 }
 
 /** Fallback for older / API-only HTML edits where the JSON is stale. */
@@ -200,7 +202,7 @@ function galleryFromHtml(html: string): GalleryDraft {
   }
 }
 
-function buildGalleryDoc(images: GalleryImage[], body: string): RichTextJson {
+function buildGalleryDoc(images: GalleryImage[], body: string, coverManual = false): RichTextJson {
   const content: unknown[] = []
   for (const image of images) {
     const attrs: Record<string, unknown> = {
@@ -218,7 +220,7 @@ function buildGalleryDoc(images: GalleryImage[], body: string): RichTextJson {
   for (const line of bodyLines(body)) {
     content.push({ type: 'paragraph', content: [{ type: 'text', text: line }] })
   }
-  return { type: 'doc', content }
+  return { type: 'doc', content, ...(coverManual ? { coverManual: true } : {}) }
 }
 
 function buildGalleryHtml(images: GalleryImage[], body: string): string {
@@ -271,6 +273,7 @@ export default function GalleryPage() {
   const [imageMeta, setImageMeta] = useState<Record<string, GalleryImageMeta>>({})
   const imageSizeCache = useRef<Map<string, Promise<number | null>>>(new Map())
   const [coverImage, setCoverImage] = useState<string | null>(null)
+  const [coverManual, setCoverManual] = useState(false)
   const [tagsInput, setTagsInput] = useState('')
   const [status, setStatus] = useState<ContentStatus>('draft')
   const [favorite, setFavorite] = useState(false)
@@ -293,6 +296,7 @@ export default function GalleryPage() {
   const bodyRef = useRef('')
   const imagesRef = useRef<GalleryImage[]>([])
   const coverRef = useRef<string | null>(null)
+  const coverManualRef = useRef(false)
   const tagsRef = useRef('')
   const statusRef = useRef<ContentStatus>('draft')
   const favoriteRef = useRef(false)
@@ -310,6 +314,7 @@ export default function GalleryPage() {
   bodyRef.current = body
   imagesRef.current = images
   coverRef.current = coverImage
+  coverManualRef.current = coverManual
   tagsRef.current = tagsInput
   statusRef.current = status
   favoriteRef.current = favorite
@@ -362,10 +367,12 @@ export default function GalleryPage() {
           fromJson && (fromJson.images.length > 0 || fromJson.body.trim().length > 0)
             ? fromJson
             : galleryFromHtml(detail.contentHtml)
+        const firstImage = draft.images[0]?.src ?? null
+        const inferredManual = draft.coverManual ?? Boolean(detail.coverImage && detail.coverImage !== firstImage)
         const nextCover =
-          detail.coverImage && draft.images.some((image) => image.src === detail.coverImage)
+          inferredManual && detail.coverImage && draft.images.some((image) => image.src === detail.coverImage)
             ? detail.coverImage
-            : draft.images[0]?.src ?? null
+            : null
 
         setContent(detail)
         setTitle(detail.title)
@@ -373,6 +380,7 @@ export default function GalleryPage() {
         setImages(draft.images)
         setImageMeta({})
         setCoverImage(nextCover)
+        setCoverManual(inferredManual)
         setTagsInput(detail.tags.join(', '))
         setStatus(detail.status)
         setFavorite(detail.favorite)
@@ -382,6 +390,7 @@ export default function GalleryPage() {
         bodyRef.current = draft.body
         imagesRef.current = draft.images
         coverRef.current = nextCover
+        coverManualRef.current = inferredManual
         tagsRef.current = detail.tags.join(', ')
         statusRef.current = detail.status
         favoriteRef.current = detail.favorite
@@ -418,7 +427,7 @@ export default function GalleryPage() {
     try {
       const payload: ContentInput = {
         title: titleRef.current.trim() || DEFAULT_TITLE,
-        contentJson: buildGalleryDoc(imagesRef.current, bodyRef.current),
+        contentJson: buildGalleryDoc(imagesRef.current, bodyRef.current, coverManualRef.current),
         contentHtml: buildGalleryHtml(imagesRef.current, bodyRef.current),
         excerpt: excerptFor(imagesRef.current, bodyRef.current),
         coverImage: effectiveCover(imagesRef.current, coverRef.current),
@@ -528,11 +537,6 @@ export default function GalleryPage() {
       ]
       imagesRef.current = next
       setImages(next)
-      if (!coverRef.current) {
-        const first = next[0]?.src ?? null
-        coverRef.current = first
-        setCoverImage(first)
-      }
       markDirty()
     },
     [markDirty],
@@ -646,17 +650,20 @@ export default function GalleryPage() {
     imagesRef.current = next
     setImages(next)
     if (coverRef.current === removed.src) {
-      const nextCover = next[0]?.src ?? null
-      coverRef.current = nextCover
-      setCoverImage(nextCover)
+      coverRef.current = null
+      setCoverImage(null)
+      coverManualRef.current = false
+      setCoverManual(false)
     }
     markDirty()
   }
 
   function chooseCover(src: string) {
-    if (coverRef.current === src) return
+    if (coverRef.current === src && coverManualRef.current) return
     coverRef.current = src
+    coverManualRef.current = true
     setCoverImage(src)
+    setCoverManual(true)
     markDirty()
   }
 
@@ -678,7 +685,7 @@ export default function GalleryPage() {
     return {
       ...content,
       title: title.trim() || DEFAULT_TITLE,
-      contentJson: buildGalleryDoc(images, body),
+      contentJson: buildGalleryDoc(images, body, coverManual),
       contentHtml: buildGalleryHtml(images, body),
       excerpt: excerptFor(images, body),
       coverImage: effectiveCover(images, coverImage),
@@ -687,7 +694,7 @@ export default function GalleryPage() {
       favorite,
       imageCount: images.length,
     }
-  }, [content, title, images, body, coverImage, tagsInput, status, favorite])
+  }, [content, title, images, body, coverImage, coverManual, tagsInput, status, favorite])
 
   async function goBack() {
     if (savingRef.current) {
@@ -1205,7 +1212,7 @@ export default function GalleryPage() {
                 </span>
               )}
             </div>
-            <p>默认使用第一张图片；在图片上点击星标即可更换。</p>
+            <p>默认使用第一张图片；点击星标手动设置后，封面会固定，不随图片排序改变。</p>
           </section>
 
           <section className="gallery-side-card">
