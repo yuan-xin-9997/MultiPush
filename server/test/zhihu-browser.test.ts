@@ -24,6 +24,7 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
   const patch = vi.fn(async (_url: string, value: { data: Record<string, unknown> }) => { saved = { ...saved, ...value.data }; return response({}) })
   const get = vi.fn(async (url: string) => {
     if (url.endsWith('/me')) return response({ id: 'account', name: '作者', url_token: 'author' })
+    if (url.includes('/column-contributions')) return response({ data: [{ column: { id: 'c_123', title: '测试专栏', articles_count: 2 } }] })
     if (options.publishNoResponse && url.includes('/api/v4/members/author/articles')) return response({ data: [{ id: '456', title: '测试文章', author: { id: 'account' }, updated: Math.floor(Date.now() / 1000) }] })
     if (url === `https://zhuanlan.zhihu.com/api/articles/${draftId}/draft` && !deleted || saved.state === 'published' && url === `https://zhuanlan.zhihu.com/api/articles/${saved.id}`) return response({ ...saved, ...(options.mismatch ? { content: '<p>丢失的内容</p>' } : {}) })
     return response({ error: { code: 4041 } }, 404)
@@ -50,6 +51,11 @@ function fixture(options: { mismatch?: boolean; createTimeout?: boolean; publish
 }
 
 describe('Zhihu browser publishing', () => {
+  it('lists the columns available to the connected Zhihu account', async () => {
+    const { driver } = fixture()
+    expect(await driver.listColumns(state)).toMatchObject({ columns: [{ id: 'c_123', title: '测试专栏', articlesCount: 2 }] })
+  })
+
   it('distinguishes missing articles and drafts from an inconclusive check', async () => {
     const { driver, post } = fixture()
     expect(await driver.checkPublication(state, '999', '测试文章')).toMatchObject({ status: 'missing' })

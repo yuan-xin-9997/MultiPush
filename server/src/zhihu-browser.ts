@@ -1,6 +1,6 @@
 import { chromium, type Browser, type BrowserContext, type APIResponse, type Page } from 'playwright-core'
 import { load } from 'cheerio'
-import type { ZhihuPublication } from '../../shared/types'
+import type { ZhihuColumn, ZhihuPublication } from '../../shared/types'
 import type { PublisherStorageState } from './publisher-session'
 import type { PublisherImage } from './publisher-image'
 import { publisherExecutablePath } from './wechat-browser'
@@ -9,7 +9,7 @@ import { ApiError } from './errors'
 import { prepareZhihuContent, zhihuEditorContent, verifyZhihuContent, zhihuImageUrl } from './zhihu-content'
 
 export interface ZhihuIdentity { accountId: string; name: string }
-export interface ZhihuArticle { title: string; html: string; images: Map<string, PublisherImage>; cover?: PublisherImage }
+export interface ZhihuArticle { title: string; html: string; images: Map<string, PublisherImage>; cover?: PublisherImage; columnTitle?: string }
 export interface ZhihuLoginAttempt {
   poll(): Promise<{ status: 'waiting' | 'scanned' | 'connected' | 'expired' | 'failed'; qrCode: string | null; message: string; state?: PublisherStorageState; identity?: ZhihuIdentity }>
   close(): Promise<void>
@@ -17,6 +17,7 @@ export interface ZhihuLoginAttempt {
 export interface ZhihuDriver {
   beginLogin(): Promise<ZhihuLoginAttempt>
   checkSession(state: PublisherStorageState): Promise<{ state: PublisherStorageState; identity: ZhihuIdentity }>
+  listColumns(state: PublisherStorageState): Promise<{ state: PublisherStorageState; columns: ZhihuColumn[] }>
   checkPublication(state: PublisherStorageState, remoteId: string, title: string): Promise<{ state: PublisherStorageState; status: 'published' | 'draft' | 'missing' | 'unknown'; url: string | null; message: string }>
   publish(state: PublisherStorageState, article: ZhihuArticle, mode: 'draft' | 'publish', progress: (value: Partial<Pick<ZhihuPublication, 'message' | 'remoteId' | 'url'>>) => void, resumeDraftId?: string): Promise<{ state: PublisherStorageState; status: 'draft' | 'published'; remoteId: string; url: string; message: string }>
   deleteDraft(state: PublisherStorageState, remoteId: string): Promise<{ state: PublisherStorageState; message: string }>
@@ -129,6 +130,31 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
     catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(502, 'zhihu_check_failed', '知乎连接检查未完成，请检查网络后重试')
+    } finally { await this.releaseContext(context) }
+  }
+
+  async listColumns(state: PublisherStorageState) {
+    const context = await this.context(state)
+    try {
+      const identity = await this.identity(context)
+      const me = await zhihuResponse(await context.request.get(`${HOME}api/v4/me`, { headers: { 'x-requested-with': 'fetch', Referer: HOME }, timeout: 15_000 }), '检查知乎账号')
+      const urlToken = typeof me.url_token === 'string' ? me.url_token : ''
+      if (!urlToken) return { state: await context.storageState(), columns: [] }
+      const response = await context.request.get(`${HOME}api/v4/members/${encodeURIComponent(urlToken)}/column-contributions?offset=0&limit=50&include=data%5B*%5D.column.articles_count%2Cvoteup_count`, {
+        headers: { 'x-requested-with': 'fetch', Referer: `${HOME}people/${encodeURIComponent(urlToken)}/columns` },
+        timeout: 20_000,
+      })
+      if (!response.ok()) return { state: await context.storageState(), columns: [] }
+      const body = await response.json().catch(() => null) as { data?: Array<Record<string, unknown>> } | null
+      const columns = (Array.isArray(body?.data) ? body.data : [])
+        .map(item => object(item.column))
+        .filter(item => typeof item.id === 'string' || typeof item.id === 'number')
+        .map(item => ({ id: String(item.id), title: typeof item.title === 'string' ? item.title : String(item.id), articlesCount: Number(item.articles_count || 0) }))
+        .filter(item => item.title)
+      return { state: await context.storageState(), columns }
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(502, 'zhihu_columns_failed', '读取知乎专栏列表失败，请稍后重试')
     } finally { await this.releaseContext(context) }
   }
 
@@ -280,6 +306,17 @@ export class PlaywrightZhihuDriver implements ZhihuDriver {
         if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/v4/content/publish') return
         void response.json().then(data => { publishedId = parseZhihuPublishedId(data); rejected = !publishedId }, () => {})
       })
+      if (article.columnTitle) {
+        progress({ message: `正在选择知乎专栏：${article.columnTitle}` })
+        const columnRadio = page.getByText('发布到专栏', { exact: true }).last()
+        if (!await columnRadio.isVisible().catch(() => false)) throw new ApiError(502, 'zhihu_column_selector_missing', '未找到知乎专栏选择入口，已停止发布')
+        await columnRadio.click()
+        const combo = page.locator('.ColumnSetting-ColumnSelector [role="combobox"]').last()
+        await combo.click({ timeout: 10_000 })
+        const option = page.getByText(article.columnTitle, { exact: true }).last()
+        if (!await option.isVisible().catch(() => false)) throw new ApiError(409, 'zhihu_column_missing', `知乎专栏「${article.columnTitle}」不存在或无权发布，请重新选择`)
+        await option.click()
+      }
       // Once any publish action may have been submitted, never replay it after a timeout.
       publishSubmitted = true
       const startedAt = Math.floor(Date.now() / 1000)

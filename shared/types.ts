@@ -705,10 +705,17 @@ export interface ZhihuLogin {
   expiresAt: string
 }
 
+export interface ZhihuColumn {
+  id: string
+  title: string
+  articlesCount: number
+}
+
 export interface ZhihuPublishInput {
   renderId: string
   mode: 'draft' | 'publish'
   coverMediaId?: string
+  columnTitle?: string
 }
 
 export interface ZhihuPublication {
