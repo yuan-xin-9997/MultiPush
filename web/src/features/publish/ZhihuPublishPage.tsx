@@ -56,6 +56,7 @@ export default function ZhihuPublishPage() {
   const [deleteTarget, setDeleteTarget] = useState<ZhihuPublication | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const article = record?.results.find(result => result.platform === 'zhihu')
+  const pin = article?.previewMode === 'pin'
   const processing = publications.some(item => item.status === 'running')
   const busy = submitting || uploading || processing || resolveBusy
   const confirmingItems = publications.filter(item => item.status === 'running' && confirmingMessage(item.message))
@@ -228,7 +229,7 @@ export default function ZhihuPublishPage() {
       {recordLoading ? <p className="publish-muted"><LoaderCircle size={15} className="spin" />正在读取排版…</p> : article ? <>
         <div className="publish-article-title"><FileText size={16} /><strong>{article.title}</strong><button type="button" className="btn btn-sm" onClick={() => navigate(`/render?renderId=${encodeURIComponent(selectedId)}`)}>检查排版<ArrowRight size={13} /></button></div>
         <div className="publish-cover-field"><label className="publish-field">封面图片（选填）<span className="publish-muted">使用内容封面，或上传 10 MB 以内的图片。</span><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" disabled={busy} onChange={event => void uploadCover(event)} /></label>{cover ? <><img className="publish-cover-preview" src={absoluteUrl(cover.url)} alt="待发布的知乎封面" /><button type="button" className="btn btn-sm" disabled={busy} onClick={() => setCover(null)}>移除封面</button></> : null}</div>
-        <label className="publish-field">
+        {pin ? <p className="publish-warning">这是一条知乎想法，将按短图文发布，不使用专栏和草稿。</p> : <label className="publish-field">
           发布到专栏
           <select
             className="input"
@@ -246,11 +247,11 @@ export default function ZhihuPublishPage() {
           <span className="publish-muted">
             {columnsLoading ? '正在读取知乎专栏…' : columns.length ? '选择后文章会收录到对应专栏。' : '当前账号没有可用的知乎专栏，将发布到个人主页「文章」。'}
           </span>
-        </label>
+        </label>}
         <p className="publish-warning">正文图片会自动上传到知乎。系统会核对知乎保存的图片、列表、图注、链接和代码；内容不一致时停止发布，并保留草稿供检查。</p>
         {confirming ? <div className="publish-warning"><p><LoaderCircle size={14} className="spin" />{confirming.message}</p><small>系统会在等待期间自动查询知乎文章；确认到文章后会自动标记为已发布，不需要手动核实。</small></div> : null}
         {uncertain ? <div className="publish-warning"><p>这篇内容有 {uncertainItems.length} 个结果待核实的任务。核实后可在这里确认结果并继续操作。</p><button type="button" className="btn btn-sm" disabled={busy} onClick={() => openResolution(uncertainItems[0])}>核实并继续</button></div> : null}
-        <div className="publish-submit-actions"><button type="button" className="btn" disabled={!ready} onClick={() => void publish('draft')}><FileText size={16} />保存到知乎草稿</button><button type="button" className="btn btn-primary" disabled={!ready} onClick={() => setConfirmation('publish')}>{busy ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}正式发布到知乎</button></div>
+        <div className="publish-submit-actions">{!pin ? <button type="button" className="btn" disabled={!ready} onClick={() => void publish('draft')}><FileText size={16} />保存到知乎草稿</button> : null}<button type="button" className="btn btn-primary" disabled={!ready} onClick={() => setConfirmation('publish')}>{busy ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}{pin ? '发布知乎想法' : '正式发布到知乎'}</button></div>
         <p className="publish-form-hint" role="status">{account?.status !== 'connected' ? '请先扫码连接知乎。' : busy ? '任务正在处理，请在下方查看进度。' : '发布后文章可能公开显示在你的知乎主页。'}</p>
       </> : null}
     </section><aside className="publish-panel publish-preview-panel"><div className="publish-section-head"><h2>知乎文章预览</h2><p>以知乎实际排版和审核结果为准。</p></div>{article ? <><h3>{article.title}</h3><iframe title="待发布的知乎正文" sandbox="" srcDoc={`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>body{padding:18px;font-family:sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}</style><body>${article.html}</body></html>`} /></> : <div className="publish-empty"><p>选择内容后预览知乎排版</p></div>}</aside></div>
@@ -281,7 +282,7 @@ export default function ZhihuPublishPage() {
       {resolveBusy ? <p className="publish-muted"><LoaderCircle size={15} className="spin" />正在保存核实结果…</p> : null}
       {resolveError ? <p className="publish-failure-message" role="alert">{resolveError}</p> : null}
     </Modal>
-    <ConfirmDialog open={confirmation === 'publish'} title="正式发布到知乎？" description={<><strong>{article?.title}</strong><p>将发布至「{account?.name || '已连接知乎账号'}」，文章可能对外公开。</p></>} confirmLabel="确认发布到知乎" tone="primary" loading={submitting} onConfirm={() => publish('publish')} onClose={() => setConfirmation(null)} />
+    <ConfirmDialog open={confirmation === 'publish'} title={pin ? '发布知乎想法？' : '正式发布到知乎？'} description={<><strong>{article?.title}</strong><p>将发布至「{account?.name || '已连接知乎账号'}」，文章可能对外公开。</p></>} confirmLabel={pin ? '确认发布想法' : '确认发布到知乎'} tone="primary" loading={submitting} onConfirm={() => publish('publish')} onClose={() => setConfirmation(null)} />
     <ConfirmDialog open={confirmation === 'disconnect'} title="断开知乎连接？" description="删除系统保存的知乎登录状态，下次发布需要重新扫码。知乎上的草稿和文章保持不变。" confirmLabel="断开连接" loading={submitting} onConfirm={disconnect} onClose={() => setConfirmation(null)} />
     <ConfirmDialog open={!!deleteTarget} title={deleteTarget?.status === 'failed' ? '删除知乎发布记录？' : '删除知乎草稿？'} description={<><strong>{deleteTarget?.title}</strong><p>{deleteTarget?.status === 'failed' ? '将清理本系统的失败记录，不会删除知乎上已发布的内容。' : '将同时删除知乎后台的这份草稿和本系统的发布记录，删除后无法恢复。'}</p></>} confirmLabel={deleteTarget?.status === 'failed' ? '删除记录' : '删除草稿'} loading={deleteBusy} onConfirm={deletePublication} onClose={() => setDeleteTarget(null)} />
   </div>

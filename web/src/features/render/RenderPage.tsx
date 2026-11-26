@@ -1515,7 +1515,7 @@ export default function RenderPage() {
                     )
                   ) : (
                     <span className="render-preview-mode">
-                      {activeRender.previewMode === 'article' ? <FileText size={13} /> : <Video size={13} />}
+                      {activeRender.previewMode === 'article' || activeRender.previewMode === 'pin' ? <FileText size={13} /> : <Video size={13} />}
                       {activeRender.platform === 'wechat'
                         ? '公众号图文'
                         : activeRender.platform === 'wechatpic'
