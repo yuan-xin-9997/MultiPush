@@ -521,7 +521,7 @@ export class PlaywrightWechatDriver implements WechatBrowserDriver {
           token: info.token, lang: 'zh_CN', f: 'json', ajax: '1', random: String(Math.random()), AppMsgId: '', count: '1', data_seq: '0', operate_from: 'Chrome', isnew: '1', articlenum: '1',
           title0: article.title, author0: article.author, digest0: article.digest, content0: html.html(), sourceurl0: article.sourceUrl || '', show_cover_pic0: '0', thumb_media_id0: cover.id,
           cdn_url0: cover.url, cdn_235_1_url0: cover.url, cdn_1_1_url0: cover.url, cdn_16_9_url0: cover.url,
-          shortvideofileid0: '', copyright_type0: '0', fileid0: '', need_open_comment0: '0', only_fans_can_comment0: '0', can_reward0: '0',
+          shortvideofileid0: '', copyright_type0: '1', fileid0: '', need_open_comment0: '1', only_fans_can_comment0: '0', can_reward0: '1', not_recommend0: '0',
         },
         timeout: 30_000,
       })
